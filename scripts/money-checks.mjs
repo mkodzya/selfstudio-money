@@ -133,6 +133,22 @@
 // «rv-thin» and «marks» call it so, as before: that is the form a stored plan
 // from before holds.
 //
+// THE REVIEW OF THAT CHANGE left its own, each of which failed on the page it
+// reviewed. In the model: «part shown» — the row that then shows the part
+// said with «Частично» is the marked line's own; dealt out with the others it
+// closed the REST of that very line, or paid the label's next month, and what
+// was still owed stood in no figure — and a case in «dated rest» (a rest a
+// founder made «каждый месяц» is a rest still). On screen, in «partly»: the
+// card's own «Только ноябрь», and Enter in a field of the row, answer the
+// question that stands open instead of closing the card over it; «Частично…»
+// pressed twice keeps what was typed; a day of another year is said with its
+// year. In «partly, other days»: an inflow is refused in an inflow's words.
+// And four that only close a gap in what was held, and pass before and after:
+// the two cases of «rest and month» that hold rule 5 for money coming in and
+// against a payment of the rest's own size; today as a day the rest may stand
+// on («partly»); a row typed under a rest's own name («partly, other days»);
+// the question inside the table of «Касса» («looks»).
+//
 // OF THE FIRST ITERATION'S SCREEN CHECKS, these were written again for rows
 // that repeat: «saving», «refused», «old plan», «typing», «empty amount»,
 // «odd ledger», and «earlier months» (what «small words» said of a month gone
@@ -1250,6 +1266,13 @@ await run('dated rest', '«Частично» with a day for the rest: a dated r
     '«Частично» on the rest itself — 200 of the 600 on 12 Nov, the other 400 on 10 Dec: the new row keeps the name and the month the debt first came from — «Person B — остаток с октября», not «… — остаток с октября — остаток с ноября»');
   const bare2 = (await wr(Q, 'partial', item(K, 'debt'), 200, 'debt3', ms('2026-11-12T11:00:00Z'), BY, '2026-11-12')).team.find((r) => r.id === 'debt3');
   same([bare2.name, bare2.date, bare2.mon, bare2.carry], ['Person B — остаток с октября — остаток с ноября', '', '2026-12', { ym: '2026-11' }], '… (the hand called WITHOUT a day is the hand from before to the letter, on such a row too: no control of the page calls it so any more, and what a caller from before meant by it is kept)');
+  // … and so does a rest a founder has since made «каждый месяц»: its months no longer say where the debt is from —
+  // the engine reads `carry` only on a row that does not repeat — but the stored row does.
+  const TK = await wr(Q, 'tick', item(K, 'debt'));
+  const KT = await C(L, TK, D22, H60);
+  const made = (await wr(TK, 'partial', item(KT, 'debt@2026-11'), 200, 'debt4', ms('2026-11-12T11:00:00Z'), BY, '2026-11-12', '2026-12-10')).team.find((r) => r.id === 'debt4');
+  same([TK.team[1].rec, TK.team[1].carry, item(KT, 'debt@2026-11').carry, made.name, made.amt, made.date, made.carry], [{ day: 12, from: '2026-11' }, { ym: '2026-10' }, null, 'Person B — остаток с октября', 400, '2026-12-10', { ym: '2026-10' }],
+    'the rest ticked «каждый месяц», then «Частично» on its November: what is left keeps the name and the month the debt first came from all the same — read off the stored row, not off the month, which carries no origin — and not «… — остаток с октября — остаток с ноября»');
   // Money coming in: what a client still owes is expected on the day named.
   const a1 = filed('a1', '2026-10-28', 8000, 'rev', 'Client A', { b: 'Barclays', v: 1333.33, at: ms('2026-10-29T08:00:00Z') });
   const AI = await C(ledP({ tx: [a1] }), P, '2026-10-30');
@@ -1289,6 +1312,21 @@ await run('rest and month', 'a rest is never the month\'s own row of its label: 
   K = await C(ledP({ tx: base.concat([pay('b3', '2026-12-20', -6000, ms('2026-12-22T08:00:00Z')), reach('Wise', '2027-01-12', 'GBP', ms('2027-01-13T08:00:00Z'))]) }), await owe('2026-12-28'), '2027-01-13', H60);
   same([states(K, ['owe', 'rB@2026-12', 'rB@2027-01']), item(K, 'owe').day, card(K, 8).filter((c) => c.item === 'owe').length, card(K, 10).filter((c) => c.item === 'rB@2026-12').length], [['late', 'done', 'due'], '2027-01-13', 1, 0],
     '13 Jan, with only the payment of 20 Dec: December is paid and nobody asks about it; what is still owed is the rest — late, counted on today, card 8 — so the 6,000 has not left the line');
+  // The same rule for money coming in. Client A's October — 8,000 + VAT — never came: on 30 Oct «Частично» with £0,
+  // the 9,600 still owed on 5 Dec. On 28 Nov, November's own day, 9,600 arrives.
+  const MA = await C(ledP(), P, '2026-10-30', H60);
+  const QA = await wr(P, 'partial', item(MA, 'rA@2026-10'), 0, 'owed', ms('2026-10-30T11:00:00Z'), BY, '2026-10-30', '2026-12-05');
+  const a11 = filed('a11', '2026-11-28', 9600, 'rev', 'Client A', { b: 'Barclays', v: 1600, at: ms('2026-11-29T08:00:00Z') });
+  K = await C(ledP({ tx: [a11] }), QA, '2026-11-29', H60);
+  same([states(K, ['owed', 'rA@2026-11', 'rA@2026-12']), item(K, 'rA@2026-11').rows, item(K, 'owed').rows, item(K, 'owed').day, item(K, 'owed').cash], [['due', 'done', 'due'], ['a11'], [], '2026-12-05', 9600],
+    'an inflow: Client A\'s October never came — «Частично» with £0, the 9,600 on 5 Dec — and 9,600 arrives on 28 Nov, November\'s own day: it is November\'s, and the rest is still expected on 5 Dec (given to the rest, November would go late and the months after it would not be counted on)');
+  // A payment of the REST's own size is the rest's, though a month's window is open and that month's day is nearer.
+  const b54 = pay('b1', '2026-10-20', -5400);
+  const M54 = await C(ledP({ tx: [b54] }), P, '2026-10-22', H60);
+  const Q54 = await wr(P, 'partial', item(M54, 'rB@2026-10'), 5400, 'debt', ms('2026-10-22T11:00:00Z'), BY, '2026-10-22', '2026-11-22');
+  K = await C(ledP({ tx: [b54, pay('b6', '2026-11-19', -600, ms('2026-11-20T08:00:00Z'))] }), Q54, '2026-11-20', H60);
+  same([states(K, ['debt', 'rB@2026-11']), item(K, 'debt').rows, item(K, 'rB@2026-11').rows, item(K, 'rB@2026-11').part, item(K, 'rB@2026-11').cash], [['done', 'due'], ['b6'], [], null, -6000],
+    'a rest of 600 on 22 Nov, and −600 paid on 19 Nov — a day from November\'s own day, three from the rest\'s: it is the rest\'s all the same. Only a payment that is exactly what the MONTH lacks is weighed between the two; this one is no part of November\'s 6,000');
   // «The month's own row»: a one-off Person B of 20 Oct paid in part, the rest on 12 Nov.
   const D22 = '2026-10-22';
   const PT = ms('2026-10-22T11:00:00Z');
@@ -1307,6 +1345,91 @@ await run('rest and month', 'a rest is never the month\'s own row of its label: 
   const two = planP({ team: [row('pb', 'Person B', 6000, '2026-10-20'), row('dec', 'Person B', 6300, '2026-12-20')] });
   const TQ = await C(ledP(), await wr(two, 'partial', item(await C(ledP(), two, D22, H60), 'pb'), 4000, 'rest', PT, BY, D22, '2026-11-12'), D22, H60);
   same([item(TQ, 'pb').twins, helperB(TQ)], [[{ ym: '2026-12', id: 'dec', amt: 6300, cur: 'GBP' }], [['2026-11', 'row', ['2026-10', '2026-12']]]], '… while a row a founder wrote for December is December\'s own as before: the tick would switch the repeat off there, and the helper knows of it');
+});
+
+// «Частично» is said first and the statement comes after: the commonest order of the two. The row that then shows the
+// part is the marked line's own. The review of the day's change found it dealt to the REST of that very line —
+// wherever the part was about the rest's size and the rest stood within ten days — or to the label's next month;
+// the marked line then stayed closed on the founder's word, and what was still owed was in no figure.
+await run('part shown', 'the row that then shows the part said with «Частично» is that line\'s own: it does not close the rest, and it does not pay the label\'s next month', async () => {
+  const P = await plan2();
+  const D22 = '2026-10-22';
+  const PT = ms('2026-10-22T11:00:00Z');
+  const U23 = ms('2026-10-23T08:00:00Z');
+  const H60 = { H: 60 };
+  const pay = (id, d, amt, at = U23) => filed(id, d, amt, 'cogs', 'Person B', { at });
+  // Person B, 6,000 on the 20th of every month. On 22 Oct half of October's is paid, and the founder says so.
+  const M = await C(ledP(), P, D22, H60);
+  figs(M, { now: 32000, OUT: 24400, END: 32800 }, '22 Oct, sixty days: October\'s 6,000 to Person B is not in the statements yet');
+  const half = (d) => (d ? wr(P, 'partial', item(M, 'rB@2026-10'), 3000, 'rest', PT, BY, D22, d) : wr(P, 'partial', item(M, 'rB@2026-10'), 3000, 'rest', PT, BY, D22));
+  const Q = await half('2026-10-30');
+  let K = await C(ledP(), Q, D22, H60);
+  same([states(K, ['rB@2026-10', 'rest']), item(K, 'rB@2026-10').done.by, K.now, K.marksGbp, K.OUT, K.END], [['done', 'due'], 'mark', 29000, -3000, 21400, 32800],
+    '«Частично» 3,000 of the 6,000, the rest on 30 Oct: October is closed on the mark, which is in «сейчас»; «Уйдёт» holds the other 3,000');
+  // The next morning the Wise statement is uploaded, and shows −3,000 of 22 Oct.
+  const seen = (X) => [states(X, ['rB@2026-10', 'rest', 'rB@2026-11']), item(X, 'rB@2026-10').done.by, item(X, 'rB@2026-10').rows, item(X, 'rB@2026-10').done.got, item(X, 'rest').rows, item(X, 'rest').day, item(X, 'rest').cash, X.now, X.marksGbp, X.OUT, X.END];
+  const L23 = ledP({ tx: [pay('h1', '2026-10-22', -3000)] });
+  K = await C(L23, Q, '2026-10-23', H60);
+  same(seen(K), [['done', 'due', 'due'], 'row', ['h1'], 3000, [], '2026-10-30', -3000, 29000, 0, 21400, 32800],
+    'the statement of the next morning shows −3,000 of 22 Oct: the row takes the place of October\'s mark. The rest — of exactly that size, eight days off — is still due on the 30th, and «Уйдёт» and the end of the line are what they were (given to the rest, everything read paid, and the 3,000 still owed was in no figure)');
+  same([K.months.by['2026-10'].team, [K.month.blocks.team.fact, K.month.blocks.team.rest, K.month.blocks.team.total]], [{ rows: ['rB@2026-10', 'rest'], expected: 6000, done: 3000 }, [3000, 3000, 6000]], '… October\'s list has 3,000 of its 6,000, and the month still expects the other half');
+  same(seen(await C(L23, await half(D22), '2026-10-23', H60)), [['done', 'waiting', 'due'], 'row', ['h1'], 3000, [], '2026-10-23', -3000, 29000, 0, 21400, 32800], 'the rest named for 22 Oct itself, the day of the payment: the row is the mark\'s all the same, and the rest is waited for — counted on today');
+  same(seen(await C(L23, await half(''), '2026-10-23', H60)), [['done', 'carry', 'due'], 'row', ['h1'], 3000, [], '2026-11-01', -3000, 29000, 0, 21400, 32800],
+    'a rest with NO date, as a plan from before holds it: the row is the mark\'s there too, and the debt stays in the line on 1 Nov. (The one thing such a plan reads otherwise than it did: before, this row closed the undated rest and the debt left every figure.)');
+  K = await C(ledP({ tx: [pay('h1', '2026-10-22', -3000), pay('h2', '2026-10-30', -3000, ms('2026-10-31T08:00:00Z'))] }), Q, '2026-10-31', H60);
+  same([states(K, ['rB@2026-10', 'rest']), item(K, 'rB@2026-10').rows, item(K, 'rest').rows], [['done', 'done'], ['h1'], ['h2']], 'the other half paid on the 30th: each row closes its own line — the first the month, the second the rest');
+  // The row is the mark's when it is exactly the part said (within what any payout is allowed), uploaded after the
+  // mark, and dated from three days before the mark to seven after — the days any mark is given.
+  K = await C(ledP({ tx: [pay('h1', '2026-10-22', -3100)] }), Q, '2026-10-23', H60);
+  same([states(K, ['rB@2026-10', 'rest']), item(K, 'rB@2026-10').rows, item(K, 'rB@2026-10').done.got, item(K, 'rest').cash], [['done', 'due'], ['h1'], 3100, -3000], '−3,100 shown for the 3,000 said — a fee on top: the part all the same, and the rest untouched');
+  const late = async (paidOn, rest) => { const day = addDays(paidOn, 1); const X = await C(ledP({ tx: [pay('h1', paidOn, -3000, ms(day + 'T08:00:00Z'))] }), await half(rest), day, H60); return [states(X, ['rB@2026-10', 'rest']), item(X, 'rB@2026-10').done.by, item(X, 'rB@2026-10').rows, item(X, 'rest').rows]; };
+  same([await late('2026-10-29', '2026-11-05'), await late('2026-10-30', '2026-11-05')], [[['done', 'due'], 'row', ['h1'], []], [['done', 'done'], 'ok', [], ['h1']]],
+    '−3,000 on 29 Oct, seven days after the mark, with the rest on 5 Nov: still the mark\'s. On 30 Oct, eight days after: no longer — it is a payment within ten days of the rest\'s day and closes the rest, and October stays closed on the founder\'s word');
+  // … and it is the PART that is claimed, not whatever the label pays in those days: another line's own payment is
+  // that line's.
+  const PB = { ...P, team: P.team.concat([row('bon', 'Person B', 500, '2026-10-24')]) };
+  K = await C(ledP({ tx: [pay('h0', '2026-10-24', -500, ms('2026-10-25T08:00:00Z'))] }), await wr(PB, 'partial', item(await C(ledP(), PB, D22, H60), 'rB@2026-10'), 3000, 'rest', PT, BY, D22, '2026-10-30'), '2026-10-25', H60);
+  same([states(K, ['bon', 'rB@2026-10', 'rest']), item(K, 'bon').rows, item(K, 'rB@2026-10').rows, item(K, 'rB@2026-10').done.got], [['done', 'done', 'due'], ['h0'], [], 3000], 'a one-off «Person B» of 500 for 24 Oct, paid on its day while October\'s mark still waits for its 3,000: the −500 is that row\'s, not a piece of the part');
+  // … nor a row that was on the page before «Частично» was said: the founder saw it, and did not mean it.
+  const PC = { ...P, team: P.team.concat([row('pb3', 'Person B', 3000, '2026-10-20')]) };
+  const LC = ledP({ tx: [pay('h9', '2026-10-20', -3000, ms('2026-10-21T08:00:00Z'))] });
+  K = await C(LC, await wr(PC, 'partial', item(await C(LC, PC, D22, H60), 'rB@2026-10'), 3000, 'rest', PT, BY, D22, '2026-10-30'), D22, H60);
+  same([states(K, ['pb3', 'rB@2026-10', 'rest']), item(K, 'pb3').rows, item(K, 'rB@2026-10').done.by, item(K, 'rB@2026-10').rows], [['done', 'done', 'due'], ['h9'], 'mark', []],
+    'a one-off «Person B» of 3,000 for 20 Oct, paid that day and already in the statements when October is said to be paid in part, 3,000 too: the row stays that row\'s — it was uploaded before the mark — and October\'s mark goes on waiting for its own');
+  // One-off rows, a payout and an invoice: Person Z 2,000 with 1,000 paid and the rest on 29 Oct; Client A 5,000 +
+  // VAT with 3,000 received and the rest on 30 Oct.
+  const P2 = { ...P, team: P.team.concat([row('z', 'Person Z', 2000, D22)]), inflows: P.inflows.concat([row('y', 'Client A', 5000, D22, { vat: true, bank: 'Barclays' })]) };
+  const M2 = await C(ledP(), P2, D22, H60);
+  const Q2 = await wr(await wr(P2, 'partial', item(M2, 'z'), 1000, 'zrest', PT, BY, D22, '2026-10-29'), 'partial', item(M2, 'y'), 3000, 'yrest', PT + 1, BY, D22, '2026-10-30');
+  K = await C(ledP(), Q2, D22, H60);
+  figs(K, { now: 34000, IN: 28200, OUT: 25400, END: 36800 }, 'two one-off rows marked «Частично» on 22 Oct — Person Z 1,000 of 2,000, Client A 3,000 of 6,000 with its VAT: the two marks are in «сейчас», the two rests in «Придёт» and «Уйдёт»');
+  K = await C(ledP({ tx: [filed('z1', '2026-10-22', -1000, 'cogs', 'Person Z', { at: U23 }), filed('y1', '2026-10-22', 3000, 'rev', 'Client A', { b: 'Barclays', v: 500, at: U23 })] }), Q2, '2026-10-23', H60);
+  same([states(K, ['z', 'zrest', 'y', 'yrest']), item(K, 'z').done.by, item(K, 'z').rows, item(K, 'zrest').rows, item(K, 'y').done.by, item(K, 'y').rows, item(K, 'yrest').rows, item(K, 'zrest').cash, item(K, 'yrest').cash],
+    [['done', 'due', 'done', 'due'], 'row', ['z1'], [], 'row', ['y1'], [], -1000, 3000], 'the statements show −1,000 and +3,000 of 22 Oct: each takes the place of its mark, and both rests are still open — what Person Z is owed, and what Client A owes');
+  figs(K, { now: 34000, IN: 28200, OUT: 25400, END: 36800 }, '… so not a figure moves when the statements come: they show what the founder had said');
+  K = await C(ledP({ tx: [filed('z1', '2026-10-21', -1000, 'cogs', 'Person Z', { at: U23 })] }), Q2, '2026-10-23', H60);
+  same([item(K, 'z').done.by, item(K, 'z').rows, item(K, 'z').mark.counts, K.marksGbp, item(K, 'zrest').state, K.now], ['row', ['z1'], false, 3000, 'due', 34000],
+    'paid the day BEFORE it was said, in a statement that stops on that day: the row closes the line at once — it stands in the place of the mark, and it, not the mark, is now what «сейчас» counts (the one mark left there is Client A\'s 3,000)');
+  // A row the table has no name for closes by amount — and so would its rest.
+  const P3 = { ...P, team: P.team.concat([every('nqm', 'Монтажёр', 1200, 18, '2026-10')]) };
+  const M3 = await C(ledP(), P3, D22, H60);
+  const Q3 = await wr(P3, 'partial', item(M3, 'nqm@2026-10'), 600, 'qrest', PT, BY, D22, '2026-10-30');
+  K = await C(ledP({ tx: [filed('q1', '2026-10-22', -600, 'cogs', 'Nobody Q', { at: U23 })] }), Q3, '2026-10-23', H60);
+  same([item(M3, 'nqm@2026-10').sk, states(K, ['nqm@2026-10', 'qrest']), item(K, 'nqm@2026-10').done.by, item(K, 'nqm@2026-10').rows, item(K, 'qrest').rows, item(K, 'qrest').cash], ['', ['done', 'due'], 'row', ['q1'], [], -600],
+    '«Монтажёр», 1,200 on the 18th, a name the table does not know: 600 of October said paid, the rest on 30 Oct, and the bank then shows −600 to somebody it calls «Nobody Q» — the part, in the place of the mark; the rest is still due');
+  // A second «Частично», on a rest: the row that shows that part is the rest's, not November's.
+  const Q4 = await wr(P, 'partial', item(M, 'rB@2026-10'), 0, 'r1', PT, BY, D22, '2026-11-12');
+  const K4 = await C(ledP(), Q4, '2026-11-12', H60);
+  const Q5 = await wr(Q4, 'partial', item(K4, 'r1'), 5000, 'r2', ms('2026-11-12T11:00:00Z'), BY, '2026-11-12', '2026-12-10');
+  K = await C(ledP(), Q5, '2026-11-12', H60);
+  figs(K, { now: 27000, OUT: 20020, END: 41780 }, 'October was not paid at all — «Частично» with £0, the 6,000 on 12 Nov. On 12 Nov 5,000 of it is paid: «Частично» on the rest, the last 1,000 on 10 Dec');
+  const b2 = pay('b2', '2026-11-12', -5000, ms('2026-11-13T08:00:00Z'));
+  K = await C(ledP({ tx: [b2] }), Q5, '2026-11-13', H60);
+  same([states(K, ['r1', 'r2', 'rB@2026-11']), item(K, 'r1').done.by, item(K, 'r1').rows, item(K, 'r1').done.got, item(K, 'rB@2026-11').rows, item(K, 'rB@2026-11').part, item(K, 'rB@2026-11').day, item(K, 'rB@2026-11').cash],
+    [['done', 'due', 'due'], 'row', ['b2'], 5000, [], null, '2026-11-20', -6000], 'the statement shows −5,000 of 12 Nov: it is the rest\'s — November\'s own 6,000 is still due on the 20th, untouched (as a payment «of the label» it had paid November a week early, at 5,000, and November\'s 6,000 was in no figure)');
+  figs(K, { now: 27000, OUT: 20020, END: 41780 }, '… and nothing moves');
+  K = await C(ledP({ tx: [b2, pay('b3', '2026-11-20', -6000, ms('2026-11-21T08:00:00Z'))] }), Q5, '2026-11-21', H60);
+  same([states(K, ['r1', 'r2', 'rB@2026-11']), item(K, 'r1').rows, item(K, 'rB@2026-11').rows, item(K, 'rB@2026-11').done.got], [['done', 'due', 'done'], ['b2'], ['b3'], 6000], 'November\'s own −6,000 on the 20th then pays November, at its sum; the last 1,000 is still owed on 10 Dec');
 });
 
 await run('p7', 'a client stops, and one who only skipped a month (R6)', async () => {
@@ -3119,6 +3242,16 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   }
   same(refused, [['Укажите день, когда заплатите остаток', true, 'ed-partdate', 5, false], ['Остаток — не раньше сегодняшнего дня', true, 'ed-partdate', 5, false], ['Слишком далёкая дата: прогноз смотрит не дальше двух лет', true, 'ed-partdate', 5, false]],
     'answered without a day (Enter in the sum), with yesterday, with a day more than two years off: «Укажите день, когда заплатите остаток», «Остаток — не раньше сегодняшнего дня», «Слишком далёкая дата…» — the question stays open on the day, and nothing is written');
+  // Today itself is a day the rest may stand on — «заплачу сегодня» is the commonest answer there is: not refused.
+  await answer(pg, undefined, '2026-10-22');
+  S = await holds(pg, '«Частично»: 5,400 of 6,000, the rest today');
+  const today = S.P.team.find((r) => r.carry);
+  same([!!today && [today.amt, today.date], today && item(S.M, today.id).state, today && item(S.M, today.id).day, await toastText(pg), await pg.$(K('row'))], [[600, '2026-10-22'], 'due', '2026-10-22', 'Person B: оплачено £5,400 из £6,000, остаток — на чт 22 окт', null],
+    'answered with today, 22 Oct: taken — the rest is a row of today, due today (only a day gone by is refused)');
+  await undo(pg);
+  same([(await rowIds(pg)).length, await pg.evaluate(() => 'x' in window.__cash.state().team[0].rec)], [5, false], '… and «Отменить» in the toast takes that answer back whole');
+  await pg.click(inDays(oct));
+  await pg.click(K('row') + '[data-ed-do="part"]');
   // Answered: the rest on 12 Nov.
   await answer(pg, undefined, '2026-11-12');
   S = await holds(pg, '«Частично»: 5,400 of 6,000, the rest on 12 Nov');
@@ -3160,7 +3293,28 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   await pg.fill(PART, '6000');
   await pg.click(K('row') + '[data-ed-go="part"]');
   same([await toastText(pg), (await rowIds(pg)).length], ['Если оплачено всё — это «Оплачено», а не «Частично»', 6], '… and all of it is not «частично»: the sum is judged before the day, and nothing is written');
-  await pg.click(K('row') + '[data-ed-x]');
+  // November's month is still open, so its card has the row's own fields and its own buttons — «Только ноябрь»,
+  // «Ноябрь и дальше» — under the question's «Готово». With the question open and nothing of the row changed, that
+  // button is the answer to the question: refused in the same words while the answer is not whole. (It closed the
+  // card without a word, and the sum and the day just typed went with it.)
+  await pg.fill(PART, '1500');
+  await pg.click(K('row') + '[data-ed-save="only"]');
+  same([await texts(pg, K('row') + '[data-ed-save]'), await toastText(pg), !!(await pg.$(ASK)), await pg.inputValue(PART), await pg.evaluate(() => document.activeElement.id), (await rowIds(pg)).length], [['Только ноябрь', 'Ноябрь и дальше'], 'Укажите день, когда заплатите остаток', true, '1500', 'ed-partdate', 6],
+    '1,500 typed and no day, then the card\'s own «Только ноябрь»: it answers the QUESTION — «Укажите день, когда заплатите остаток» — and the card stays open with the sum as typed and the cursor on the day');
+  await pg.click(K('row') + '.ed-foot [data-ed-do="part"]');
+  same([await pg.inputValue(PART), await pg.evaluate(() => document.activeElement.id)], ['1500', 'ed-part'], '«Частично…» pressed again in the card\'s foot puts the cursor back into the sum — the question is not drawn afresh, empty');
+  // The day is the last one the page takes, two years on — and Enter in the ROW's own «Дата», which presses the
+  // card's button, answers the question as that button does. The toast says the year: it is not this year's.
+  await pg.fill(REST, '2028-10-22');
+  await pg.press(K('row') + '#ed-date', 'Enter');
+  S = await holds(pg, '«Частично» on November\'s month: 1,500 of 6,000, the rest on 22 Oct 2028', 'cash');
+  const far = S.P.team.find((r) => r.carry && r.id !== debt.id);
+  same([await toastText(pg), !!far && [far.name, far.amt, far.date], Object.keys(S.P.team[0].rec.x['2026-11']), S.P.team[0].rec.x['2026-11'].paid.amt, await pg.$(K('row')), far && item(S.M, far.id).state],
+    ['Person B: оплачено £1,500 из £6,000, остаток — на вс 22 окт 2028', ['Person B — остаток с ноября', 4500, '2028-10-22'], ['paid'], 1500, null, 'due'],
+    'the day typed — 22 Oct 2028, the last one allowed — and Enter in the row\'s own «Дата»: the answer is taken, with November\'s own date and sum untouched; the toast names the day WITH ITS YEAR, «на вс 22 окт 2028» — without it a year typed with a slip read like this year\'s, of a row that is in no day in sight');
+  same(await text(pg, '#cs-undo span'), 'Последнее изменение: Person B: оплачено £1,500 из £6,000, остаток — на вс 22 окт 2028', '… and so does the strip that offers to take it back');
+  await pg.click('#cs-undo [data-cs-undo]');
+  same([(await rowIds(pg)).length, await pg.evaluate(() => Object.keys(window.__cash.state().team[0].rec.x))], [6, ['2026-10']], '… «Отменить» there takes November\'s answer back, and October\'s stands');
   // «Отменить» takes the whole answer back: the mark and the row together.
   await pg.click('#cs-undo [data-cs-undo]');
   S = await holds(pg, '«Отменить»', 'cash');
@@ -3231,6 +3385,14 @@ await run('partly, other days', '«Частично» with the rest in the same 
   await pg.click('#view-cash [data-cs-view="days"]');
   await pg.waitForSelector('#cs-stmt');
   same(await dayLine(pg, '2026-12-15'), ['вт 15 дек', '£37,200', '+£2,000', '−£400', '£38,800', '2'], '… and in «По дням» the 15th of December takes its 400 beside Client R\'s 2,000');
+  // The editor has its own list of «the later months that already hold a row of this name» — for a row made «каждый
+  // месяц» in «Добавить» or by the tick in its card. A rest is not in it either: a row typed by hand under the very
+  // name the two rests carry repeats into December, where the second rest stands, with no word of it.
+  await goToday(pg);
+  const twin = await addRow(pg, 'team', { name: 'Person B — остаток с октября', amt: 50, date: '2026-11-05', monthly: true });
+  S = await holds(pg, 'a row added under the name of a rest, «каждый месяц» from November');
+  same([await toastText(pg), !!twin && stored(S, twin).rec, states(S.M, [twin + '@2026-11', twin + '@2026-12', next.id])], ['В плане: Person B — остаток с октября', { day: 5, from: '2026-11' }, ['due', 'due', 'due']],
+    'a row «Person B — остаток с октября» of £50 added for 5 Nov, «каждый месяц»: the toast speaks of no row standing in December, and the repeat is not switched off there — the rest of 15 Dec is a debt beside it, not «December\'s own row» of that name');
   await finish(pg);
 
   // Money coming in: the same question in its own words, from the card of «Нужно решить».
@@ -3242,6 +3404,9 @@ await run('partly, other days', '«Частично» with the rest in the same 
   same([await pg.evaluate(() => !!document.querySelector('#view-today .td-need [data-ed-card="row"] [data-ed-askbox="part"]')), await text(pg, K('row') + 'label[for="ed-part"] span'), await text(pg, K('row') + 'label[for="ed-partdate"] span'), await text(pg, ASK + ' > .note:last-child'), await pg.evaluate(() => document.activeElement.id)],
     [true, 'Сколько уже получено, £', 'Когда придёт остаток', 'Строка закроется за сентябрь на том, что получено. Остаток встанет отдельной строкой на выбранный день.', 'ed-part'],
     '«Частично…» in card 7 opens the row\'s card there, on the question in an inflow\'s words: «Сколько уже получено», «Когда придёт остаток»');
+  await pg.fill(PART, '4000');
+  await pg.click(K('row') + '[data-ed-go="part"]');
+  same([await toastText(pg), (await rowIds(pg)).length, !!(await pg.$(ASK))], ['Если получено всё — это «Получено», а не «Частично»', 4, true], '… all 4,000 typed: refused in an inflow\'s words too — the button for money that has all come is «Получено» here, not «Оплачено» — and nothing is written');
   await pg.fill(PART, '1000');
   same(await text(pg, K('row') + '[data-ed-partnote]'), 'остаток £3,000', '… 1,000 typed: «остаток £3,000»');
   await pg.click(K('row') + '[data-ed-go="part"]');
@@ -3860,9 +4025,10 @@ await run('earlier months', 'a row nobody closed stays in the month of its date;
 // ---- how it looks ----
 // With SHOTS set to a folder, full-page pictures of the main states are saved there, for looking at: the fabricated
 // studio on «Сегодня», in the monthly constructor and day by day, on a desk and on a phone; a row's card on the
-// question «Частично…» — the page it stands in, and the card alone, close up; «Настройки → Налоги»; and day one — a
-// ledger loaded and nothing typed («looks», at the end). The review's checks, which come first, save a picture of
-// each thing they changed («rv-…»). Without SHOTS the same pages are still opened and held to the model.
+// question «Частично…» — the page it stands in, and the card alone, close up, on «Сегодня» and inside the table of
+// «Касса»; «Настройки → Налоги»; and day one — a ledger loaded and nothing typed («looks», at the end). The review's
+// checks, which come first, save a picture of each thing they changed («rv-…»). Without SHOTS the same pages are
+// still opened and held to the model.
 const SHOTS = process.env.SHOTS || '';
 const shot = async (pg, name, clip) => { if (SHOTS) { await pg.evaluate(() => window.scrollTo(0, 0)); await pg.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true, ...(clip ? { clip } : {}) }); console.log(`      saved ${name}.png`); } };
 // … and of one thing on a page, close up: a card is a small part of a long page. It is cut out of the picture of
@@ -4223,7 +4389,22 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
       ok(!!g && g.date > 0 && g.arrows.length === 2 && g.arrows.concat(g.fields).every((fh) => Math.abs(fh - g.date) <= 1), '… every field of that card is one height, the date and the two arrows beside it included', g);
       ok(!!g && g.words.every((wh) => wh <= 48), '… and the words beside a tick box stay on a line or two: nothing squeezes them into a column', g && g.words);
       await shot(pg, 'live-d-plan-row');
-      if (g) await pg.click('#view-cash tr.cs-edrow [data-ed-card="row"] [data-ed-x]');
+      if (g) {
+        // … and the question «Частично…» opened in that card, inside the table: its two fields are set as the
+        // card's own sum and date there too — none of the table's compact boxes reaches them either.
+        const inTable = '#view-cash tr.cs-edrow [data-ed-card="row"] ';
+        const asks = !!(await pg.$(inTable + '[data-ed-do="part"]'));
+        if (asks) {
+          await pg.click(inTable + '[data-ed-do="part"]');
+          await pg.fill(PART, '1000');
+          await pg.fill(REST, '2026-10-20');
+        }
+        same(asks && (await pg.$$eval(inTable + '#ed-amt, ' + inTable + '#ed-date, ' + inTable + '[data-ed-part], ' + inTable + '[data-ed-partdate]', (l) => [l.length, [...new Set(l.map((e) => { const cs = getComputedStyle(e); return [cs.fontFamily, cs.fontSize, Math.round(e.getBoundingClientRect().height)].join(' · '); }))].length])), [4, 1],
+          '… with «Частично…» open in it, the question\'s sum and day are set as the card\'s own sum and date are — one face, one size, one height, inside the table as on «Сегодня»');
+        await shot(pg, 'live-d-plan-row-part');
+        await shotOf(pg, inTable, 'live-d-plan-row-part-card');
+        await pg.click(inTable + '[data-ed-x]');
+      }
     }
     if (tag === 'd') { await toMonth(pg, '2026-11'); await shot(pg, 'live-d-plan-nov'); }
     await pg.click('#view-cash [data-cs-view="days"]');
