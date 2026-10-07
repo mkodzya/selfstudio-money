@@ -142,7 +142,9 @@
 // card's own «Только ноябрь», and Enter in a field of the row, answer the
 // question that stands open instead of closing the card over it; «Частично…»
 // pressed twice keeps what was typed; a day of another year is said with its
-// year. In «partly, other days»: an inflow is refused in an inflow's words.
+// year. In «partly, other days»: an inflow is refused in an inflow's words;
+// and where the row itself was changed too, the toast says the answer was not
+// taken.
 // And four that only close a gap in what was held, and pass before and after:
 // the two cases of «rest and month» that hold rule 5 for money coming in and
 // against a payment of the rest's own size; today as a day the rest may stand
@@ -3437,6 +3439,21 @@ await run('partly, other days', '«Частично» with the rest in the same 
   same([await toastText(pg), Object.keys(S.P.team[0].rec.x), S.P.team[0].rec.day, states(S.M, ['pb@2026-10', 'pb@2026-11', r2.id]), item(S.M, 'pb@2026-11').cash, S.M.months.by['2026-11'].team],
     ['Person B: каждый месяц, с октября', ['2026-10'], 20, ['done', 'due', 'due'], -6000, { rows: [r2.id, 'pb@2026-11'], expected: 8000, done: 0 }],
     'pressed: «Person B: каждый месяц, с октября» — with no word of a row in November: the repeat is not switched off there, and November holds the 2,000 still owed for October beside its own 6,000');
+  await finish(pg);
+
+  // Two things at once: the question open and answered, AND a field of the row itself changed, then the card's own
+  // button. The row is saved, as it always was — and the toast says that the answer was not taken: what was typed
+  // into the question is never dropped without a word.
+  pg = await scene('partly, two things at once', ledP(), await plan2(), { H: 60, at: '2026-10-22T12:00:00+01:00' });
+  await openRow(pg, 'rB@2026-11');
+  await pg.click(K('row') + '[data-ed-do="part"]');
+  await pg.fill(PART, '1500');
+  await pg.fill(REST, '2026-11-27');
+  await pg.fill(K('row') + '#ed-date', '2026-11-25');
+  await pg.click(K('row') + '[data-ed-save="only"]');
+  S = await holds(pg, 'November\'s month moved to the 25th with «Частично» open and answered');
+  same([await toastText(pg), S.P.team[0].rec.x, (await rowIds(pg)).length, await pg.$(K('row'))], ['Сохранено: Person B — только ноябрь · «Частично» не записано — ответьте на него заново', { '2026-11': { date: '2026-11-25' } }, 5, null],
+    'November\'s month, «Частично…» answered with 1,500 and 27 Nov, and its own date changed to the 25th, then «Только ноябрь»: the date is saved for that month — and the toast says the answer was not: «… · «Частично» не записано — ответьте на него заново»');
   await finish(pg);
 });
 
