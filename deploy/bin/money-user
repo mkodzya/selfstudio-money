@@ -5,6 +5,7 @@
 #   money-user <prod|test> invite <login>            a one-time link to choose a password
 #   money-user <prod|test> disable <login>           the login stops working at the next request
 #   money-user <prod|test> enable <login>
+#   money-user <prod|test> retire-links              every pending one-time link stops working
 #   money-user <prod|test> sessions                  open sessions (counts and dates, never tokens)
 #   money-user <prod|test> logout <login>            close every session of one login
 #   money-user <prod|test> logout --all              close every session of the stand
@@ -18,7 +19,11 @@
 #     Without one the link would be issued and shown to nobody, and issuing a
 #     link retires the one before it - so this refuses before anything changes.
 #   - a Claude session never runs `invite` (CLAUDE.md). Mika runs the line and
-#     passes each link to its founder.
+#     passes each link to its founder - together with the login, which
+#     `invite` prints on a line of its own: the sign-in page asks for it.
+#   - `retire-links` is for the moment after a whole stand came back from a
+#     backup: a link that was pending in the backup and has been used since
+#     would work again. money-restore runs it by itself when it has to.
 #
 # Everything is `python -m moneyd.ctl user ...` and `... sessions ...` inside
 # the stand's container; the words of ctl itself are accepted as well
@@ -26,7 +31,7 @@
 set -eu
 
 usage() {
-  echo "usage: money-user <prod|test> list | invite <login> | disable <login> | enable <login>" >&2
+  echo "usage: money-user <prod|test> list | invite <login> | disable <login> | enable <login> | retire-links" >&2
   echo "       money-user <prod|test> sessions | logout <login> | logout --all" >&2
   exit 2
 }
@@ -82,6 +87,12 @@ case "$WORD" in
       usage
     fi
     set -- user "$WORD" "$1"
+    ;;
+  retire-links)
+    if [ $# -ne 0 ]; then
+      usage
+    fi
+    set -- user retire-links
     ;;
   logout)
     if [ $# -ne 1 ]; then

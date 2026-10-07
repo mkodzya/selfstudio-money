@@ -9,17 +9,22 @@
 #
 # What it does, in this order:
 #   1. takes the lock: one Money deploy at a time, whichever stand;
-#   2. refuses when memory is short or another image build is running - before
-#      anything has been touched;
+#   2. refuses a MONEY_CSP or MONEY_CSP_OVERRIDE_UNTIL the service would not
+#      start on, and refuses when memory is short or another image build is
+#      running - before anything has been touched;
 #   3. takes a backup of the data directory (deploy/bin/money-backup). A deploy
 #      that cannot back up does not go on;
 #   4. moves the checkout: `main`, fast-forward only - a deploy that has to
-#      merge is a deploy nobody reviewed - or the tag that was named;
+#      merge is a deploy nobody reviewed - or the tag that was named. A tag
+#      from before the hosted service existed (0.1.0) is refused before the
+#      checkout moves: it holds no deploy/ folder, and checking it out would
+#      take every money-* command and the nightly backup away with it;
 #   5. says which release that is, and says so in a WARNING line when the
 #      commit carries no release tag at all;
 #   6. hands over to deploy/stand.sh: build, start, self-check, smoke, and one
-#      verdict line. If the new container does not come up healthy or fails
-#      its self-check, the previous image is started again.
+#      verdict line. If the new container does not come up healthy, fails its
+#      self-check or fails the smoke, the previous image is started again,
+#      with the policy settings it ran with.
 #
 # It never seeds: prod holds the studio's real money and nothing else.
 #
@@ -74,6 +79,15 @@ if [ -n "$TAG" ]; then
   if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
     die "there is no tag $TAG. Nothing was deployed."
   fi
+  # What the server runs is read from the checkout: these commands, the timer
+  # of the nightly backup, the stand itself. A tag that does not hold them
+  # must never be checked out here.
+  for NEEDED in deploy/stand.sh deploy/compose.yml deploy/Dockerfile deploy/stands/prod.env \
+    deploy/bin/money-deploy deploy/bin/money-backup deploy/bin/money-smoke moneyd/__main__.py; do
+    if ! git cat-file -e "refs/tags/$TAG:$NEEDED" 2>/dev/null; then
+      die "tag $TAG has no hosted service to deploy (it holds no $NEEDED). The checkout was not moved. Nothing was deployed."
+    fi
+  done
   if ! git checkout -q --detach "refs/tags/$TAG"; then
     die "could not check out $TAG. Nothing was deployed."
   fi

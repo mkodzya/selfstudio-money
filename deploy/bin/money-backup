@@ -81,6 +81,15 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 PART=$OUT_DIR/.money-prod-$STAMP.tar.gz.part
 FINAL=$OUT_DIR/money-prod-$STAMP.tar.gz
 
+# The half-written file goes however this ends: it holds the ledger and the
+# password hashes. After a good run it has its real name and is not there to
+# remove. dash, which is /bin/sh on the server, runs an EXIT trap only when
+# the script ends by itself, so the three signals are turned into endings.
+trap 'rm -f "$PART"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
 pack() {
   tar -C "$DATA" --exclude='*.tmp-*' --exclude='auth/sessions.json*' -czf "$PART" .
 }

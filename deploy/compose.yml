@@ -55,8 +55,10 @@ services:
       # Whose X-Forwarded-For is believed: the host itself, seen through the
       # Docker bridge. The port is published on loopback, so no other peer exists.
       MONEY_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-      # enforce unless said otherwise. report-only is refused on prod without a
-      # day on which it ends; `ctl selfcheck` prints the mode at every deploy.
+      # enforce unless said otherwise. deploy/stand.sh checks both values before
+      # a deploy touches anything: report-only on prod needs a day, and the day
+      # must not have passed. A stand whose override has ended goes back to
+      # enforcing by itself; `ctl selfcheck` prints the mode at every deploy.
       MONEY_CSP: "${MONEY_CSP:-enforce}"
       MONEY_CSP_OVERRIDE_UNTIL: "${MONEY_CSP_OVERRIDE_UNTIL:-}"
       TZ: UTC
@@ -75,6 +77,12 @@ services:
       retries: 3
       start_period: 30s
       start_interval: 2s
+    # The request log - who asked for what, and who saved - is this container's
+    # standard output and nothing else receives it. Docker keeps it in the
+    # container's own directory and deletes it with the container, so
+    # deploy/stand.sh sets it aside before a container is replaced or removed:
+    # /var/log/money/<stand>/requests-<utc>.log.gz, kept 400 days. Within one
+    # container's life the 5 x 10 MB below are how far back it reaches.
     logging:
       driver: json-file
       options:

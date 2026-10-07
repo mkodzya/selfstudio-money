@@ -2,13 +2,14 @@
   "name": "selfstudio-money-checks",
   "version": "0.0.0",
   "private": true,
-  "description": "Browser checks for Money. Playwright is the only package here and only CI installs it; the service itself is Python standard library and needs none of this.",
+  "description": "Browser checks for Money. Playwright is the only package here and only CI installs it; the service itself is Python standard library and needs none of this. deploy-checks needs no package at all: python3 and a POSIX shell.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "page-checks": "node scripts/money-checks.mjs",
-    "stand-smoke": "node checks/stand-smoke.mjs"
+    "stand-smoke": "node checks/stand-smoke.mjs",
+    "deploy-checks": "python3 -B checks/test_deploy.py"
   },
   "devDependencies": {
     "playwright": "1.62.1"

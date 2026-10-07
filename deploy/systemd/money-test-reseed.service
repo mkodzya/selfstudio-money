@@ -5,16 +5,18 @@
 # the month is no longer the week the first screen is about. And nothing real
 # may stay on a stand that is reachable from the internet and looked after
 # with less care than prod: whatever was typed or uploaded there by mistake is
-# gone by morning, and the copies of it two days later.
+# gone by morning, and so is every copy of it.
 #
-# What runs is deploy/bin/money-seed-test: the frozen generator in a throwaway
+# What runs is deploy/bin/money-seed-test: the checkout's generator in a throwaway
 # container without a network, its two documents put in through the stand's
 # own save door (`ctl seed ... --fresh`), then `ctl purge-snapshots
-# --older-than-days 2`. Accounts and passwords survive it.
+# --older-than-days 0` - every snapshot, because the day's copy is what the
+# seed has just replaced. Accounts and passwords survive it.
 #
 # Installed by linking:
 #   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.service /etc/systemd/system/
 #   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.timer   /etc/systemd/system/
+#   ln -sf /opt/money-dev/deploy/motd/97-money-test-reseed         /etc/update-motd.d/
 #   systemctl daemon-reload && systemctl enable --now money-test-reseed.timer
 
 [Unit]
@@ -25,7 +27,14 @@ After=docker.service
 [Service]
 Type=oneshot
 ExecStart=/opt/money-dev/deploy/bin/money-seed-test
-# A night that fails leaves the stand as it was and says so in the journal:
+# A oneshot unit has no start timeout of its own, and this one holds the lock
+# every Money deploy needs, prod's included, for as long as it runs. A docker
+# call that hangs must not keep that lock all night: after fifteen minutes the
+# run is ended, the lock is free again and the unit is "failed".
+TimeoutStartSec=15min
+# A night that fails leaves the stand as it was and says so in three places:
 #   journalctl -u money-test-reseed -n 30 --no-pager
+#   the next money-deploy-test, in a WARNING line above its verdict
+#   the words at login (deploy/motd/97-money-test-reseed)
 # A deploy in progress is waited for, up to five minutes, not raced.
 Nice=10

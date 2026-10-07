@@ -1,12 +1,17 @@
 # Money's checks. Everything that needs a container or a browser runs here and
 # nowhere else: the Mac this is written on has 8 GB and other work to do.
 #
-#   unit         the Python tests, on 3.9 (the Mac's own Python) and 3.13 (the image)
+#   unit         the Python tests, on 3.9 (the Mac's own Python) and 3.13 (the image);
+#                and the server's commands against stand-ins for docker and git
+#                (checks/test_deploy.py)
 #   image        deploy/Dockerfile builds and runs as the stand runs it; the
-#                server's own commands are rehearsed on the runner; shellcheck;
-#                caddy validate on the edge blocks
-#   page-checks  the page's own checks, frozen, exactly as they were handed over
-#   stand-smoke  the unchanged page against the real backend, in a real browser
+#                server's own commands are rehearsed on the runner with a real
+#                Docker - a deploy and its kept log, a backup, a restore that
+#                keeps the accounts and raises the floors; shellcheck; caddy
+#                validate on the edge blocks
+#   page-checks  the page's own checks (scripts/money-checks.mjs), on a copy of
+#                the page as this commit holds it
+#   stand-smoke  the page as it is against the real backend, in a real browser
 #
 # Nothing here holds or needs a secret, and nothing deploys.
 name: ci
@@ -36,7 +41,7 @@ jobs:
   unit:
     name: unit (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +53,13 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: The tests
         run: python -m unittest discover -s tests -t .
+      # deploy/stand.sh and deploy/bin/*, run under dash in a sandbox against
+      # stand-ins for docker, git and flock; `ctl` inside a container is the
+      # real one of this checkout. The same scripts meet a real Docker in the
+      # image job.
+      - name: The deploy commands, against stand-ins
+        if: ${{ !cancelled() }}
+        run: python -B checks/test_deploy.py
       - name: Nothing is left running
         run: |
           if pgrep -fl moneyd; then
@@ -63,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build deploy/Dockerfile
+        id: build
         run: |
           docker build --pull -f deploy/Dockerfile \
             --build-arg "MONEY_VERSION=ci-${GITHUB_SHA::12}" -t money-ci:ci .
@@ -70,14 +83,21 @@ jobs:
       - name: The build context is the allow-list and nothing else
         run: |
           # Decoys of everything that must never reach a build: a ledger beside
-          # the code, an environment file, design notes.
-          mkdir -p data design
-          echo '{"decoy":true}' > data/db.json
-          echo 'DECOY=1' > .env.decoy
-          echo 'decoy' > design/notes.md
-          printf 'FROM busybox:stable\nCOPY . /ctx/\n' | docker build -q -f - -t money-ctx:ci .
+          # the code, an environment file, design notes. They carry the names of
+          # the real things, so they are planted in a COPY of what git tracks and
+          # never in the working copy: nothing here writes to a path called
+          # data/ or removes one beside the code, wherever this block is run.
+          : "${RUNNER_TEMP:?this step runs on a GitHub runner}"
+          ctx="$RUNNER_TEMP/build-context"
+          mkdir "$ctx"
+          git archive HEAD | tar -x -C "$ctx"
+          test -f "$ctx/.dockerignore"
+          mkdir "$ctx/data" "$ctx/design"
+          echo '{"decoy":true}' > "$ctx/data/db.json"
+          echo 'DECOY=1' > "$ctx/.env.decoy"
+          echo 'decoy' > "$ctx/design/notes.md"
+          printf 'FROM busybox:stable\nCOPY . /ctx/\n' | docker build -q -f - -t money-ctx:ci "$ctx"
           docker run --rm money-ctx:ci sh -c 'cd /ctx && ls -A' | sort > "$RUNNER_TEMP/context.txt"
-          rm -rf data design .env.decoy
           cat "$RUNNER_TEMP/context.txt"
           printf 'index.html\nmoneyd\nvendor\n' > "$RUNNER_TEMP/expected.txt"
           if ! diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/context.txt"; then
@@ -139,7 +159,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           shellcheck --version
-          shellcheck deploy/bin/* deploy/stand.sh deploy/motd/98-money-backup
+          shellcheck deploy/bin/* deploy/stand.sh deploy/motd/*
 
       - name: caddy validate on the edge blocks
         if: ${{ !cancelled() }}
@@ -155,23 +175,77 @@ jobs:
             echo "$unit: $when"
             systemd-analyze calendar "$when"
           done
+          # The nightly reseed holds the lock every deploy needs: it must not be
+          # able to hold it all night.
+          limit=$(sed -n 's/^TimeoutStartSec=//p' deploy/systemd/money-test-reseed.service)
+          echo "money-test-reseed.service: TimeoutStartSec=$limit"
+          systemd-analyze timespan "$limit"
 
       # From here on the runner plays the server: the checkout is linked to the
       # two places the stands live in, and the commands that will first run for
-      # real on the studio's machine are run here first.
+      # real on the studio's machine are run here first. Both steps run whatever
+      # shellcheck said above: one note in one script must not hide whether the
+      # deploy, the backup and the restore work on Linux with a real Docker.
+      #
+      # They link into /opt, write under /var/lib/money and /var/log/money, and
+      # replace "prod's" data - on a runner that is thrown away afterwards. They
+      # stop at once anywhere else, and on any machine that has a checkout of
+      # its own in /opt/money or /opt/money-dev.
       - name: "Rehearsal: the test stand's deploy, twice, and its reseed"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
+          if [ "${GITHUB_ACTIONS:-}" != true ] || [ -z "${RUNNER_TEMP:-}" ] || [ -z "${GITHUB_WORKSPACE:-}" ]; then
+            echo "this is not a GitHub runner: the rehearsal is not run"; exit 1
+          fi
+          if [ -e /opt/money-dev ] && [ "$(readlink -f /opt/money-dev)" != "$(readlink -f "$GITHUB_WORKSPACE")" ]; then
+            echo "/opt/money-dev is a checkout of its own: this is a server, and the rehearsal is not run"; exit 1
+          fi
+          stand_container() {
+            docker ps -a -q --filter "label=com.docker.compose.project=money-$1" --filter label=com.docker.compose.service=app
+          }
           sudo ln -sfn "$GITHUB_WORKSPACE" /opt/money-dev
           sudo install -d -o 10001 -g 10001 -m 700 /var/lib/money/test
+          # On the server every deploy is root's. Here the runner's own user
+          # deploys, so the place where the stands keep what their containers
+          # said is made for that user.
+          sudo install -d -o "$(id -u)" -g "$(id -g)" -m 700 /var/log/money
+
           # 1. a first deploy of an empty stand: it is seeded
           /opt/money-dev/deploy/bin/money-deploy-test | tee "$RUNNER_TEMP/deploy-1.txt"
           tail -n 1 "$RUNNER_TEMP/deploy-1.txt" | grep -q '^money-test: OK - deployed and seeded'
-          # 2. the same again: there is a previous image now, and the stand holds data
+          # the smoke saw its own request in the stand's log, under the address it sent
+          grep -q '^ok    the stand counts a visitor by the address the proxy names in X-Forwarded-For$' "$RUNNER_TEMP/deploy-1.txt"
+          # the seed's own save left a day copy, and the purge after it left none
+          grep -q 'every snapshot purged$' "$RUNNER_TEMP/deploy-1.txt"
+          test ! -e /var/log/money/test
+          first=$(stand_container test)
+
+          # 2. the same again: there is a previous image now, the stand holds
+          #    data, and the container is a new one - what the first one said
+          #    is kept before Docker deletes it
           /opt/money-dev/deploy/bin/money-deploy-test | tee "$RUNNER_TEMP/deploy-2.txt"
           tail -n 1 "$RUNNER_TEMP/deploy-2.txt" | grep -q '^money-test: OK - deployed. The stand holds data'
           docker image inspect money-test:previous >/dev/null
-          # 3. what the nightly timer runs
-          /opt/money-dev/deploy/bin/money-seed-test
+          second=$(stand_container test)
+          test -n "$first" && test -n "$second" && test "$first" != "$second"
+          ls -l /var/log/money/test
+          test "$(stat -c %a /var/log/money/test)" = 700
+          test "$(find /var/log/money/test -name 'requests-*.log.gz' | wc -l)" -eq 1
+          kept=$(find /var/log/money/test -name 'requests-*.log.gz')
+          test "$(stat -c %a "$kept")" = 600
+          zcat "$kept" > "$RUNNER_TEMP/kept-log.txt"
+          grep -c '"addr":"192.0.2.10"' "$RUNNER_TEMP/kept-log.txt"      # the first smoke's requests
+          grep -c '"method":"PUT"' "$RUNNER_TEMP/kept-log.txt"           # the seed's two saves
+          grep -q '"event":"stopped"' "$RUNNER_TEMP/kept-log.txt"        # read after it had stopped: whole
+          /opt/money-dev/deploy/stand.sh test logs --no-log-prefix > "$RUNNER_TEMP/logs-now.txt" 2> "$RUNNER_TEMP/logs-note.txt"
+          grep -q '/var/log/money/test/requests-<utc>.log.gz' "$RUNNER_TEMP/logs-note.txt"
+          docker image ls money-test
+
+          # 3. what the nightly timer runs: afterwards no snapshot is left
+          /opt/money-dev/deploy/bin/money-seed-test | tee "$RUNNER_TEMP/seed.txt"
+          grep -q 'every snapshot purged$' "$RUNNER_TEMP/seed.txt"
+          test "$(sudo find /var/lib/money/test/ledger/snapshots /var/lib/money/test/plan/snapshots -type f | wc -l)" -eq 0
+
           # 4. the wrappers a person uses
           /opt/money-dev/deploy/bin/money-user test list
           /opt/money-dev/deploy/bin/money-smoke test
@@ -179,16 +253,40 @@ jobs:
             echo "::error::invite went ahead without a terminal"
             exit 1
           fi
+
           # 5. a seeded stand is not an empty one
           if /opt/money-dev/deploy/stand.sh test ctl empty; then
             echo "::error::ctl empty says the stand is empty right after it was seeded"
             exit 1
           fi
 
-      - name: "Rehearsal: the prod stand, its backup, and a restore"
+          # 6. a setting the service would not start on is refused before the
+          #    pull, the build and the container
+          before=$(stand_container test)
+          status=0
+          MONEY_CSP=reportonly /opt/money-dev/deploy/bin/money-deploy-test > "$RUNNER_TEMP/deploy-refused.txt" || status=$?
+          cat "$RUNNER_TEMP/deploy-refused.txt"
+          test "$status" -eq 1
+          tail -n 1 "$RUNNER_TEMP/deploy-refused.txt" | grep -q '^money-test: FAILED - MONEY_CSP must be enforce or report-only .* Nothing was changed\.$'
+          test "$(stand_container test)" = "$before"
+
+      - name: "Rehearsal: the prod stand, its backup, and two restores"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
+          if [ "${GITHUB_ACTIONS:-}" != true ] || [ -z "${RUNNER_TEMP:-}" ] || [ -z "${GITHUB_WORKSPACE:-}" ]; then
+            echo "this is not a GitHub runner: the rehearsal is not run"; exit 1
+          fi
+          if [ -e /opt/money ] && [ "$(readlink -f /opt/money)" != "$(readlink -f "$GITHUB_WORKSPACE")" ]; then
+            echo "/opt/money is a checkout of its own: this is a server, and the rehearsal is not run"; exit 1
+          fi
+          # On the server every command is root's. Here the lock is made by the
+          # runner's own user or by root in turn, and the kernel will not let
+          # one reopen the other's file in /run/lock.
+          unlock() { sudo rm -f /run/lock/money-deploy.lock; }
           sudo ln -sfn "$GITHUB_WORKSPACE" /opt/money
           sudo install -d -o 10001 -g 10001 -m 700 /var/lib/money/prod
+          sudo install -d -o "$(id -u)" -g "$(id -g)" -m 700 /var/log/money
+          unlock
           # Not money-deploy itself: it moves the checkout to main. What it
           # hands over to is the same.
           /opt/money/deploy/stand.sh prod up | tee "$RUNNER_TEMP/deploy-prod.txt"
@@ -198,23 +296,94 @@ jobs:
           echo '{"tx":[]}' | /opt/money/deploy/stand.sh prod ctl seed ledger --fresh || status=$?
           test "$status" -eq 2
           /opt/money/deploy/stand.sh prod ctl empty
-          # a backup, the rehearsal of its restore, then the restore itself
+
+          # on prod report-only needs a day, a real one, that has not passed -
+          # and the refusal comes before anything is touched
+          running=$(docker ps -q --filter label=com.docker.compose.project=money-prod)
+          for until in "" 2020-01-01 2026-02-30 soon; do
+            status=0
+            MONEY_CSP=report-only MONEY_CSP_OVERRIDE_UNTIL="$until" /opt/money/deploy/stand.sh prod up > "$RUNNER_TEMP/refused.txt" || status=$?
+            cat "$RUNNER_TEMP/refused.txt"
+            test "$status" -eq 1
+            test "$(wc -l < "$RUNNER_TEMP/refused.txt")" -eq 1
+            grep -q '^money-prod: FAILED - MONEY_CSP.* Nothing was changed\.$' "$RUNNER_TEMP/refused.txt"
+            test "$(docker ps -q --filter label=com.docker.compose.project=money-prod)" = "$running"
+          done
+
+          # --- a backup, and what it does not hold --------------------------------
+          # Nobody can save on this stand (no password exists), so the count the
+          # backup holds is put there as a floor: 41.
+          /opt/money/deploy/stand.sh prod ctl floor ledger 41
           sudo /opt/money/deploy/bin/money-backup
-          tarball=$(sudo sh -c 'ls /var/backups/money/money-prod-*.tar.gz' | tail -n 1)
+          tarball=$(sudo find /var/backups/money -name 'money-prod-*.tar.gz' | sort | tail -n 1)
           test "$(sudo stat -c %a "$tarball")" = 600
           test "$(sudo stat -c %a /var/backups/money)" = 700
-          sudo /opt/money/deploy/bin/money-restore --rehearse "$tarball"
-          # On the server every command is root's. Here the lock was made by
-          # the runner's own user a moment ago, and the kernel will not let
-          # root reopen somebody else's file in /run/lock.
-          sudo rm -f /run/lock/money-deploy.lock
-          echo prod | sudo /opt/money/deploy/bin/money-restore "$tarball"
-          sudo rm -f /run/lock/money-deploy.lock
+          sudo tar -tzf "$tarball" > "$RUNNER_TEMP/tarball.txt"
+          grep -qx './ledger/EVER_SAVED' "$RUNNER_TEMP/tarball.txt"
+          grep -qx './ledger/NEVER_SAVED' "$RUNNER_TEMP/tarball.txt"
+          grep -qx './auth/USERS_WRITTEN' "$RUNNER_TEMP/tarball.txt"
+          if grep -q '/sessions\.json' "$RUNNER_TEMP/tarball.txt"; then
+            echo "::error::the backup holds the open sessions"; exit 1
+          fi
+          # the rehearsal: a throwaway container without a network, the image's
+          # own preparations of a restore, and nothing left behind
+          sudo /opt/money/deploy/bin/money-restore --rehearse "$tarball" | tee "$RUNNER_TEMP/rehearse.txt"
+          tail -n 1 "$RUNNER_TEMP/rehearse.txt" | grep -q "^money-restore --rehearse: OK - .* takes a restore's preparations\. Prod was not touched\.$"
+          test -z "$(docker ps -a -q --filter name=money-rehearse)"
+          test "$(sudo find /var/tmp -maxdepth 1 -name 'money-rehearse.*' | wc -l)" -eq 0
+          # after the backup: the stand counts on to 57, and a login is disabled
+          /opt/money/deploy/stand.sh prod ctl floor ledger 57
+          /opt/money/deploy/bin/money-user prod disable vanya
+
+          # --- the restore: what was in place reads -------------------------------
+          unlock
+          echo prod | sudo /opt/money/deploy/bin/money-restore "$tarball" | tee "$RUNNER_TEMP/restore-1.txt"
+          unlock
+          grep -q '^money-restore: OK - the stand runs on the data of ' "$RUNNER_TEMP/restore-1.txt"
+          # the accounts were kept, not taken back to the backup's
+          grep -q 'the accounts are kept as they were before the restore' "$RUNNER_TEMP/restore-1.txt"
+          /opt/money/deploy/bin/money-user prod list > "$RUNNER_TEMP/users-1.txt"
+          cat "$RUNNER_TEMP/users-1.txt"
+          grep -Eq '^vanya +Vanya +no: disabled' "$RUNNER_TEMP/users-1.txt"
+          # the floor is what the stand had reached (57), not what the backup holds (41)
+          grep -q '^money-restore: the ledger had reached revision 57 before the restore$' "$RUNNER_TEMP/restore-1.txt"
+          test "$(sudo cat /var/lib/money/prod/ledger/EVER_SAVED)" = 57
+          sudo test ! -e /var/lib/money/prod/plan/EVER_SAVED
+          # a floor is not a save: the stand is still empty, and it serves
+          /opt/money/deploy/stand.sh prod ctl empty
           /opt/money/deploy/stand.sh prod ctl selfcheck
           /opt/money/deploy/bin/money-smoke prod
-          sudo sh -c 'ls -d /var/lib/money/prod.before-restore-*'
-          # the words at login: nothing to say right after a backup
+          # both floors left their line where a founder can see it
+          test "$(sudo grep -c 'floor-raised' /var/lib/money/prod/security.log)" -ge 2
+
+          # --- the restore: what was in place cannot be read ----------------------
+          # Moved out of the way inside the directory, not deleted: the accounts
+          # file is gone (and its marker says there was one), and so is the
+          # ledger's whole directory.
+          sudo mv /var/lib/money/prod/auth/users.json /var/lib/money/prod/auth/users.json.moved-by-the-rehearsal
+          sudo mv /var/lib/money/prod/ledger /var/lib/money/prod/ledger.moved-by-the-rehearsal
+          unlock
+          echo prod | sudo /opt/money/deploy/bin/money-restore "$tarball" | tee "$RUNNER_TEMP/restore-2.txt"
+          unlock
+          grep -q '^money-restore: OK - the stand runs on the data of ' "$RUNNER_TEMP/restore-2.txt"
+          # the accounts are the backup's, with every pending link retired
+          grep -q "so the accounts are the backup's" "$RUNNER_TEMP/restore-2.txt"
+          grep -q 'no one-time link was pending' "$RUNNER_TEMP/restore-2.txt"
+          /opt/money/deploy/bin/money-user prod list > "$RUNNER_TEMP/users-2.txt"
+          cat "$RUNNER_TEMP/users-2.txt"
+          grep -Eq '^vanya +Vanya +yes' "$RUNNER_TEMP/users-2.txt"
+          # the ledger's floor is a million above what the backup knows
+          grep -q 'its floor is put 1000000 above the 41 that is known$' "$RUNNER_TEMP/restore-2.txt"
+          test "$(sudo cat /var/lib/money/prod/ledger/EVER_SAVED)" = 1000041
+          /opt/money/deploy/stand.sh prod ctl selfcheck
+          /opt/money/deploy/bin/money-smoke prod
+          test "$(sudo find /var/lib/money -maxdepth 1 -name 'prod.before-restore-*' | wc -l)" -eq 2
+          test "$(sudo find /var/lib/money -maxdepth 1 -name 'prod.failed-restore-*' | wc -l)" -eq 0
+
+          # the words at login: nothing to say right after a backup, and nothing
+          # about a reseed on a machine that has no such timer to speak of
           test -z "$(sudo /opt/money/deploy/motd/98-money-backup)"
+          sudo /opt/money/deploy/motd/97-money-test-reseed
 
       - name: What the stands said
         if: failure()
@@ -225,6 +394,13 @@ jobs:
             echo "--- money-$stand"
             docker compose -p "money-$stand" logs --tail 80 2>&1 || true
           done
+          sudo ls -lR /var/log/money /var/lib/money 2>&1 | head -n 120 || true
+          for file in "$RUNNER_TEMP"/restore-*.txt "$RUNNER_TEMP"/rehearse.txt; do
+            if [ -f "$file" ]; then
+              echo "--- $file"
+              cat "$file"
+            fi
+          done
 
   page-checks:
     name: page-checks
@@ -233,10 +409,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The three files are written by another session and arrive whole. Until
-      # they are all here there is nothing to check, and that is not a failure.
-      - name: Are the handed-over files here
-        id: frozen
+      # The page, its checks and the generator of its made-up studio live in
+      # this repository since the hand-over of 7 October 2026 and change here.
+      # A commit that lacks one of them (a tag from before the hand-over) has
+      # nothing to check, and that is not a failure of this job; what fails
+      # when one of them goes missing is tests/test_repo_hygiene.py.
+      - name: Are the page and its checks here
+        id: files
         run: |
           if [ -f index.html ] && [ -f scripts/money-checks.mjs ] && [ -f scripts/money-demo.mjs ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -246,22 +425,21 @@ jobs:
           fi
 
       - uses: actions/setup-node@v4
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         with:
           node-version: 22
 
       - name: Playwright, at the one version package.json names
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      # The checks are run exactly as they were handed over. They find the page
-      # through PUB alone, so they get a copy of it - under a path that does
-      # not begin with /money/, or the page opened as a file would take itself
-      # for the hosted one.
-      - name: The frozen checks, on a copy of the page
-        if: steps.frozen.outputs.present == 'true'
+      # The checks find the page through PUB alone, so they get a copy of it -
+      # under a path that does not begin with /money/, or the page opened as a
+      # file would take itself for the hosted one.
+      - name: The page's own checks, on a copy of the page
+        if: steps.files.outputs.present == 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/pub/money"
           cp index.html "$RUNNER_TEMP/pub/money/index.html"
@@ -279,7 +457,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Is there a page and a studio to put behind it
-        id: frozen
+        id: files
         run: |
           if [ -f index.html ] && [ -f scripts/money-demo.mjs ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -289,29 +467,29 @@ jobs:
           fi
 
       - uses: actions/setup-python@v5
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         with:
           python-version: "3.13"
 
       - uses: actions/setup-node@v4
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         with:
           node-version: 22
 
       - name: Playwright, at the one version package.json names
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
       - name: The unchanged page on the real backend, in Chromium
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         env:
           SMOKE_ARTIFACTS: ${{ runner.temp }}/stand-smoke
         run: node checks/stand-smoke.mjs
 
       - name: Nothing is left running
-        if: steps.frozen.outputs.present == 'true'
+        if: steps.files.outputs.present == 'true'
         run: |
           if pgrep -fl moneyd; then
             echo "::error::a moneyd process outlived the smoke"
