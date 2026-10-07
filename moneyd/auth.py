@@ -31,6 +31,9 @@ Almost everything goes through one object::
   For ``ctl`` (each call writes its line into the security log)::
 
     auth.issue_invite(login, by="ctl") -> (link, expires)      UnknownLogin | LoginDisabled
+    auth.retire_links(by="ctl") -> [login, ...]                every pending link is retired; for a stand
+                                                               put back from a backup, where a spent link
+                                                               is pending again. One log line per login
     auth.set_disabled(login, disabled, by="ctl") -> User       closes the login's sessions when disabling
     auth.close_sessions(login=None, by="ctl") -> int           None closes everybody's
     auth.internal_session(login, ttl=300, purpose="selfcheck", by="ctl") -> (token, Session)
@@ -64,9 +67,15 @@ On disk (``<data>/auth/``, written whole: temporary file, fsync, rename, under f
     ``users.json``     per login: password hash, generation, disabled, a reserved ``totp``, and the
                        sha256 and expiry of a pending one-time link. Damaged -> ``AuthDamaged``;
                        it is never repaired by guessing.
+    ``USERS_WRITTEN``  left beside it by its first write. With it there, a ``users.json`` that is
+                       missing was lost: ``AuthDamaged``, as for a damaged one - never "no accounts
+                       yet". (To begin the accounts anew on purpose, a person deletes both.)
     ``sessions.json``  sha256(token) -> login, created, seen, expires, address, user agent.
                        Damaged -> moved aside as ``sessions.json.damaged-<utc>`` and treated as
                        empty: everybody signs in again.
+
+  The directory itself is made by the stand's first start (``store.prepare_data_dir``). When it
+  has gone later, the accounts are lost with it: ``AuthDamaged``, and it is not made anew.
 
 Nothing here is secret-keyed: tokens are random and kept as sha256, nothing is signed.
 Time comes from the injected ``clock``; only waiting for a hash slot or a lock runs on the real one.
@@ -90,7 +99,7 @@ import unicodedata
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 from .config import Clock, Refusal, as_utc, iso, parse_iso, stamp, utcnow
-from .store import FileLock, LockTimeout, atomic_write, parse_json
+from .store import FileLock, LockTimeout, Unsynced, atomic_write, has_run, parse_json
 
 __all__ = [
     "Auth", "Identity", "NewSession", "Users", "User", "Invites", "Sessions", "Session", "Limiter", "Attempt",
@@ -526,11 +535,13 @@ class _JsonFile:
     MAX_BYTES = 4 * MIB
     BELIEVE = 2.0
 
-    def __init__(self, path: str, check: Any, lock_timeout: float = 10.0):
+    def __init__(self, path: str, check: Any, lock_timeout: float = 10.0, unsynced: Any = None):
         self.path = path
         self._check = check
         self._lockfile = os.path.join(os.path.dirname(path), ".%s.lock" % os.path.basename(path))
         self._lock_timeout = lock_timeout
+        #: Called with the file's name when a write is in place but its directory could not be synced.
+        self._unsynced = unsynced
         self._thread_lock = threading.RLock()
         self._depth = 0
         self._flock = None  # type: Optional[FileLock]
@@ -570,16 +581,21 @@ class _JsonFile:
     def locked(self) -> Iterator[None]:
         """Hold the file for a read-change-write. Re-entrant within a thread.
 
-        Raises ``Busy`` when the lock stays taken and ``AuthStorageFailed`` when the directory cannot be used.
+        Raises ``Busy`` when the lock stays taken and ``AuthStorageFailed`` when the directory cannot be used -
+        or is not there on a stand that has run before: that directory was lost, and is not made anew.
         """
         if not self._thread_lock.acquire(timeout=self._lock_timeout):
             raise Busy()
         try:
             if self._depth == 0:
                 lock = FileLock(self._lockfile, self._lock_timeout)
+                directory = os.path.dirname(self.path)
+                if not os.path.isdir(directory) and has_run(os.path.dirname(directory)):
+                    raise AuthStorageFailed("The accounts directory is missing, although this stand has run "
+                                            "before. It is not made anew.")
                 try:
                     try:
-                        os.mkdir(os.path.dirname(self.path), 0o700)
+                        os.mkdir(directory, 0o700)
                     except FileExistsError:
                         pass
                     lock.__enter__()
@@ -601,7 +617,12 @@ class _JsonFile:
             self._thread_lock.release()
 
     def write(self, data: Dict[str, Any]) -> None:
-        """Replace the file. Call inside ``locked()``. Raises ``AuthStorageFailed``."""
+        """Replace the file. Call inside ``locked()``. Raises ``AuthStorageFailed`` when the file is as it was.
+
+        A write that is in place while only the sync of its directory failed is a write: every
+        reader gets the new file, so saying "as it was" would be false - a link would be spent,
+        a password set, and the caller told that nothing happened. It is noted, not raised.
+        """
         raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
         try:
             # Under the lock nobody else is writing: a temporary file here is a crash's leftover.
@@ -610,6 +631,9 @@ class _JsonFile:
                 if name.startswith(prefix + ".tmp-"):
                     os.unlink(os.path.join(directory, name))
             atomic_write(self.path, (raw,))
+        except Unsynced:
+            if self._unsynced is not None:
+                self._unsynced(os.path.basename(self.path))
         except OSError as error:
             raise AuthStorageFailed("The server could not write %s (%s); the file is as it was."
                                     % (os.path.basename(self.path), errno.errorcode.get(error.errno, "error")))
@@ -630,6 +654,32 @@ def _is_time(value: Any) -> bool:
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _LOGIN = re.compile(r"[a-z][a-z0-9._-]{0,31}")
+#: The marker beside ``users.json``: the file has been written here, so its absence is a loss.
+_USERS_WRITTEN = "USERS_WRITTEN"
+
+
+def _lost_accounts(data_dir: str) -> Optional[str]:
+    """Why a ``users.json`` that is not in ``data_dir`` is a loss; None when no account was written there yet.
+
+    Either the marker beside it says that it was written, or its whole directory has gone on
+    a stand that has run before (``STAND`` is written after ``auth/`` is made).
+    """
+    directory = os.path.join(data_dir, "auth")
+    if os.path.lexists(os.path.join(directory, _USERS_WRITTEN)):
+        return "it is missing, although accounts have been written here before"
+    if not os.path.isdir(directory) and has_run(data_dir):
+        return "its directory is missing, although this stand has run before"
+    return None
+
+
+def _noting(security_log: Any) -> Any:
+    """What a ``_JsonFile`` calls when a write is in place but unconfirmed: a line in the security log, or nothing."""
+    if security_log is None:
+        return None
+
+    def note(name: str) -> None:
+        security_log.write("storage-unsynced", file=name)
+    return note
 
 
 # ---------------------------------------------------------------------------
@@ -690,13 +740,48 @@ class Users:
     reaches a running server at its next request. Every method raises
     ``AuthDamaged`` while the file cannot be read; writers may raise ``Busy``
     and ``AuthStorageFailed``.
+
+    A file that is not there is "no accounts yet" only on a stand that has
+    never written one. The first write leaves the marker ``USERS_WRITTEN``
+    beside the file; with the marker there, a missing file was lost, and that
+    is ``AuthDamaged`` like a file that cannot be read - not three founders
+    quietly made anew without passwords, every session void and the open pages
+    told 401. The same when the whole ``auth/`` directory has gone on a stand
+    that has run before.
     """
 
-    def __init__(self, data_dir: str, founders: Any, clock: Clock = utcnow, *, lock_timeout: float = 10.0):
+    #: Beside ``users.json``: says that the file has been written here, so that its absence is a loss.
+    WRITTEN = _USERS_WRITTEN
+
+    def __init__(self, data_dir: str, founders: Any, clock: Clock = utcnow, *, lock_timeout: float = 10.0,
+                 security_log: Any = None):
         self._founders = collections.OrderedDict(founders.items() if hasattr(founders, "items") else founders)
         self._clock = clock
+        self._data_dir = data_dir
         self.path = os.path.join(data_dir, "auth", "users.json")
-        self._file = _JsonFile(self.path, _check_users, lock_timeout)
+        self._written = os.path.join(data_dir, "auth", self.WRITTEN)
+        self._file = _JsonFile(self.path, _check_users, lock_timeout, unsynced=_noting(security_log))
+
+    # -- lost, or not written yet? ---------------------------------------------
+
+    def _lost(self) -> Optional[str]:
+        """Why a ``users.json`` that is not there is a loss; None when no account was written here yet."""
+        return _lost_accounts(self._data_dir)
+
+    def _refuse_lost(self) -> None:
+        if not os.path.lexists(self.path):
+            why = self._lost()
+            if why is not None:
+                raise AuthDamaged("The accounts file is damaged: %s. Nobody can sign in until it is repaired." % why)
+
+    def _mark_written(self) -> None:
+        """Leave the marker: from now on a ``users.json`` that is missing here was lost."""
+        if os.path.lexists(self._written):
+            return
+        try:
+            atomic_write(self._written, (iso(self._clock()).encode("ascii") + b"\n",))
+        except OSError:
+            pass            # the accounts themselves are written; the next write tries the marker again
 
     # -- reading -------------------------------------------------------------
 
@@ -705,7 +790,10 @@ class Users:
             data = self._file.read(fresh)
         except _Unreadable as why:
             raise AuthDamaged("The accounts file is damaged: %s. Nobody can sign in until it is repaired." % why)
-        return data["users"] if data is not None else {}
+        if data is None:
+            self._refuse_lost()
+            return {}
+        return data["users"]
 
     def _user(self, login: str, record: Optional[Dict[str, Any]]) -> User:
         record = record or _blank_user()
@@ -769,13 +857,21 @@ class Users:
     # -- writing -------------------------------------------------------------
 
     def _change(self, login: Optional[str], change: Any) -> Any:
-        """Read the file anew under the lock, let ``change(records)`` edit a copy, write it if it asks to."""
+        """Read the file anew under the lock, let ``change(records)`` edit a copy, write it if it asks to.
+
+        A file that was lost is not written anew: ``AuthDamaged``, before the lock is taken and again under it.
+        """
+        self._refuse_lost()
         with self._file.locked():
             try:
                 data = self._file.read(fresh=True)
             except _Unreadable as why:
                 raise AuthDamaged("The accounts file is damaged: %s. Nobody can sign in until it is repaired." % why)
-            data = copy.deepcopy(data) if data is not None else {"v": 1, "users": {}}
+            if data is None:
+                self._refuse_lost()
+                data = {"v": 1, "users": {}}
+            else:
+                data = copy.deepcopy(data)
             records = data["users"]
             if login is not None and login not in records:
                 if login not in self._founders:
@@ -784,12 +880,14 @@ class Users:
             write, result = change(records)
             if write:
                 self._file.write(data)
+                self._mark_written()
             return result
 
     def ensure(self) -> None:
         """The boot step: make the file and an account without a password for each founder it lacks.
 
-        Raises ``AuthDamaged`` when a file is there and cannot be read - the boot stops on it.
+        Raises ``AuthDamaged`` when a file is there and cannot be read, or was there and is gone -
+        the boot stops on it. A file from before the marker existed gets its marker here.
         """
         def change(records: Dict[str, Any]) -> Tuple[bool, None]:
             missing = [login for login in self._founders if login not in records]
@@ -797,6 +895,8 @@ class Users:
                 records[login] = _blank_user()
             return bool(missing) or not os.path.exists(self.path), None
         self._change(None, change)
+        if os.path.exists(self.path):
+            self._mark_written()
 
     def set_password(self, login: str, password_hash: str) -> User:
         """Store a new password hash, drop any pending link, and move the generation on (old sessions are void)."""
@@ -905,6 +1005,20 @@ class Invites:
             return True, True
         return self._users._change(None, change)
 
+    def revoke_all(self) -> List[str]:
+        """Retire every pending link, in one write. The logins that had one: the founders in their order, then the rest.
+
+        "Pending" is every link on record, also one whose 48 hours have run out: it is dead either way.
+        """
+        def change(records: Dict[str, Any]) -> Tuple[bool, List[str]]:
+            held = [login for login, record in records.items() if record.get("invite") is not None]
+            for login in held:
+                records[login]["invite"] = None
+            return bool(held), held
+        held = self._users._change(None, change)
+        founders = [login for login in self._users._founders if login in held]
+        return founders + sorted(login for login in held if login not in self._users._founders)
+
 
 # ---------------------------------------------------------------------------
 # Sessions
@@ -960,7 +1074,7 @@ class Sessions:
         self._seen_every = int(seen_every)
         self._security_log = security_log
         self.path = os.path.join(data_dir, "auth", "sessions.json")
-        self._file = _JsonFile(self.path, _check_sessions, lock_timeout)
+        self._file = _JsonFile(self.path, _check_sessions, lock_timeout, unsynced=_noting(security_log))
 
     # -- the file ------------------------------------------------------------
 
@@ -1065,15 +1179,22 @@ class Sessions:
             return None
         session = self._session(digest, record)
         if (now - session.seen).total_seconds() >= self._seen_every:
-            def change(records: Dict[str, Any], _now: datetime.datetime) -> Tuple[bool, bool]:
-                if digest not in records:
-                    return False, False
-                records[digest]["seen"] = iso(now)
-                return True, True
+            def change(records: Dict[str, Any], _now: datetime.datetime) -> Tuple[bool, Optional[str]]:
+                fresh = records.get(digest)
+                if fresh is None:
+                    return False, None
+                # Judged again on what is on disk now, under the lock: a page asks for several
+                # things at the same moment, and all of them read the same stale ``seen`` above.
+                # The first one writes it down; for the others it is written already.
+                if (now - parse_iso(fresh["seen"])).total_seconds() < self._seen_every:
+                    return False, fresh["seen"]
+                fresh["seen"] = iso(now)
+                return True, fresh["seen"]
             try:
-                if not self._change(change):
+                seen = self._change(change)
+                if seen is None:
                     return None             # closed by the other process in this very moment
-                session = session._replace(seen=parse_iso(iso(now)))
+                session = session._replace(seen=parse_iso(seen))
             except (AuthStorageFailed, Busy):
                 pass                        # the use goes unnoted; the session itself is good
         return session
@@ -1326,7 +1447,7 @@ class Auth:
         self.settings = settings
         self._clock = clock
         self._security_log = security_log
-        self.users = Users(settings.data_dir, settings.founders, clock)
+        self.users = Users(settings.data_dir, settings.founders, clock, security_log=security_log)
         self.invites = Invites(self.users, clock, ttl=settings.invite_ttl)
         self.sessions = Sessions(
             settings.data_dir, clock, ttl=settings.session_ttl, idle=settings.session_idle,
@@ -1522,6 +1643,24 @@ class Auth:
                                         % errno.errorcode.get(error.errno, "error"))
         return invite_link(self.settings.public_url, token), expires
 
+    def retire_links(self, by: str = "ctl") -> List[str]:
+        """Retire every pending one-time link. Returns the logins that had one; ``[]`` when there was none.
+
+        For a stand that was put back from a backup: a link that was pending when the backup
+        was taken and has been used - or replaced - since is pending again in the restored
+        accounts file, and whoever still has that message could set the founder's password.
+        Nothing but the links is touched: passwords, disabled logins and sessions stay as
+        they are. Each founder who needs a link is issued a new one afterwards.
+
+        One write of ``users.json`` for all of them, then one ``link-retired`` line (login, by)
+        per login in the security log. The logins come back in the order ``users.list()`` has.
+        Raises ``AuthDamaged``, ``Busy``, ``AuthStorageFailed``; then no link was retired.
+        """
+        logins = self.invites.revoke_all()
+        for login in logins:
+            self._note("link-retired", login=login, by=by)
+        return logins
+
     def set_disabled(self, login: str, disabled: bool, by: str = "ctl") -> User:
         """Disable or enable a login. Disabling closes its sessions and retires its pending link."""
         if login not in self.settings.logins and self.users.get(login) is None:
@@ -1572,7 +1711,10 @@ def verify(data_dir: str) -> Dict[str, Any]:
 
     Read-only: no lock is taken, nothing is moved aside, nothing is written.
     The answer never holds a hash, a token or a link. ``state`` is ``"ok"``,
-    ``"missing"`` or ``"damaged"`` (then ``problem`` says why).
+    ``"missing"`` or ``"damaged"`` (then ``problem`` says why). A ``users.json``
+    that is not there is ``"damaged"``, not ``"missing"``, when the marker beside
+    it says it was written, or when ``auth/`` itself has gone from a directory
+    that carries a ``STAND`` marker: the accounts were lost.
     """
     report = {}  # type: Dict[str, Any]
     for key, name, check in (("users", "users.json", _check_users), ("sessions", "sessions.json", _check_sessions)):
@@ -1581,7 +1723,10 @@ def verify(data_dir: str) -> Dict[str, Any]:
         except _Unreadable as why:
             report[key] = {"state": "damaged", "problem": "%s cannot be trusted: %s." % (name, why)}
             continue
-        if data is None:
+        lost = _lost_accounts(data_dir) if data is None and key == "users" else None
+        if lost is not None:
+            report[key] = {"state": "damaged", "problem": "%s cannot be trusted: %s." % (name, lost)}
+        elif data is None:
             report[key] = {"state": "missing", "problem": None}
         elif key == "users":
             records = data["users"].values()

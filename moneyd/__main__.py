@@ -88,9 +88,17 @@ def main(environ: Optional[Any] = None, stdout: Any = None, stderr: Any = None,
     # What is allowed but should be seen, right under the boot line.
     for warning in settings.warnings:
         requests.event("warning", text=warning)
+    # The service starts all the same: `ctl selfcheck` is what fails a deploy for a page whose
+    # handlers the enforced policy will not run, and the deploy then goes back by itself.
     if web.facts.inline_handlers:
         requests.event("warning", text="the page has %d inline event handler(s); its policy does not run them"
                        % web.facts.inline_handlers)
+    if web.facts.scripted_handlers:
+        requests.event("warning", text="%d place(s) in the page's inline script look like markup with an inline "
+                       "event handler; its policy does not run such a handler either" % web.facts.scripted_handlers)
+    if web.facts.unknown_vendor:
+        requests.event("warning", text="the page names %s under /money/vendor/, and only %s are served there"
+                       % (", ".join(web.facts.unknown_vendor[:5]), ", ".join(httpd.VENDOR_FILES)))
     for kind, document in stores.items():
         if document.status()["state"] == "damaged":
             requests.event("warning",

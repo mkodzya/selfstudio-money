@@ -13,16 +13,20 @@ API for ``__main__``, ``ctl`` and the tests
     The methods that are served at all (anything else is 405) and the three vendor names.
 ``CSP_OWN_PAGES``, ``CSP_VENDOR``, ``CSP_JSON``, ``page_policy(hashes)``, ``FIXED_HEADERS``
     The four policies and the headers every answer carries.
-``inspect_page(data) -> PageFacts(script_hashes, inline_handlers)``
+``inspect_page(data) -> PageFacts(script_hashes, inline_handlers, scripted_handlers, unknown_vendor)``
     What the page's policy is built from: the sha256 of every inline script of the file as
-    it is, and how many inline event handlers it has (the policy would not run them).
+    it is, and how many inline event handlers its markup has (the policy does not run them).
+    The last two are guesses for a person to look at: markup with a handler inside the text
+    of an inline script, and names under ``/money/vendor/`` that are not served.
 ``WebFiles(settings, clock)``
     Everything that is ever sent from a file, read into memory once. Raises ``WebDirError``
     (a ``config.BootRefusal``) when the page or a vendor file is missing.
 ``MoneyServer(settings, auth_, stores, request_log, clock=utcnow, security_log=None, web=None)``
     The server. ``serve_forever()`` as usual, or ``serve_in_thread()``; ``stop(grace)`` ends
     it: no new connections, requests in flight get ``grace`` seconds, the rest are cut.
-    ``port`` is the bound port.
+    ``port`` is the bound port. ``connections()``, ``in_flight()`` and ``signed_out(key=None)``
+    say what it holds right now: open connections, requests begun, and signed-out slots taken
+    (in all, or by the client address counted as ``key``).
 
 What a request passes, in this order, and what it is told when it does not
     a free thread (32)                        bare 503, written by the accept loop
@@ -32,7 +36,9 @@ What a request passes, in this order, and what it is told when it does not
     Transfer-Encoding, Content-Length, Expect 400 / 417
     the method is GET, HEAD, POST or PUT      405
     the session cookie                        (a damaged accounts file: 503 auth_damaged, never 401)
-    no session: one of 8 signed-out slots     503 busy
+    no session, and a body is announced:      503 busy
+      one of 8 signed-out slots, and one of
+      the 2 its client address may hold
     the route                                 signed out: 401 under /api/ and for the vendor files,
                                               302 /login for the rest; signed in: 404, or 405 with Allow
     /api/ only: Origin and Sec-Fetch-Site     403 bad_origin
@@ -40,8 +46,17 @@ What a request passes, in this order, and what it is told when it does not
                         Content-Length        411 length_required, 413 body_too_large
                         free space (PUT)      507 storage_failed
   and only then is the body read, under one deadline for all of it (5 s for the sign-in doors,
-  20 s + 1 s per 50 000 bytes for a document); a body that misses it gets no answer, the
-  connection is closed. A body that is not JSON, or nests deeper than 16 levels, is 400 bad_json.
+  20 s + 1 s per 10 000 bytes and 600 s at most for a document); a body that misses it gets no
+  answer, the connection is closed. A body that is not JSON, or nests deeper than 16 levels, is
+  400 bad_json.
+
+The signed-out slots are what keeps strangers from holding the threads founders need. Only a
+request that announces a body (``Content-Length`` above 0) can make this server wait - for the
+body, or for what is left of it after an answer - so only such a request takes a slot, and it
+keeps it until it is over. A request without a body is answered from memory as soon as its head
+is read: the sign-in page, its two assets and every refusal stay reachable however many bodies
+are stalled. And no client address holds more than 2 of the 8, so that one address cannot shut
+the sign-in door and the set-password door (the way out of a lock-out) for everybody else.
 
 One request per connection: every answer says ``Connection: close`` and the handler never
 reads a second request, so there is no request boundary to disagree about with the proxy.
@@ -49,8 +64,9 @@ reads a second request, so there is no request boundary to disagree about with t
 Three things the table above does not say
     * A request is read strictly: ``METHOD target HTTP/1.x``, then header lines that are
       ``name: value`` and nothing else (no folded lines, no space before the colon), 8 KiB a
-      line, 32 KiB and 100 headers in all. ``100 Continue`` is said only when a body is
-      about to be read.
+      line, 32 KiB and 100 headers in all. A line is taken apart in one pass, whatever it
+      holds: the headers are read before any limit knows whose request this is.
+      ``100 Continue`` is said only when a body is about to be read.
     * A document body of a megabyte or more is "large": at most three of them are in memory
       at once, and one at a time is parsed and saved (at the 16 MiB limit that takes the
       process to about 130 MB for a moment). A request waits up to 30 seconds for its turn
@@ -68,7 +84,9 @@ Money's own pages (``pages/*.html``) are filled on the server: ``{{name}}`` take
 value, ``<!--only:test-->...<!--/only-->`` and ``<!--except:test-->...<!--/except-->`` keep or
 drop a block by stand, once, at start. That is how ``/login`` knows its three states and
 ``/data`` its fifty log entries without a door of their own, and how the upload control is
-simply not in the markup of the test stand.
+simply not in the markup of the test stand. An element marked ``data-when="<states>"`` belongs
+to those states of its page: for any other state it is sent with ``hidden``, so the page shows
+the right thing even when its stylesheet never arrives.
 """
 import base64
 import email.utils
@@ -237,8 +255,45 @@ _GONE = frozenset(getattr(errno, name) for name in (
     "ENETUNREACH", "ENETDOWN", "ENETRESET") if hasattr(errno, name))
 
 _REQUEST_LINE = re.compile(rb"([A-Z]{1,16}) ([\x21-\x7e]{1,4096}) HTTP/1\.([01])\r?\n")
-_HEADER_LINE = re.compile(rb"([!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}):[ \t]*([\t\x20-\x7e\x80-\xff]*?)[ \t]*\r?\n")
-_DIGITS = re.compile(r"[0-9]{1,12}")
+_HEADER_NAME = re.compile(rb"[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}")
+#: What a header's value may hold: a tab, printable ASCII, and bytes beyond ASCII.
+_HEADER_VALUE_BYTES = b"\t" + bytes(range(0x20, 0x7f)) + bytes(range(0x80, 0x100))
+_DIGITS = re.compile(r"[0-9]+")
+#: A Content-Length of more digits than this is not counted out: it is over every limit there is.
+_LENGTH_DIGITS = 15
+_LENGTH_BEYOND = 10 ** _LENGTH_DIGITS
+
+
+def _header(line: bytes) -> Optional[Tuple[bytes, bytes]]:
+    """``(name, value)`` of one header line, or None when the line is not ``name: value``.
+
+    The name is a token of 64 bytes at most with the colon right behind it; the value is the
+    rest of the line without the blanks around it, and holds no control byte but a tab.
+
+    One pass, whatever the line holds. A pattern with an optional run of blanks on either
+    side of a lazy value does the same in time that grows with the square of the line, and a
+    stranger could buy a second of this server's one processor with four header lines. Every
+    step here is a single scan: find, strip, translate.
+    """
+    if not line.endswith(b"\n"):
+        return None
+    end = len(line) - (2 if line.endswith(b"\r\n") else 1)
+    colon = line.find(b":", 0, 65)
+    if colon < 1 or _HEADER_NAME.fullmatch(line, 0, colon) is None:
+        return None
+    value = line[colon + 1:end].strip(b" \t")
+    if value.translate(None, _HEADER_VALUE_BYTES):
+        return None                     # a byte that no header value may hold
+    return line[:colon], value
+
+
+def _length(value: str) -> int:
+    """A ``Content-Length`` as a number: -1 when it is not one, ``_LENGTH_BEYOND`` when it has
+    more digits than any body this server takes could need."""
+    if _DIGITS.fullmatch(value) is None:
+        return -1
+    digits = value.lstrip("0")
+    return int(digits or "0") if len(digits) <= _LENGTH_DIGITS else _LENGTH_BEYOND
 
 
 def _reason(status: int) -> str:
@@ -255,8 +310,13 @@ def _reason(status: int) -> str:
 class PageFacts(NamedTuple):
     #: base64 sha256 of each inline script, in the order they stand in the file.
     script_hashes: Tuple[str, ...]
-    #: Inline event handlers and javascript: addresses. The policy does not run them.
+    #: Inline event handlers and javascript: addresses in the page's markup. The policy does not run them.
     inline_handlers: int
+    #: A guess: places in the text of the inline scripts that look like markup with a handler
+    #: (``<button onclick="...">`` in a template the script draws). The policy does not run those either.
+    scripted_handlers: int = 0
+    #: A guess: names the page spells out under /money/vendor/ that are not among the files served.
+    unknown_vendor: Tuple[str, ...] = ()
 
 
 _TAG = re.compile(r"<(/?)([A-Za-z][^\t\n\f />]*)")
@@ -265,6 +325,10 @@ _SPACE = "\t\n\f "
 _RAW_TEXT = frozenset(("script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes"))
 _SCRIPT_MARK = re.compile(r"<!--|-->|<(/?)script(?=[\t\n\f />])", re.IGNORECASE)
 _ADDRESS_ATTRIBUTES = frozenset(("href", "src", "action", "formaction", "xlink:href"))
+#: Inside script text: something that opens like a tag and, before that tag could end, gives an
+#: on<event> attribute a quoted value. Bounded on purpose: this is a hint, not a parser.
+_SCRIPTED_HANDLER = re.compile(r"<[A-Za-z][^<>]{0,400}?[\s\"'`]on[a-z]{3,20}\s{0,4}=\s{0,4}(?:\\?[\"'`]|\$\{)")
+_VENDOR_NAME = re.compile(r"/money/vendor/([A-Za-z0-9][A-Za-z0-9._/-]{0,100})")
 
 
 def _read_tag(text: str, at: int) -> Tuple[Optional[List[Tuple[str, str]]], int]:
@@ -316,6 +380,10 @@ def _script_end(text: str, at: int) -> int:
     A script may hold ``<!-- <script> ... </script> -->``; inside such a comment the first
     ``</script`` does not end it. The three states are the tokenizer's: script data, escaped
     (after ``<!--``), double escaped (after a ``<script`` inside that).
+
+    The two dashes of a ``<!--`` are also the dashes of a ``-->`` when a ``>`` follows them:
+    ``<!-->`` and ``<!--->`` end an escape in every state (and, in plain script data, open and
+    end one in the same breath). So the search goes on from those two dashes, not after them.
     """
     state = 0
     position = at
@@ -326,9 +394,9 @@ def _script_end(text: str, at: int) -> int:
         token = mark.group(0)
         position = mark.end()
         if token == "<!--":
-            # "<!-->" and "<!--->" open and close in one breath.
-            if state == 0 and not text.startswith(">", position) and not text.startswith("->", position):
+            if state == 0:
                 state = 1
+            position -= 2               # its dashes may be the start of the "-->" that ends it
         elif token == "-->":
             state = 0
         elif mark.group(1):             # </script
@@ -345,6 +413,12 @@ def inspect_page(data: bytes) -> PageFacts:
     The hash of a script is taken over the text between its tags exactly as the browser
     sees it (line ends normalised, as the parser does before anything else). A script with
     ``src`` has no inline text to allow. Raises ``ValueError`` for a file that is not UTF-8.
+
+    ``inline_handlers`` counts what is certain: handlers and ``javascript:`` addresses in the
+    markup itself. A page that draws its interface from templates inside a script can carry a
+    handler there, where this reading sees only script text; ``scripted_handlers`` is a
+    bounded guess at those, and ``unknown_vendor`` at names under ``/money/vendor/`` that this
+    service does not serve. Both are for a person to look at, and neither stops anything.
     """
     text = data.decode("utf-8")
     if text.startswith("﻿"):
@@ -352,6 +426,7 @@ def inspect_page(data: bytes) -> PageFacts:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     hashes = []  # type: List[str]
     handlers = 0
+    scripted = 0
     size = len(text)
     position = 0
     while position < size:
@@ -400,11 +475,14 @@ def inspect_page(data: bytes) -> PageFacts:
             if not any(attribute == "src" for attribute, _value in attributes) and end > after:
                 content = text[after:end].replace("\x00", "�")
                 hashes.append(base64.b64encode(hashlib.sha256(content.encode("utf-8")).digest()).decode("ascii"))
+                scripted += sum(1 for _found in _SCRIPTED_HANDLER.finditer(content))
         else:
             close = re.compile(r"</%s(?=[\t\n\f />])" % re.escape(name), re.IGNORECASE).search(text, after)
             end = close.start() if close else size
         position = end
-    return PageFacts(tuple(hashes), handlers)
+    named = {name.rstrip("._/-") for name in _VENDOR_NAME.findall(text)}
+    unknown = sorted(named - frozenset(VENDOR_FILES) - {""})
+    return PageFacts(tuple(hashes), handlers, scripted, tuple(unknown[:20]))
 
 
 # ---------------------------------------------------------------------------
@@ -422,13 +500,17 @@ class _Markup(str):
 _ONLY = re.compile(r"<!--only:([a-z,]+)-->\n?(.*?)<!--/only-->\n?", re.DOTALL)
 _EXCEPT = re.compile(r"<!--except:([a-z,]+)-->\n?(.*?)<!--/except-->\n?", re.DOTALL)
 _SLOT = re.compile(r"\{\{([A-Za-z]+)\}\}")
+#: An element that belongs to some states of its page only: <section data-when="form ending">.
+_WHEN = re.compile(r'<[a-z][a-z0-9]*\b[^<>]*?\bdata-when="([a-z -]*)"')
 
 #: Money's own pages and what each is filled with at every request.
 _PAGES = {
-    "login": ("stand", "state", "firstName"),
+    "login": ("stand", "state", "firstName", "login"),
     "set-password": ("stand",),
     "data": ("stand", "firstName", "entries"),
 }
+#: The states a page with states can be asked for: its ``state`` value picks one.
+_STATES = {"login": ("form", "ending", "signed-in")}
 
 
 class WebFiles:
@@ -463,7 +545,7 @@ class WebFiles:
             "/assets/auth.js": (script, _TYPE_JS, CSP_VENDOR),
             "/assets/auth.css": (style, _TYPE_CSS, CSP_JSON),
         }
-        self._pages = {}  # type: Dict[str, str]
+        self._pages = {}  # type: Dict[Any, str]     name -> template; (name, state) -> that state's
         for name, slots in _PAGES.items():
             raw = self._read(os.path.join(own, "pages", name + ".html"), "the package")
             try:
@@ -478,6 +560,14 @@ class WebFiles:
             if unknown:
                 raise WebDirError("The page %s.html asks for a value nobody gives it: %s." % (name, ", ".join(unknown)))
             self._pages[name] = template
+            # A page with states is kept once per state, with everything that belongs to another
+            # state marked `hidden` in the markup itself. The stylesheet tells the states apart
+            # as well - but a page whose stylesheet did not arrive must not show a stranger
+            # "you are signed in", the way out and the form all at once.
+            for state in _STATES.get(name, ()):
+                self._pages[name, state] = _WHEN.sub(
+                    lambda tag, state=state: tag.group(0) + ("" if state in tag.group(1).split() else " hidden"),
+                    template)
 
     @staticmethod
     def _read(path: str, where: str) -> bytes:
@@ -492,13 +582,18 @@ class WebFiles:
         return data
 
     def render(self, name: str, **values: Any) -> bytes:
-        """One of Money's own pages, filled. Values are escaped unless they are ``_Markup``."""
+        """One of Money's own pages, filled. Values are escaped unless they are ``_Markup``.
+
+        For a page with states (``/login``), ``state`` also picks the markup: what belongs to
+        another state carries ``hidden``.
+        """
         values.setdefault("stand", self.stand)
+        template = self._pages.get((name, values.get("state")), self._pages[name])
 
         def put(slot: Any) -> str:
             value = values[slot.group(1)]
             return value if isinstance(value, _Markup) else html.escape(str(value), quote=True)
-        return _SLOT.sub(put, self._pages[name]).encode("utf-8", "replace")
+        return _SLOT.sub(put, template).encode("utf-8", "replace")
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +691,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._bytes_out = 0
         self._addr = None               # type: Optional[str]
         self._address_key = None        # type: Optional[str]
-        self._slot = False
+        self._slot = False              # this request holds a signed-out slot, and one of its address's
         self._identity = None           # type: Optional[auth.Identity]
         self._token = None              # type: Optional[str]
         self._log_login = None          # type: Optional[str]
@@ -652,7 +747,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if self._large:
                     server.large.release()
                 if self._slot:
-                    server.leave_signed_out()
+                    server.leave_signed_out(self._address_key)
                 if self._address_key is not None:
                     server.leave_address(self._address_key)
 
@@ -741,7 +836,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if lengths:
             if len(set(lengths)) != 1:
                 return self._refuse(400)
-            self._declared = int(lengths[0]) if _DIGITS.fullmatch(lengths[0]) else -1
+            self._declared = _length(lengths[0])
             self._unread = max(0, self._declared)
         expect = headers.get("Expect")
         if expect is not None:
@@ -777,11 +872,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         hidden = path == _HEALTH and not probe
         if hidden:
             route = None
-        probe = probe and route is not None and route.handler == "healthz"
 
-        # A caller without a session works within eight slots, so that founders never wait behind strangers.
-        if identity is None and not probe:
-            if not server.enter_signed_out():
+        # A caller without a session who announces a body works within eight slots, and within
+        # the two of them its address may hold: such a request can keep its thread waiting - for
+        # the body, or for the rest of it once it has been answered - and founders must never
+        # wait behind strangers, nor everybody behind one address. A request with no body cannot
+        # stall once its head is read, so it takes no slot: the sign-in page, its assets and
+        # every refusal stay reachable whatever is stalled.
+        if identity is None and self._unread > 0:
+            if not server.enter_signed_out(key):
                 return self._refuse(503, headers=(("Retry-After", "1"),))
             self._slot = True
 
@@ -826,11 +925,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if count > _HEADER_COUNT_MAX:
                 self._refuse(431)
                 return False
-            header = _HEADER_LINE.fullmatch(line)
+            header = _header(line)
             if header is None:
                 self._refuse(400)
                 return False
-            message[header.group(1).decode("ascii")] = header.group(2).decode("iso-8859-1")
+            message[header[0].decode("ascii")] = header[1].decode("iso-8859-1")
         self.headers = message
         return True
 
@@ -938,7 +1037,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         payload = b"" if bodiless or self.command == "HEAD" else body
         self._status = status
         self._answered = True
-        # One deadline for the whole answer, as for a body on its way in.
+        # One deadline for the whole answer, by the rule of a body on its way in: the edge hands an
+        # answer on only as fast as the browser takes it, so a ledger of megabytes going out to a
+        # phone needs the minutes a ledger coming in from one gets. Only a founder is ever sent
+        # anything that long; what a stranger can be sent fits the socket's buffer.
         self.connection.settimeout(max(settings.socket_timeout, settings.put_deadline(len(payload))))
         if len(payload) <= _SMALL_ANSWER:
             self.connection.sendall(head + payload)
@@ -1015,12 +1117,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _do_page_login(self, route: Route) -> None:
         identity = self._identity
         if identity is None:
-            state, name = "form", ""
+            state, name, login = "form", "", ""
         elif identity.may_open_page:
-            state, name = "signed-in", identity.first_name
+            state, name, login = "signed-in", identity.first_name, identity.login
         else:
-            state, name = "ending", identity.first_name     # the session's last 24 hours
-        self._html(self.server.web.render("login", state=state, firstName=name))
+            state, name, login = "ending", identity.first_name, identity.login     # the session's last 24 hours
+        self._html(self.server.web.render("login", state=state, firstName=name, login=login))
 
     def _do_page_set_password(self, route: Route) -> None:
         self._html(self.server.web.render("set-password"))
@@ -1122,7 +1224,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         new = server.auth.set_password(fields.get("token"), fields.get("password"), self._addr, self._agent(),
                                        presented=self._token)
         self._log_login = new.identity.login
-        self._json(200, {"ok": True, "firstName": new.identity.first_name},
+        # The login goes back with the answer: the page that set the password is the one place a
+        # founder is sure to see what to type at the sign-in door next time. It is told to nobody
+        # but the holder of a link that worked.
+        self._json(200, {"ok": True, "firstName": new.identity.first_name, "login": new.identity.login},
                    headers=(("Set-Cookie", auth.session_cookie(server.settings, new.token)),))
 
     def _do_api_logout(self, route: Route) -> None:
@@ -1162,6 +1267,9 @@ class MoneyServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
     allow_reuse_address = True
+    #: Said out loud: some Python releases let a second listener share the port by default, and a
+    #: second moneyd on a stand's port must be refused, not given half of the connections.
+    allow_reuse_port = False
     request_queue_size = 64
 
     def __init__(self, settings: Any, auth_: Any, stores: Dict[str, Any], request_log: Any,
@@ -1179,10 +1287,12 @@ class MoneyServer(http.server.ThreadingHTTPServer):
         #: And only a few large bodies are held at all - being read, or waiting for that turn.
         self.large = threading.BoundedSemaphore(_LARGE_SLOTS)
         self._free = threading.BoundedSemaphore(settings.max_connections)
-        self._signed_out = threading.BoundedSemaphore(settings.signed_out_slots)
         self._lock = threading.Lock()
         self._quiet = threading.Condition(self._lock)
         self._addresses = {}    # type: Dict[str, int]
+        #: Signed-out requests that announced a body and are not over yet: all of them, and by address.
+        self._signed_out = 0
+        self._signed_out_by = {}    # type: Dict[str, int]
         #: connection -> [its thread, whether a request has begun on it]
         self._open = {}         # type: Dict[Any, List[Any]]
         self._refused = 0
@@ -1273,12 +1383,33 @@ class MoneyServer(http.server.ThreadingHTTPServer):
             else:
                 self._addresses.pop(key, None)
 
-    def enter_signed_out(self) -> bool:
-        """Take one of the slots for callers without a session; False when all eight are taken."""
-        return self._signed_out.acquire(blocking=False)
+    def enter_signed_out(self, key: str) -> bool:
+        """Take a slot for a request without a session that announces a body, for the client
+        address counted as ``key``. False when all eight are taken, or when that address holds
+        its two already - so one address never has more than its share of the eight."""
+        settings = self.settings
+        with self._lock:
+            held = self._signed_out_by.get(key, 0)
+            if self._signed_out >= settings.signed_out_slots or held >= settings.signed_out_body_slots_per_address:
+                return False
+            self._signed_out += 1
+            self._signed_out_by[key] = held + 1
+            return True
 
-    def leave_signed_out(self) -> None:
-        self._signed_out.release()
+    def leave_signed_out(self, key: str) -> None:
+        """Give the slot back; ``key`` is what it was taken under."""
+        with self._lock:
+            self._signed_out = max(0, self._signed_out - 1)
+            held = self._signed_out_by.get(key, 0) - 1
+            if held > 0:
+                self._signed_out_by[key] = held
+            else:
+                self._signed_out_by.pop(key, None)
+
+    def signed_out(self, key: Optional[str] = None) -> int:
+        """How many signed-out slots are taken right now - in all, or by the address counted as ``key``."""
+        with self._lock:
+            return self._signed_out if key is None else self._signed_out_by.get(key, 0)
 
     def mark_busy(self, request: Any) -> None:
         """A request has begun on this connection: ``stop`` lets it finish."""

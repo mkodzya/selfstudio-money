@@ -283,6 +283,47 @@ class SelfcheckModeTests(CtlCase):
         self.assertNotIn("policy: enforced", done.out)
 
 
+def page_with_a_handler():
+    """A web directory whose page is the repository's with one inline handler added; the vendor files are the real ones."""
+    directory = tempfile.mkdtemp(prefix="money-test-")
+    page = read(os.path.join(_harness.CHECKOUT, "index.html")).decode("utf-8")
+    changed = page.replace("<body", '<body onpageshow="hideDemo()"', 1)
+    assert changed != page
+    write(os.path.join(directory, "index.html"), changed.encode("utf-8"))
+    os.symlink(os.path.join(_harness.CHECKOUT, "vendor"), os.path.join(directory, "vendor"))
+    return directory
+
+
+class SelfcheckDeadHandlerTests(unittest.TestCase):
+    """A deploy goes back to the previous image when ``selfcheck`` is not 0. A page with an inline event
+    handler is the one thing the service knows the enforced policy will not run in full."""
+
+    def stand(self, **env):
+        directory = page_with_a_handler()
+        self.addCleanup(shutil.rmtree, directory, True)
+        stand = _harness.Stand(clock=config.utcnow, env=dict(env, MONEY_WEB_DIR=directory))
+        self.addCleanup(stand.stop)
+        return stand, process_environ(stand.environ)
+
+    def test_under_the_enforced_policy_selfcheck_is_1_and_says_why(self):
+        stand, environ = self.stand()
+        done = run_ctl(environ, ["selfcheck"])
+        self.assertEqual(done.status, 1, done.said)
+        self.assertIn("FAIL  the page's markup has no inline event handler and no javascript: address", done.out)
+        self.assertIn("got: 1 found", done.out)
+        self.assertRegex(done.out, r"self-check: FAILED - 1 of \d+ checks\n$")
+        self.assertIn("  policy: enforced\n", done.out)
+        self.assertEqual(stand.auth.sessions.list(), [], "and the session it made is gone all the same")
+
+    def test_under_report_only_it_is_a_warning_and_the_check_passes(self):
+        _stand, environ = self.stand(MONEY_CSP="report-only")
+        done = run_ctl(environ, ["selfcheck"])
+        self.assertEqual(done.status, 0, done.said)
+        self.assertIn("  WARNING: the page has 1 inline event handler(s); the policy will not run them once it is enforced\n",
+                      done.out)
+        self.assertNotIn("FAIL", done.out)
+
+
 # ---------------------------------------------------------------------------
 # user list | invite | disable | enable
 # ---------------------------------------------------------------------------
@@ -319,7 +360,58 @@ class UserTests(CtlCase):
         self.assertEqual((issued["login"], issued["by"]), ("mika", "ctl"))
         self.assertNotIn(token, json.dumps(self.stand.security_events()))
         answer = stand.post("/api/auth/setup", {"token": token, "password": PASSWORD})
-        self.assertEqual((answer.status, answer.json()), (200, {"ok": True, "firstName": "Mika"}))
+        self.assertEqual((answer.status, answer.json()), (200, {"ok": True, "firstName": "Mika", "login": "mika"}))
+
+    def test_invite_prints_the_login_on_a_line_of_its_own_above_the_link(self):
+        # Nothing else tells a founder what the sign-in page wants in «Логин»: whoever passes the link on
+        # passes the login with it, and the word a founder gets is the word that signs in.
+        stand = self.stand
+        done = self.ctl("user", "invite", "vanya", terminal="stdout")
+        self.assertEqual((done.status, done.err), (0, ""), done.said)
+        lines = done.out.splitlines()
+        self.assertEqual(lines[-2], "login: vanya")
+        (token,) = self.links(lines[-1])
+        self.assertEqual(self.links("\n".join(lines[:-1])), [], "the link stands on the last line, alone")
+        self.assertIn("not an e-mail", done.out)
+        self.assertEqual(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}).json()["login"], "vanya")
+        signed = stand.post("/api/auth/login", {"login": lines[-2].split(": ", 1)[1], "password": PASSWORD})
+        self.assertEqual(signed.status, 200)
+        printed = self.ctl("user", "invite", "misha", "--print")
+        self.assertEqual(printed.out.splitlines()[-2], "login: misha")
+
+    def test_retire_links_ends_every_pending_link_prints_whose_and_then_the_list(self):
+        stand = self.stand
+        stand.set_password("mika")
+        cookie = stand.session("mika")
+        tokens = [stand.invite("misha"), stand.invite("vanya")]
+        done = self.ctl("user", "retire-links")
+        self.assertEqual((done.status, done.err), (0, ""), done.said)
+        lines = done.out.splitlines()
+        self.assertEqual([line.split(":")[0] for line in lines[:2]], ["misha", "vanya"], "one line per login touched")
+        self.assertEqual(lines[2:], self.ctl("user", "list").out.splitlines(), "and then the table of `user list`")
+        for token in tokens:
+            self.assertEqual(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}).status, 404)
+            self.assertNotIn(token, done.said)
+        self.assertEqual({login: record["invite"] for login, record in self.users().items()},
+                         {"mika": None, "misha": None, "vanya": None})
+        self.assertEqual([(entry["login"], entry["by"]) for entry in self.events("link-retired")],
+                         [("misha", "ctl"), ("vanya", "ctl")])
+        self.assertEqual(stand.get(ME, cookie=cookie).status, 200, "sessions and passwords are not touched")
+        # None pending: said, the list shown, and still 0 - a restore script runs it without looking first.
+        before = read(self.path("auth", "users.json"))
+        none = self.ctl("user", "retire-links")
+        self.assertEqual((none.status, none.err), (0, ""))
+        self.assertIn("no one-time link was pending", none.out.splitlines()[0])
+        self.assertEqual(none.out.splitlines()[1:], self.ctl("user", "list").out.splitlines())
+        self.assertEqual(read(self.path("auth", "users.json")), before)
+        self.assertEqual(len(self.events("link-retired")), 2)
+        for arguments in (("user", "retire-links", "mika"), ("user", "retire-links", "--all"), ("user", "retire")):
+            wrong = self.main(*arguments)
+            self.assertEqual((wrong.status, wrong.out), (2, ""), arguments)
+        write(self.path("auth", "users.json"), b'{"v":1,')
+        broken = self.ctl("user", "retire-links")
+        self.assertEqual((broken.status, broken.out), (1, ""))
+        self.assertNoTraceback(broken)
 
     def test_invite_to_a_pipe_a_file_or_dev_null_is_2_prints_no_link_and_issues_none(self):
         before = read(self.path("auth", "users.json"))
@@ -525,6 +617,124 @@ class SnapshotTests(CtlCase):
 
 
 # ---------------------------------------------------------------------------
+# floor
+# ---------------------------------------------------------------------------
+
+class FloorTests(CtlCase):
+    """``floor <ledger|plan> <N>``: no later revision is N or lower. For a stand put back from a backup, and for the cut-over."""
+
+    def setUp(self):
+        super().setUp()
+        history(self.stand.data_dir, "ledger", [ledger(30), ledger(31), ledger(32)])       # the ledger is at revision 3
+
+    def test_floor_is_0_prints_the_revision_and_the_floor_and_touches_no_document(self):
+        stand = self.stand
+        documents = (read(self.path("ledger", "current.json")), self.snapshots("ledger"))
+        done = self.ctl("floor", "ledger", "108")
+        self.assertEqual((done.status, done.err), (0, ""), done.said)
+        self.assertEqual(done.out, "ledger: revision 3; floor 108 (was 3). The next save or restore becomes revision 109.\n")
+        self.assertEqual((read(self.path("ledger", "current.json")), self.snapshots("ledger")), documents)
+        self.assertEqual(read(self.path("ledger", "EVER_SAVED")), b"108\n", "digits and a newline: what a script reads")
+        (entry,) = self.events("floor-raised")
+        self.assertEqual((entry["doc"], entry["floor"], entry["was"], entry["by"]), ("ledger", 108, 3, "ctl"))
+        # The running server is another process, and the very next save it takes lands above the floor:
+        # a page that was open before the restore, at any revision up to 108, can only be told to reload.
+        cookie = stand.session("mika")
+        self.assertEqual(stand.get(LEDGER, cookie=cookie).json()["rev"], 3)
+        stale = stand.put(LEDGER, {"base": 108, "doc": ledger(1)}, cookie=cookie)
+        self.assertEqual((stale.status, stale.json()["rev"]), (409, 3))
+        self.assertEqual(stand.put(LEDGER, {"base": 3, "doc": ledger(33)}, cookie=cookie).json(), {"rev": 109})
+        self.assertEqual(stand.put(LEDGER, {"base": 108, "doc": ledger(1)}, cookie=cookie).status, 409)
+        # A restore goes above it too, and the self-check still passes on a stand with a floor.
+        restored = self.main("restore", "ledger", SNAPSHOTS[0], typed="dev\n")
+        self.assertEqual(restored.status, 0, restored.said)
+        self.assertIn("revision 110", restored.out)
+        self.assertEqual(self.main("selfcheck").status, 0)
+
+    def test_floor_never_lowers_and_a_document_never_saved_stays_empty_under_it(self):
+        lower = self.ctl("floor", "ledger", "2")
+        self.assertEqual((lower.status, lower.err), (0, ""))
+        self.assertIn("floor 3 (it was that already; nothing was changed)", lower.out)
+        self.assertEqual(read(self.path("ledger", "EVER_SAVED")), b"3\n")
+        # The cut-over: the floor first, the import after it. Until the import the stand is still "empty".
+        done = self.ctl("floor", "plan", "40")
+        self.assertEqual((done.status, done.err), (0, ""))
+        self.assertEqual(done.out, "plan: never saved (revision 0); floor 40 (was 0). The next save or restore becomes revision 41.\n")
+        cookie = self.stand.session("mika")
+        self.assertEqual(self.stand.get(PLAN, cookie=cookie).body, EMPTY)
+        self.assertEqual(self.revision("plan"), 0)
+        doctor = self.main("doctor")
+        self.assertEqual(doctor.status, 0, doctor.said)
+        self.assertIn("  plan: never saved (revision 0); floor 40 (the next save becomes revision 41)", doctor.out)
+        seeded = self.main("seed", "plan", typed=plan(3))
+        self.assertEqual(seeded.status, 0, seeded.said)
+        self.assertIn("revision 41", seeded.out)
+        self.assertEqual(self.main("floor", "plan", "0").status, 0, "a floor of 0 asks for nothing and is still an answer")
+        self.assertEqual([(entry["doc"], entry["floor"], entry["was"]) for entry in self.events("floor-raised")],
+                         [("ledger", 3, 3), ("plan", 40, 0), ("plan", 41, 41)])
+
+    def test_on_a_new_stand_a_floor_leaves_both_documents_empty_and_the_import_lands_above_it(self):
+        # The cut-over, in its order: the floor first (the platform's revision), then the import. A page
+        # left open on the platform's Money holds that revision; in Money it can then only be told to reload.
+        with _harness.Stand(clock=config.utcnow) as stand:
+            environ = process_environ(stand.environ)
+            for kind in ("ledger", "plan"):
+                done = run_ctl(environ, ["floor", kind, "40"])
+                self.assertEqual((done.status, done.err), (0, ""), done.said)
+                self.assertIn("%s: never saved (revision 0); floor 40 (was 0)." % kind, done.out)
+            empty = run_ctl(environ, ["empty"])
+            self.assertEqual((empty.status, empty.out), (0, "empty: both documents are at revision 0\n"),
+                             "a floor is not a document: the stand is still empty for whoever asks before filling it")
+            cookie = stand.session("mika")
+            for path in (LEDGER, PLAN):
+                self.assertEqual(stand.get(path, cookie=cookie).body, EMPTY)
+            # The old page's save, from the platform's revision: refused. The import, from revision 0: taken, as 41.
+            old_page = stand.put(LEDGER, {"base": 40, "doc": ledger(2)}, cookie=cookie)
+            self.assertEqual((old_page.status, old_page.json()["rev"]), (409, 0))
+            self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger(50)}, cookie=cookie).json(), {"rev": 41})
+            self.assertEqual(stand.put(LEDGER, {"base": 40, "doc": ledger(2)}, cookie=cookie).status, 409)
+            self.assertEqual(stand.ctl("empty").status, 1)
+            self.assertFalse(os.path.exists(os.path.join(stand.data_dir, "ledger", "NEVER_SAVED")))
+
+    def test_a_number_no_revision_can_be_is_2_and_nothing_is_changed(self):
+        before = files_under(self.stand.data_dir)
+        for number in ("-1", "1000000000000000", "9" * 60):
+            with self.subTest(number=number[:20]):
+                done = self.ctl("floor", "ledger", number) if number == "-1" else self.main("floor", "ledger", number)
+                self.assertEqual((done.status, done.out), (2, ""), done.said)
+                self.assertIn("refused", done.err)
+                self.assertIn("Nothing was changed.", done.err)
+                self.assertNoTraceback(done)
+        for arguments in (("floor",), ("floor", "ledger"), ("floor", "other", "5"), ("floor", "ledger", "five"),
+                          ("floor", "ledger", "5", "6"), ("floor", "ledger", "1_000"), ("floor", "ledger", "0x10"),
+                          ("floor", "ledger", "1e3"), ("floor", "ledger", "5.0"), ("floor", "5", "ledger")):
+            with self.subTest(arguments=arguments):
+                wrong = self.main(*arguments)
+                self.assertEqual((wrong.status, wrong.out), (2, ""))
+                self.assertIn("usage: ", wrong.err)
+        self.assertEqual(files_under(self.stand.data_dir), before)
+        self.assertEqual(self.events("floor-raised"), [])
+
+    def test_floor_on_a_damaged_document_is_done_and_says_its_revision_is_not_known(self):
+        truncate(self.path("ledger", "current.json"), 40)
+        done = self.ctl("floor", "ledger", "50")
+        self.assertEqual((done.status, done.err), (0, ""), done.said)
+        self.assertIn("ledger: its stored file is damaged or lost, so its revision is not known (run: ctl doctor); "
+                      "floor 50 (was 3).", done.out)
+        self.assertNoTraceback(done)
+        # ... and what is restored after it lands above the floor.
+        restored = self.main("restore", "ledger", SNAPSHOTS[0], typed="dev\n")
+        self.assertEqual(restored.status, 0, restored.said)
+        self.assertIn("revision 51", restored.out)
+        # A document whose whole directory has gone cannot take one: 1, and the directory is not made anew.
+        shutil.rmtree(self.path("plan"))
+        lost = self.ctl("floor", "plan", "5")
+        self.assertEqual((lost.status, lost.out), (1, ""), lost.said)
+        self.assertNoTraceback(lost)
+        self.assertFalse(os.path.exists(self.path("plan")))
+
+
+# ---------------------------------------------------------------------------
 # empty
 # ---------------------------------------------------------------------------
 
@@ -674,6 +884,20 @@ class PurgeTests(CtlCase):
         self.assertEqual((real.status, real.out), (2, ""))
         self.assertEqual(files_under(self.stand.data_dir), before)
 
+    def test_more_days_than_a_hundred_years_is_2_and_deletes_nothing(self):
+        before = files_under(self.stand.data_dir)
+        for days in ("36501", "3660000", "99999999999999999999"):
+            with self.subTest(days=days):
+                done = self.ctl("purge-snapshots", "--older-than-days", days)
+                self.assertEqual((done.status, done.out), (2, ""), done.said)
+                self.assertIn("from 0 to 36500", done.err)
+                self.assertNoTraceback(done)
+        self.assertEqual(files_under(self.stand.data_dir), before)
+        self.assertEqual(self.events("snapshots-purged"), [])
+        most = self.ctl("purge-snapshots", "--older-than-days", "36500")
+        self.assertEqual((most.status, most.err), (0, ""), most.said)
+        self.assertEqual(len(self.snapshots("ledger")), 3, "nothing here is a hundred years old")
+
     def test_a_number_of_days_no_calendar_reaches_is_answered_and_not_a_crash(self):
         # Nothing is older than ten thousand years: either "that is no number of days" (2) or "nothing
         # was that old" (0) is an answer. A Python traceback is not.
@@ -780,6 +1004,113 @@ class VerifyAndDoctorTests(CtlCase):
             self.assertIn("sessions: unreadable", done.out)
             self.assertEqual(files_under(self.stand.data_dir), before, arguments)
         self.assertEqual(read(self.path("auth", "sessions.json")), garbage)
+
+
+# ---------------------------------------------------------------------------
+# What deploy/bin/money-restore reads off this command line
+# ---------------------------------------------------------------------------
+
+#: The script's own test for "the accounts file of the directory that was moved aside reads":
+#: ``grep -Eq '^[[:space:]]*accounts: [0-9]+ \('`` on what ``ctl verify`` printed. A count means it reads.
+ACCOUNTS_READ = re.compile(r"(?m)^[ \t]*accounts: [0-9]+ \(")
+
+
+class RestoreScriptTests(CtlCase):
+    """A whole-stand restore is a shell script, and what it decides it decides from these words and
+    statuses. A rewording here would change what a restore does to the accounts without a test of the
+    service noticing - so they are held here, beside the code that prints them (the script's own tests
+    are ``checks/test_deploy.py``)."""
+
+    def setUp(self):
+        super().setUp()
+        history(self.stand.data_dir, "ledger", [ledger(30), ledger(31)])
+        self.stand.set_password("mika")
+        self.stand.invite("misha")
+
+    def copy(self):
+        """The data directory as the restore finds it, moved aside."""
+        parent = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, parent, True)
+        return shutil.copytree(self.stand.data_dir, os.path.join(parent, "prod.before-restore"))
+
+    def nothing_set(self):
+        """The environment of the throwaway container the script asks: no ``MONEY_*`` setting at all."""
+        return {name: value for name, value in self.environ.items() if not name.startswith("MONEY_")}
+
+    def test_verify_prints_a_count_of_accounts_exactly_when_the_accounts_file_reads(self):
+        sound = self.copy()
+        before = files_under(sound)
+        done = run_ctl(self.nothing_set(), ["verify", sound])
+        self.assertEqual(done.status, 0, done.said)
+        self.assertRegex(done.out, ACCOUNTS_READ)
+        self.assertIn("  accounts: 3 (with a password: 1, disabled: 0, pending links: 1)\n", done.out)
+        self.assertEqual(files_under(sound), before, "the directory is mounted read-only for this: nothing is written")
+        # A damaged document makes verify end with 1 - and says nothing about the accounts, which still read.
+        # So the script goes by the line and not by the exit status.
+        copy = self.copy()
+        truncate(os.path.join(copy, "ledger", "current.json"), 50)
+        done = self.main("verify", copy)
+        self.assertEqual(done.status, 1, done.said)
+        self.assertRegex(done.out, ACCOUNTS_READ)
+        unreadable = {
+            "not JSON": lambda auth: write(os.path.join(auth, "users.json"), b'{"v":1,'),
+            "cut short": lambda auth: truncate(os.path.join(auth, "users.json"), 40),
+            "empty": lambda auth: write(os.path.join(auth, "users.json"), b""),
+            "gone, where accounts had been written": lambda auth: os.unlink(os.path.join(auth, "users.json")),
+            "gone with its whole directory": lambda auth: shutil.rmtree(auth),
+        }
+        for what, harm in unreadable.items():
+            with self.subTest(accounts=what):
+                copy = self.copy()
+                harm(os.path.join(copy, "auth"))
+                done = self.main("verify", copy)
+                self.assertEqual(done.status, 1, done.said)
+                self.assertNotRegex(done.out, ACCOUNTS_READ, "the restore would keep an accounts file that does not read")
+                self.assertIn("  accounts: DAMAGED\n", done.out)
+        # No accounts were ever written there: nothing to keep either, and it is not called a count.
+        copy = self.copy()
+        os.unlink(os.path.join(copy, "auth", "users.json"))
+        os.unlink(os.path.join(copy, "auth", "USERS_WRITTEN"))
+        done = self.main("verify", copy)
+        self.assertNotRegex(done.out, ACCOUNTS_READ)
+        self.assertIn("  accounts: no users.json", done.out)
+
+    def test_an_image_is_asked_whether_it_knows_floor_and_retire_links_through_their_own_help(self):
+        # `python -m moneyd.ctl floor --help` and `... user retire-links --help` in a container with no
+        # setting and no data: 0 means the image can prepare a restore, anything else that it cannot.
+        environ = self.nothing_set()
+        before = files_under(self.stand.data_dir)
+        for words in (("floor",), ("user", "retire-links")):
+            with self.subTest(words=words):
+                done = run_ctl(environ, list(words) + ["--help"])
+                self.assertEqual((done.status, done.err), (0, ""), done.said)
+                self.assertIn("usage: ", done.out)
+        # An image from before the two words existed says so with a status that is not 0 - and so does
+        # this one, for a word it does not have. The script then refuses before anything is moved.
+        for words in (("no-such-word",), ("user", "no-such-word")):
+            with self.subTest(words=words):
+                done = run_ctl(environ, list(words) + ["--help"])
+                self.assertEqual((done.status, done.out), (2, ""), done.said)
+        self.assertEqual(files_under(self.stand.data_dir), before, "asking changes nothing")
+
+    def test_the_restores_three_commands_end_with_0_also_when_there_is_nothing_for_them_to_do(self):
+        # The script runs each without looking first, and takes any other status for a restore that
+        # failed: it then puts the old directory back.
+        stand = self.stand
+        for kind in store.KINDS:
+            with self.subTest(floor=kind):
+                self.assertEqual(self.ctl("floor", kind, "0").status, 0)
+        self.assertEqual([(entry["doc"], entry["floor"]) for entry in self.events("floor-raised")],
+                         [("ledger", 2), ("plan", 0)], "and each leaves its line, so a restore is seen on /data")
+        first, again = self.ctl("user", "retire-links"), self.ctl("user", "retire-links")
+        self.assertEqual((first.status, again.status), (0, 0))
+        self.assertEqual(first.out.splitlines()[0], "misha: its pending one-time link is retired; issue a new one with: user invite misha")
+        self.assertEqual(again.out.splitlines()[0], "no one-time link was pending; nothing was changed")
+        listed = self.ctl("user", "list")
+        self.assertEqual(listed.status, 0)
+        self.assertEqual(listed.out.splitlines()[0].split()[:2], ["login", "name"])
+        self.assertEqual(first.out.splitlines()[1:], listed.out.splitlines(), "the list the script prints after either")
+        self.assertEqual(stand.get(LEDGER, cookie=stand.session("mika")).status, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -937,6 +1268,31 @@ class ServerStandTests(unittest.TestCase):
         self.assertEqual((purged.status, purged.err), (0, ""), purged.said)
         self.assertEqual(os.listdir(os.path.join(directory, "ledger", "snapshots")), [])
         self.assertEqual(store.DocStore(directory, "ledger").revision(), 3, "what is current is never purged")
+
+    def test_floor_and_retire_links_are_taken_on_prod_they_lose_nothing(self):
+        # They are what a whole-stand restore of prod runs before the stand starts: nobody listens yet.
+        environ, directory = self.stand("prod")
+        documents = {name: content for name, content in files_under(directory).items() if name.endswith("current.json")}
+        floor = run_ctl(environ, ["floor", "ledger", "500"], scrypt=True)
+        self.assertEqual((floor.status, floor.err), (0, ""), floor.said)
+        self.assertEqual(floor.out, "ledger: revision 3; floor 500 (was 3). The next save or restore becomes revision 501.\n")
+        both = run_ctl(environ, ["floor", "plan", "0"], scrypt=True)
+        self.assertEqual((both.status, both.err), (0, ""), both.said)
+        self.assertIn("plan: revision 2; floor 2 (it was that already; nothing was changed)", both.out)
+        self.assertEqual({name: content for name, content in files_under(directory).items() if name.endswith("current.json")},
+                         documents, "no document was touched")
+        self.assertEqual(store.DocStore(directory, "ledger").save(3, ledger(40), "tests").rev, 501)
+        invited = run_ctl(environ, ["user", "invite", "misha"], terminal="stdout", scrypt=True)
+        self.assertEqual(invited.status, 0, invited.said)
+        self.assertEqual(invited.out.splitlines()[-2], "login: misha")
+        retired = run_ctl(environ, ["user", "retire-links"], scrypt=True)
+        self.assertEqual((retired.status, retired.err), (0, ""), retired.said)
+        self.assertTrue(retired.out.startswith("misha: its pending one-time link is retired"))
+        users = json.loads(read(os.path.join(directory, "auth", "users.json")).decode("ascii"))["users"]
+        self.assertIsNone(users["misha"]["invite"])
+        self.assertEqual({record["invite"] for record in users.values()}, {None})
+        refused = run_ctl(environ, ["floor", "ledger", "-1"], scrypt=True)
+        self.assertEqual((refused.status, refused.out), (2, ""))
 
     def test_print_is_refused_outside_dev_whatever_standard_output_is(self):
         for name, ways in (("prod", ({}, {"terminal": "stdout"})), ("test", ({"terminal": "stdout"},))):

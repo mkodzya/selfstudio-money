@@ -9,8 +9,12 @@ session never lives anywhere in git. These tests read the repository as it is an
 * a stand file (``deploy/stands/*.env``) gains a key the build spec does not know, or
   anything that looks like a secret;
 * ``moneyd`` imports the laptop server, or a test file forgets ``tests/_safety.py``;
-* a frozen file changed: the page, its readers, its checks and its made-up studio are pinned
-  here by sha256 (the laptop tool's own two files: ``tests/test_laptop_frozen.py``).
+* a vendored reader changed: the three files of ``vendor/`` are pinned here by sha256 (the
+  laptop tool's own two files: ``tests/test_laptop_frozen.py``);
+* the page, its checks or its made-up studio are gone. They are **not** pinned: the page lives
+  in this repository now and changes with every release of it. What holds the page is its own
+  checks (``scripts/money-checks.mjs``, the ``page-checks`` job of CI) and the browser run
+  against the real service (``checks/stand-smoke.mjs``).
 
     python3 -m unittest tests.test_repo_hygiene
 
@@ -101,8 +105,8 @@ class TrackedFilesTests(unittest.TestCase):
     def test_no_file_is_named_like_a_ledger_a_copy_of_one_or_a_stands_state(self):
         named = re.compile(
             r"(db|cash)\.json|(db|cash)-\d{4}-\d{2}-\d{2}\.json|(cash-)?before-shrink-.*\.json"     # the laptop tool's
-            r"|current\.json.*|(day|shrink|restore)-.*\.json\.gz|EVER_SAVED|STAND"                  # a stand's documents
-            r"|users\.json.*|sessions\.json.*|security\.log.*"                                      # a stand's accounts
+            r"|current\.json.*|(day|shrink|restore)-.*\.json\.gz|EVER_SAVED|NEVER_SAVED|STAND"      # a stand's documents
+            r"|users\.json.*|USERS_WRITTEN|sessions\.json.*|security\.log.*"                        # a stand's accounts
             r"|money-(prod|test)-.*\.tar\.gz(\.part)?")                                             # a stand's backups
         for name in self.tracked:
             self.assertIsNone(named.fullmatch(os.path.basename(name)), "%s is tracked: it is data, not code" % name)
@@ -639,30 +643,23 @@ class ApartTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Frozen files
+# The page and what it loads
 # ---------------------------------------------------------------------------
 
-#: sha256 of each frozen file as it stood on 7 October 2026 (unchanged since commits 6ef1824 and 0dac689).
-PAGE_AND_ITS_CHECKS = {
-    "index.html": "2bc60ec7e0678bef7883d0ca39aa04fb812e1a69b4beae1a837644c7f177d0f8",
-    "scripts/money-checks.mjs": "7d79133ecaa3908471f4e48583b8fabf35f0f367abca384b47bddaac73af4b8a",
-    "scripts/money-demo.mjs": "999670980bd74609f423537c8fcad14a7d5e938fa63411df99966c636dc05fb0",
-}
+#: The page, its checks and the generator of its made-up studio. They are in this repository and are
+#: NOT pinned: the page was handed over whole on 7 October 2026 and changes here with every release
+#: of it, so a pin would be replaced in every such commit and hold nothing. They have to be there:
+#: the service serves the first, and CI's page-checks job runs only while all three exist - a file
+#: that went missing would switch the page's own checks off without a word.
+PAGE_AND_ITS_CHECKS = ("index.html", "scripts/money-checks.mjs", "scripts/money-demo.mjs")
+
+#: sha256 of each vendored reader as it stood on 7 October 2026.
 VENDOR = {
     "vendor/pdf.min.js": "5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946",
     "vendor/pdf.worker.min.js": "feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b",
     "vendor/xlsx.full.min.js": "c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99",
 }
 
-HANDED_OVER = (
-    "\n\n%s is not the file that was handed over (pinned %s, found %s)."
-    "\nindex.html, scripts/money-checks.mjs and scripts/money-demo.mjs are FROZEN: another session is"
-    "\nrewriting them and hands all three over whole, in one commit."
-    "\n- If this IS that hand-over commit: replace the three pins in tests/test_repo_hygiene.py with the new"
-    "\n  sha256 values in the same commit, and say so in its message."
-    "\n- If it is anything else: the file was edited here by mistake, and the hand-over will overwrite"
-    "\n  the edit. Put the file back as git has it."
-)
 NOT_EDITED = (
     "\n\n%s is not the vendored file (pinned %s, found %s)."
     "\nvendor/ holds the readers the page loads (pdf.js, SheetJS); the hosted work does not edit them, and"
@@ -677,12 +674,17 @@ def sha256_of(name: str) -> str:
 
 
 class FrozenFilesTests(unittest.TestCase):
-    def test_the_page_its_checks_and_its_made_up_studio_are_byte_for_byte_what_was_handed_over(self):
-        for name, pin in PAGE_AND_ITS_CHECKS.items():
+    def test_the_page_its_checks_and_its_made_up_studio_are_there_and_are_not_pinned(self):
+        for name in PAGE_AND_ITS_CHECKS:
             with self.subTest(file=name):
-                self.assertTrue(os.path.isfile(path_of(*name.split("/"))), "%s is gone" % name)
-                found = sha256_of(name)
-                self.assertEqual(found, pin, HANDED_OVER % (name, pin, found))
+                path = path_of(*name.split("/"))
+                self.assertTrue(os.path.isfile(path) and not os.path.islink(path),
+                                "%s is gone. The service serves the page, and CI runs the page's own checks only "
+                                "while index.html and both scripts exist: without it they are skipped silently." % name)
+                self.assertGreater(os.path.getsize(path), 1000, "%s is all but empty" % name)
+        # Nothing in this file holds the page to a sha256 any more - a pin of a file that changes with
+        # every release is replaced in every such commit and so guards nothing.
+        self.assertFalse(set(PAGE_AND_ITS_CHECKS) & set(VENDOR))
 
     def test_the_vendored_readers_are_byte_for_byte_the_pinned_files(self):
         for name, pin in VENDOR.items():
@@ -694,7 +696,7 @@ class FrozenFilesTests(unittest.TestCase):
         self.assertEqual(sorted("vendor/" + name for name in os.listdir(path_of("vendor"))), sorted(VENDOR))
 
     def test_every_pin_is_a_whole_sha256(self):
-        for name, pin in list(PAGE_AND_ITS_CHECKS.items()) + list(VENDOR.items()):
+        for name, pin in VENDOR.items():
             self.assertRegex(pin, r"^[0-9a-f]{64}$", name)
 
 

@@ -775,6 +775,72 @@ class AtomicTests(StoreCase):
             self.open("plan").save(0, plan(banks=1), "mika")
         self.assertFalse(os.path.exists(self.dir))
 
+    def unsyncable(self, *parts):
+        """``store._fsync_dir`` failing with EIO for one directory of the stand: what a dying disk does last."""
+        target = os.path.realpath(self.path(*parts))
+        real = store._fsync_dir
+
+        def fsync_dir(directory):
+            if os.path.realpath(directory) == target:
+                raise OSError(errno.EIO, "Input/output error")
+            return real(directory)
+        return mock.patch.object(store, "_fsync_dir", fsync_dir)
+
+    def test_a_save_that_is_in_place_but_whose_directory_could_not_be_synced_is_answered_as_the_save_it_is(self):
+        # Once the rename has happened every reader gets the new revision. Answered 507 "what was stored is
+        # untouched", the page keeps its old base, and its next save is 409: it stops saving for good.
+        journal = log.SecurityLog(self.dir, self.clock)
+        document = self.open("ledger", security_log=journal)
+        document.save(0, ledger(3, "stored"), "mika")
+        with self.unsyncable("ledger"):
+            saved = document.save(1, ledger(3, "in place"), "misha")
+            self.assertEqual((saved.rev, saved.snapshot), (2, "day-2026-10-07-rev000001.json.gz"))
+            for reader in (document, self.open("ledger")):
+                self.assertEqual(reader.read().body, envelope(2, ledger(3, "in place")))
+            self.assertEqual(document.save(2, ledger(3, "the same page, its next edit"), "misha").rev, 3)
+        self.assertEqual(document.save(3, ledger(3, "and once the disk is well again"), "misha").rev, 4)
+        said = [entry for entry in reversed(journal.tail(20)) if entry["event"] == "storage-unsynced"]
+        self.assertEqual([(entry["file"], entry["rev"], entry["by"]) for entry in said],
+                         [("ledger", 2, "misha"), ("ledger", 3, "misha")])
+        self.assertEqual(read_file(self.path("ledger", "EVER_SAVED")), b"4\n")
+        self.assertNoLitter()
+        self.assertEqual(store.verify(self.dir)["problems"], [])
+
+    def test_a_restore_that_is_in_place_but_not_synced_is_a_restore_too(self):
+        journal = log.SecurityLog(self.dir, self.clock)
+        document = self.open("ledger", security_log=journal)
+        document.save(0, ledger(3, "monday"), "mika")
+        document.save(1, ledger(3, "tuesday"), "mika")
+        with self.unsyncable("ledger"):
+            done = document.restore("day-2026-10-07-rev000001.json.gz", "ctl")
+        self.assertEqual((done.rev, document.read().body), (3, envelope(3, ledger(3, "monday"))))
+        self.assertEqual([entry["event"] for entry in reversed(journal.tail(20))], ["restore", "storage-unsynced"])
+
+    def test_a_copy_whose_directory_could_not_be_synced_stops_the_save_and_the_document_is_untouched(self):
+        # Here "untouched" is true: what the save would replace has no copy that is known to last.
+        self.ledger.save(0, ledger(30, "stored"), "mika")
+        stored = read_file(self.ledger.path)
+        with self.unsyncable("ledger", "snapshots"):
+            with self.assertRaises(store.StorageFailed) as failed:
+                self.ledger.save(1, ledger(2, "would have replaced it"), "mika")
+        self.assertEqual((failed.exception.status, failed.exception.code), (507, "storage_failed"))
+        self.assertEqual((read_file(self.ledger.path), self.ledger.read().rev), (stored, 1))
+        self.assertEqual(self.ledger.save(1, ledger(30, "next"), "mika").rev, 2)
+
+    def test_a_write_that_fails_before_the_rename_is_still_the_plain_error_and_not_unsynced(self):
+        target = self.path("plan", "probe.json")
+        os.mkdir(self.path("plan", "blocked"))
+        with self.assertRaises(OSError) as refused:
+            store.atomic_write(os.path.join(self.path("plan", "blocked"), "no-such-directory", "x"), (b"1",))
+        self.assertNotIsInstance(refused.exception, store.Unsynced)
+        with self.unsyncable("plan"):
+            with self.assertRaises(store.Unsynced) as unsynced:
+                store.atomic_write(target, (b"in place",))
+        self.assertIsInstance(unsynced.exception, OSError)
+        self.assertEqual(unsynced.exception.errno, errno.EIO)
+        self.assertEqual(read_file(target), b"in place")
+        self.assertEqual([name for name in os.listdir(self.path("plan")) if ".tmp-" in name], [])
+
 
 # ---------------------------------------------------------------------------
 # Fail closed (BUILD-SPEC 2.5; docs/security.md "Damaged state fails closed")
@@ -839,6 +905,102 @@ class MarkerTests(StoreCase):
                 self.assertEqual(read_file(self.ledger.path), good[:length])
         write_new(self.ledger.path, good)
         self.assertEqual(self.ledger.read().rev, 2)
+
+
+class LostDirectoryTests(StoreCase):
+    """The marker lies inside the directory it vouches for. When the whole directory goes - moved aside by
+    hand, an unpack that stopped half-way - what is left to tell "lost" from "never saved" is that the
+    stand has run before: ``STAND`` is written only after both documents' directories are made."""
+
+    STAND = "prod"
+
+    def test_a_document_whose_directory_has_gone_is_lost_and_never_revision_0(self):
+        for rev in range(3):
+            self.ledger.save(rev, ledger(30, "save %d" % (rev + 1)), "mika")
+        self.plan.save(0, plan(banks=1), "mika")
+        aside = self.path("ledger.moved-aside")
+        os.rename(self.path("ledger"), aside)
+        for document in (self.ledger, self.open("ledger")):
+            for attempt in (document.read, document.revision, lambda: document.save(0, ledger(1), "mika"),
+                            lambda: document.save(3, ledger(1), "mika"), lambda: document.raise_floor(9),
+                            lambda: document.restore("day-2026-10-07-rev000001.json.gz", "ctl")):
+                with self.assertRaises(store.Damaged) as lost:
+                    attempt()
+                self.assertEqual((lost.exception.status, lost.exception.code), (503, "storage_damaged"))
+                self.assertIn("directory is missing", lost.exception.message)
+                self.assertFalse(os.path.lexists(self.path("ledger")), "the lost directory was made anew")
+            said = document.status()
+            self.assertEqual((said["state"], said["directory"], said["rev"]), ("damaged", False, None))
+        store.prepare_data_dir(self.dir, "prod")            # a restart: it goes on, and makes nothing anew
+        self.assertFalse(os.path.lexists(self.path("ledger")), "a restart made the lost directory anew")
+        with self.assertRaises(store.Damaged):
+            store.open_stores(config.Settings.from_env(_harness.dev_environ(self.dir, 8123)), self.clock)["ledger"].read()
+        report = store.doctor(self.dir, "prod", self.clock)
+        self.assertEqual(len(report["problems"]), 1, report["problems"])
+        self.assertRegex(report["problems"][0], r"^ledger: .*directory is missing.*put the directory back from a backup")
+        self.assertNotIn("ctl restore", report["problems"][0], "its copies went with the directory")
+        self.assertEqual(report["documents"]["ledger"]["restore"], None)
+        self.assertEqual((self.plan.read().rev, self.plan.save(1, plan(banks=2), "mika").rev), (1, 2))
+        os.rename(aside, self.path("ledger"))               # put back: all of it is there again
+        self.assertEqual((self.ledger.read().rev, self.ledger.floor(), len(self.names())), (3, 3, 1))
+        self.assertEqual(store.doctor(self.dir, "prod", self.clock)["problems"], [])
+
+    def test_to_begin_a_lost_document_anew_a_person_makes_its_directory_by_hand(self):
+        self.ledger.save(0, ledger(3), "mika")
+        shutil.rmtree(self.path("ledger"))
+        with self.assertRaises(store.Damaged):
+            self.ledger.read()
+        os.mkdir(self.path("ledger"))                       # the person's call, said with one command
+        self.assertEqual((self.ledger.read().body, self.ledger.status()["state"]), (EMPTY, "empty"))
+        store.prepare_data_dir(self.dir, "prod")            # the next start makes the place for its copies
+        self.assertTrue(os.path.isdir(self.path("ledger", "snapshots")))
+        self.assertEqual(self.ledger.save(0, ledger(1), "mika").rev, 1)
+
+    def test_copies_without_a_document_and_without_a_marker_are_a_lost_document(self):
+        self.ledger.save(0, ledger(30, "monday"), "mika")
+        self.ledger.save(1, ledger(30, "tuesday"), "mika")              # day-2026-10-07-rev000001
+        os.unlink(self.ledger.path)
+        os.unlink(self.path("ledger", "EVER_SAVED"))
+        for document in (self.ledger, self.open("ledger")):
+            for attempt in (document.read, lambda: document.save(0, ledger(1), "mika")):
+                with self.assertRaises(store.Damaged) as lost:
+                    attempt()
+                self.assertIn("copies of it are there", lost.exception.message)
+        self.assertFalse(os.path.exists(self.ledger.path))
+        problems = store.doctor(self.dir, "prod", self.clock)["problems"]
+        self.assertIn("ctl restore ledger day-2026-10-07-rev000001.json.gz", " ".join(problems))
+        self.ledger.restore("day-2026-10-07-rev000001.json.gz", "ctl")
+        self.assertEqual(json.loads(self.ledger.read().body.decode("utf-8"))["doc"]["note"], "monday")
+        # A file that is no copy does not make a document lost: a write that died, a stranger's notes.
+        write_new(self.path("plan", "snapshots", "day-2026-10-07-rev000001.json.gz.tmp-4242-deadbeef"), b"half")
+        write_new(self.path("plan", "snapshots", "notes.txt"), b"x")
+        self.assertEqual(self.plan.read().body, EMPTY)
+
+    def test_where_no_stand_has_run_a_missing_directory_is_a_document_never_saved(self):
+        # A DocStore on a directory of its own, as a tool or a test uses it: nothing was ever laid out here.
+        bare = tempfile.mkdtemp(prefix="money-store-")
+        self.addCleanup(shutil.rmtree, bare, True)
+        document = store.DocStore(bare, "ledger", self.clock)
+        self.assertEqual((document.read().body, document.status()["state"], os.listdir(bare)), (EMPTY, "empty", []))
+        self.assertEqual(document.save(0, ledger(2), "mika").rev, 1)
+        self.assertEqual(os.listdir(bare), ["ledger"])
+        self.assertFalse(store.has_run(bare))
+        self.assertTrue(store.has_run(self.dir))
+
+    def test_a_data_directory_that_has_gone_is_not_an_empty_document(self):
+        # A volume that is no longer mounted under a running server: every document would read as revision 0.
+        self.ledger.save(0, ledger(3), "mika")
+        moved = self.dir + ".unmounted"
+        os.rename(self.dir, moved)
+        self.addCleanup(shutil.rmtree, moved, True)
+        for document in (self.ledger, self.plan, self.open("plan")):
+            with self.assertRaises(store.Damaged) as gone:
+                document.read()
+            self.assertIn("data directory is missing", gone.exception.message)
+            self.assertEqual(document.status()["state"], "damaged")
+        self.assertFalse(os.path.exists(self.dir))
+        os.rename(moved, self.dir)
+        self.assertEqual((self.ledger.read().rev, self.plan.read().body), (1, EMPTY))
 
 
 class DamagedDoorTests(DoorCase):
@@ -914,6 +1076,24 @@ class DamagedDoorTests(DoorCase):
         self.assertShut("missing")
         self.assertFalse(os.path.exists(self.file()))
         self.assertTrue(os.path.isfile(self.file(name="EVER_SAVED")))
+
+    def test_a_document_whose_whole_directory_has_gone_is_503_and_the_directory_is_not_made_anew(self):
+        # docs/api.md: 503 when a document "is missing although the document has been saved before". The
+        # marker that says so went with the directory; the stand having run before says it instead.
+        directory = os.path.dirname(self.file())
+        aside = directory + ".moved-aside"
+        os.rename(directory, aside)
+        self.assertShut("its directory gone")
+        self.assertFalse(os.path.lexists(directory), "a request made the lost directory anew")
+        sick = self.stand.ctl("doctor")
+        self.assertEqual(sick.status, 1)
+        self.assertIn("ledger: DAMAGED", sick.out)
+        self.assertIn("put the directory back from a backup", sick.out)
+        self.assertEqual(self.stand.ctl("empty").status, 1, "a lost ledger is not an empty stand")
+        self.assertFalse(os.path.lexists(directory), "ctl made the lost directory anew")
+        os.rename(aside, directory)
+        self.assertEqual(self.get(LEDGER).body, self.good)
+        self.assertSaved(self.put(LEDGER, 3, ledger(2, "whole again")), 4)
 
     def test_a_folder_or_an_unreadable_file_in_its_place_is_503_too(self):
         os.unlink(self.file())
@@ -999,6 +1179,65 @@ class DoctorTests(DoorCase):
         self.assertIn("ctl restore ledger day-2026-10-09-rev000004.json.gz", sick.out,
                       "doctor sends the operator back to the document that the restore had just replaced")
         self.assertEqual(self.stand.stores["ledger"].snapshots()[0].name, "day-2026-10-09-rev000004.json.gz")
+        # Newest first is highest revision first, everywhere the order is shown or used.
+        document = self.stand.stores["ledger"]
+        self.assertEqual([snapshot.rev for snapshot in document.snapshots()], [4, 3, 2, 1])
+        said = document.status()["snapshots"]
+        self.assertEqual((said["newest"], said["oldest"]),
+                         ("day-2026-10-09-rev000004.json.gz", "day-2026-10-07-rev000001.json.gz"))
+
+    def spoil(self, name):
+        """Make a snapshot one that does not unpack - a disk that lost part of it, a copy cut short."""
+        write_new(self.file(name=os.path.join("snapshots", name)), b"\x1f\x8b not what gzip wrote")
+
+    def test_doctor_passes_over_a_snapshot_that_does_not_read_back_and_says_so(self):
+        # docs/deploy.md: when a document answers 503, restore what doctor names. A copy that does not
+        # unpack is refused by restore (bad_snapshot, nothing changed) - naming it leaves the operator
+        # with a command that does nothing and no word about the copy that would have worked.
+        self.assertSaved(self.put(LEDGER, 0, ledger(30)), 1)
+        self.assertSaved(self.put(LEDGER, 1, ledger(30)), 2)                # day-2026-10-07-rev000001
+        self.stand.clock.tick(days=1)
+        self.assertSaved(self.put(LEDGER, 2, ledger(30)), 3)                # day-2026-10-08-rev000002
+        self.stand.clock.tick(hours=1)
+        self.assertSaved(self.put(LEDGER, 3, ledger(2)), 4)                 # shrink-20261008T130000Z-rev000003
+        newest, older, oldest = ("shrink-20261008T130000Z-rev000003.json.gz", "day-2026-10-08-rev000002.json.gz",
+                                 "day-2026-10-07-rev000001.json.gz")
+        self.spoil(newest)
+        self.damage()
+        before = tree(self.stand.data_dir)
+        sick = self.stand.ctl("doctor")
+        self.assertEqual(sick.status, 1)
+        self.assertIn("The newest snapshot that reads back is %s" % older, sick.out)
+        self.assertIn("ctl restore ledger %s" % older, sick.out)
+        self.assertNotIn("ctl restore ledger %s" % newest, sick.out, "doctor names a copy that restore refuses")
+        self.assertRegex(sick.out, r"passed over, because it does not read back: %s\b" % newest.replace(".", r"\."))
+        report = store.doctor(self.stand.data_dir, "dev", self.stand.clock)["documents"]["ledger"]
+        self.assertEqual((report["restore"], report["passedOver"]), (older, [newest]))
+        self.assertEqual(report["snapshots"]["newest"], newest, "the list of copies is as it is; only the advice skips")
+        self.assertEqual(tree(self.stand.data_dir), before, "a doctor looks; it does not treat")
+        # The command as printed is the one that works.
+        self.assertEqual(self.stand.ctl("restore", "ledger", newest, stdin="dev\n").status, 1)
+        self.assertEqual(self.stand.ctl("restore", "ledger", older, stdin="dev\n").status, 0)
+        self.assertEqual(self.get(LEDGER).json()["rev"], 5)
+
+        self.spoil(older)                                                    # two do not read back: both are named
+        self.damage()
+        sick = self.stand.ctl("doctor")
+        self.assertIn("ctl restore ledger %s" % oldest, sick.out)
+        self.assertRegex(sick.out, r"passed over, because they do not read back: [^)]*%s[^)]*%s" % (
+            newest.replace(".", r"\."), older.replace(".", r"\.")))
+
+    def test_doctor_says_so_when_no_snapshot_reads_back(self):
+        self.assertSaved(self.put(LEDGER, 0, ledger(30)), 1)
+        self.assertSaved(self.put(LEDGER, 1, ledger(30)), 2)                # day-2026-10-07-rev000001
+        self.spoil("day-2026-10-07-rev000001.json.gz")
+        self.damage()
+        sick = self.stand.ctl("doctor")
+        self.assertEqual(sick.status, 1)
+        self.assertIn("None of its 1 snapshot(s) reads back (day-2026-10-07-rev000001.json.gz)", sick.out)
+        self.assertNotIn("ctl restore", sick.out)
+        report = store.doctor(self.stand.data_dir, "dev", self.stand.clock)["documents"]["ledger"]
+        self.assertEqual((report["restore"], report["passedOver"]), (None, ["day-2026-10-07-rev000001.json.gz"]))
 
 
 # ---------------------------------------------------------------------------
@@ -1150,6 +1389,39 @@ class ShrinkCopyTests(StoreCase):
         self.assertNotIn(CANARY, json.dumps(journal.tail(50)))
         self.assertNotIn(CANARY, read_file(journal.path).decode("utf-8"))
 
+    def test_a_save_that_empties_the_document_as_the_first_save_of_a_day_leaves_its_line_too(self):
+        # 08:00 UTC, nobody has saved yet today, and a page that loaded badly writes tx: [] over the ledger.
+        # The day's copy keeps what it replaced - and the journal on /data must say when, by whom, and
+        # which copy brings it back. For founders at UTC+4 every first save after 04:00 is this case.
+        journal = log.SecurityLog(self.dir, self.clock)
+        document = self.open("ledger", security_log=journal)
+        shrunk = lambda: [entry for entry in reversed(journal.tail(50)) if entry["event"] == "doc-shrunk"]
+        document.save(0, ledger(1500, "the whole ledger"), "mika")
+        stored = read_file(document.path)
+        self.clock.set(datetime.datetime(2026, 10, 8, 8, 0, tzinfo=UTC))
+        emptied = document.save(1, ledger(0), "vanya")
+        self.assertEqual(emptied.snapshot, "day-2026-10-08-rev000001.json.gz")
+        self.assertEqual(self.unpack(emptied.snapshot), stored)
+        self.assertEqual([(entry["doc"], entry["by"], entry["rev"], entry["rows"], entry["fromRows"], entry["snapshot"])
+                          for entry in shrunk()], [("ledger", "vanya", 2, 0, 1500, "day-2026-10-08-rev000001.json.gz")])
+        self.assertEqual(shrunk()[0]["t"], "2026-10-08T08:00:00Z")
+        # The first save of a day that drops nothing much is no line, as on any other save.
+        self.clock.tick(days=1)
+        document.save(2, ledger(30), "mika")
+        self.clock.tick(days=1)
+        self.assertEqual(document.save(3, ledger(16), "mika").snapshot, "day-2026-10-10-rev000003.json.gz")
+        self.assertEqual(len(shrunk()), 1, "16 of 30 rows left is editing")
+        self.clock.tick(days=1)
+        document.save(4, ledger(7), "mika")                 # 7 of 16: under twenty rows nothing is "most of it"
+        self.assertEqual(len(shrunk()), 1)
+        # And the plan, whose rows are in five lists.
+        plans = self.open("plan", security_log=journal)
+        plans.save(0, plan(banks=11, team=10), "misha")
+        self.clock.tick(days=1)
+        self.assertRegex(plans.save(1, plan(banks=10), "misha").snapshot, r"^day-2026-10-12-rev000001\.json\.gz$")
+        self.assertEqual([(entry["doc"], entry["rows"], entry["fromRows"]) for entry in shrunk()],
+                         [("ledger", 0, 1500), ("plan", 10, 21)])
+
 
 # ---------------------------------------------------------------------------
 # Retention: newest 90 day copies, newest 50 before-shrink copies (BUILD-SPEC 2.8)
@@ -1239,8 +1511,51 @@ class PurgeTests(StoreCase):
         rev = document.revision()
         self.assertEqual(document.save(rev, ledger(3), "mika").rev, rev + 1, "and the document goes on being saved")
 
-    def test_what_was_typed_on_test_leaves_the_document_the_next_night_and_every_copy_by_the_third(self):
-        # BUILD-SPEC 2.11: every night at 00:10 UTC the stand is reseeded and `purge-snapshots --older-than-days 2` runs.
+    def test_what_was_put_on_test_is_out_of_the_document_and_of_every_copy_after_the_next_nights_reseed(self):
+        # The night as deploy/bin/money-seed-test runs it: at 00:10 UTC the stand is reseeded, and then
+        # `purge-snapshots --older-than-days 0` takes every snapshot - the day's copy the seed has just made
+        # included, which is exactly what was typed or uploaded since the night before. So "a day at most"
+        # (docs/security.md, docs/deploy.md) is true of the document and of every copy of it.
+        document = self.ledger
+        seed = lambda: json.dumps({"tx": list(range(60)), "seeded": self.clock().isoformat()})
+
+        def night(day):
+            self.clock.set(datetime.datetime(2026, 10, day, 0, 10, tzinfo=UTC))
+            document.save(document.revision(), seed(), "ctl")
+            return document.purge(0, "test")
+
+        def on_disk():
+            """Every file of the stand that holds the statement, wherever it lies and however it is packed."""
+            found = []
+            for base, _folders, files in os.walk(self.dir):
+                for name in files:
+                    data = read_file(os.path.join(base, name))
+                    if name.endswith(".gz"):
+                        data = gzip.decompress(data)
+                    if CANARY.encode("ascii") in data:
+                        found.append(os.path.relpath(os.path.join(base, name), self.dir))
+            return sorted(found)
+
+        self.clock.set(datetime.datetime(2026, 10, 5, 0, 10, tzinfo=UTC))
+        document.save(0, seed(), "ctl")
+        night(6)
+        self.assertEqual(self.names(), [], "a night leaves no copy behind")
+        self.clock.set(datetime.datetime(2026, 10, 6, 0, 11, tzinfo=UTC))       # a real statement, by mistake: a minute
+        document.save(document.revision(), json.dumps({"tx": list(range(61)), "statement": CANARY}), "mika")   # after the reseed
+        self.clock.set(datetime.datetime(2026, 10, 6, 15, 0, tzinfo=UTC))       # and somebody empties the stand's ledger
+        document.save(document.revision(), json.dumps({"tx": [1, 2]}), "mika")
+        self.assertEqual(on_disk(), ["ledger/snapshots/shrink-20261006T150000Z-rev000003.json.gz"],
+                         "until the night, the copy a save made of it is still there")
+        self.assertEqual(night(7), 3, "yesterday's two copies, and the day's copy the seed has just made")
+        self.assertEqual(on_disk(), [], "after the next night's reseed it is in no file of the stand")
+        self.assertEqual(self.kept(), (["EVER_SAVED", "current.json"], []))
+        self.assertNotIn(CANARY.encode("ascii"), document.read().body)
+        self.assertEqual(document.save(document.revision(), seed(), "mika").rev, 6, "and the stand goes on being saved")
+
+    def test_purging_only_what_is_older_than_two_days_kept_the_days_copy_for_three_nights(self):
+        # Why the night purges everything. BUILD-SPEC 2.11 had it run `purge-snapshots --older-than-days 2` and
+        # promised "a day at most" in the same breath: the store's rule for N days is held here as it is, and
+        # with it what that rule left on the disk.
         document = self.ledger
         seed = lambda: json.dumps({"tx": list(range(60)), "seeded": self.clock().isoformat()})
 
@@ -1265,6 +1580,26 @@ class PurgeTests(StoreCase):
         night(9)
         self.assertEqual(holding(), [], "three nights on, no copy of it is left")
         self.assertNotIn(CANARY.encode("ascii"), document.read().body)
+
+    def test_a_number_of_days_no_calendar_reaches_purges_nothing_and_is_not_a_crash(self):
+        # `ctl purge-snapshots --older-than-days 3660000` ended in a traceback: the cutoff fell before year 1.
+        journal = log.SecurityLog(self.dir, self.clock)
+        document = self.open("ledger", security_log=journal)
+        document.save(0, ledger(60), "ctl")
+        self.clock.tick(days=5)
+        document.save(1, ledger(60), "ctl")
+        document.save(2, ledger(2), "mika")
+        kept, stored = self.kept(), read_file(document.path)
+        self.assertEqual(len(kept[1]), 2)
+        for days in (740000, 3660000, 2 ** 31, 10 ** 20):
+            with self.subTest(days=days):
+                self.assertEqual(document.purge(days, "test"), 0)
+                self.assertEqual((self.kept(), read_file(document.path)), (kept, stored))
+        self.assertEqual([(entry["count"], entry["days"]) for entry in reversed(journal.tail(10))
+                          if entry["event"] == "snapshots-purged"],
+                         [(0, 740000), (0, 3660000), (0, 2 ** 31), (0, 10 ** 20)])
+        self.assertEqual(document.purge(36500, "test"), 0, "a hundred years: nothing is that old either")
+        self.assertEqual(document.purge(0, "test"), 2)
 
     def test_purging_is_for_the_stand_the_directory_is_marked_for_and_never_for_prod(self):
         document = self.ledger
@@ -1399,6 +1734,299 @@ class RestoreTests(DoorCase):
         with self.assertRaises(store.NoSpace):
             tight.restore(self.copy, "ctl")
         self.assertEqual((self.stored(), self.copies()), before)
+
+
+# ---------------------------------------------------------------------------
+# The floor: a revision never comes back to a number a browser may hold
+# (fix plan C2; findings review-store/restore-rewinds-revisions and cutover-revisions-start-anew)
+# ---------------------------------------------------------------------------
+
+class FloorTests(StoreCase):
+    """``base == stored revision`` is all that keeps an old page from saving its old copy. A whole stand put
+    back from a backup, and the cut-over, both leave the stored revision *behind* what open pages hold. So
+    every revision given out is above the number in ``EVER_SAVED``, and ``raise_floor`` lifts that number."""
+
+    def marker(self, kind="ledger", name="EVER_SAVED"):
+        return self.path(kind, name)
+
+    def test_the_marker_holds_the_highest_revision_given_out_as_digits_and_a_newline(self):
+        # What a whole-stand restore reads from the directory it has set aside: a count, never contents.
+        self.assertEqual((self.ledger.floor(), self.ledger.status()["floor"]), (0, 0))
+        for rev in range(1, 4):
+            self.ledger.save(rev - 1, ledger(2, "rev %d" % rev), "mika")
+            self.assertEqual(read_file(self.marker()), b"%d\n" % rev)
+            self.assertEqual((self.ledger.floor(), self.open("ledger").floor()), (rev, rev))
+        done = self.ledger.restore("day-2026-10-07-rev000001.json.gz", "ctl")
+        self.assertEqual((done.rev, read_file(self.marker()), self.ledger.status()["floor"]), (4, b"4\n", 4))
+        self.assertEqual((self.plan.floor(), os.path.lexists(self.marker("plan"))), (0, False), "each document its own")
+
+    def test_a_save_goes_above_the_marker_when_an_older_file_was_put_back_under_it(self):
+        # The store's own half: the document is put back as it was at revision 3 - by hand, or by a tarball
+        # unpacked over the directory - while the marker still says how far the count had gone.
+        at_three = None
+        for rev in range(5):
+            self.ledger.save(rev, ledger(30, "save %d" % (rev + 1)), "mika")
+            if rev == 2:
+                at_three = read_file(self.ledger.path)
+        write_new(self.ledger.path, at_three)
+        for document in (self.ledger, self.open("ledger")):
+            self.assertEqual((document.read().rev, document.floor()), (3, 5))
+            for held in (5, 4):                             # the pages that were open: 409, with the stored revision
+                with self.assertRaises(store.Stale) as late:
+                    document.save(held, ledger(1, "typed in a page from before"), "vanya")
+                self.assertEqual(late.exception.rev, 3)
+        self.assertEqual(self.ledger.read().body, at_three, "a refused save wrote nothing")
+        saved = self.ledger.save(3, ledger(30, "typed after reloading"), "mika")
+        self.assertEqual(saved.rev, 6, "the counter went back through numbers a page still holds")
+        self.assertEqual(read_file(self.marker()), b"6\n")
+        for held in (4, 5):
+            with self.assertRaises(store.Stale) as late:
+                self.ledger.save(held, ledger(1, "typed in a page from before"), "vanya")
+            self.assertEqual(late.exception.rev, 6)
+        self.assertEqual(self.ledger.save(6, ledger(30, "and on"), "mika").rev, 7)
+        self.assertEqual(json.loads(self.ledger.read().body.decode("utf-8"))["doc"]["note"], "and on")
+
+    def test_raise_floor_lifts_the_number_never_lowers_it_and_never_touches_the_document(self):
+        for rev in range(3):
+            self.ledger.save(rev, ledger(30, "save %d" % (rev + 1)), "mika")
+        stored, copies = read_file(self.ledger.path), self.names()
+        status = os.stat(self.ledger.path)
+        self.assertEqual(self.ledger.raise_floor(108), store.FloorResult(floor=108, was=3, rev=3))
+        self.assertEqual(read_file(self.marker()), b"108\n")
+        for lower in (50, 108, 3, 0):
+            self.assertEqual(self.ledger.raise_floor(lower), store.FloorResult(floor=108, was=108, rev=3))
+            self.assertEqual(read_file(self.marker()), b"108\n")
+        after = os.stat(self.ledger.path)
+        self.assertEqual((read_file(self.ledger.path), self.names()), (stored, copies))
+        self.assertEqual((after.st_ino, after.st_mtime_ns), (status.st_ino, status.st_mtime_ns), "the document was rewritten")
+        self.assertEqual(self.ledger.read().rev, 3, "a page that reloads still gets the stored revision")
+        other = self.open("ledger")                         # the running server: ctl raised it in another process
+        self.assertEqual(other.floor(), 108)
+        self.assertEqual(other.save(3, ledger(30, "after"), "mika").rev, 109)
+        self.assertEqual(self.ledger.raise_floor(109), store.FloorResult(floor=109, was=109, rev=109))
+        self.assertNoLitter()
+
+    def test_a_floor_is_a_whole_number_of_fifteen_digits_at_most(self):
+        self.ledger.save(0, ledger(2), "mika")
+        before = tree(self.dir)
+        for floor in (10 ** 15, 10 ** 15 + 7, 10 ** 30, -1, -10 ** 20):
+            with self.subTest(floor=floor):
+                with self.assertRaises(store.Refused) as refused:
+                    self.ledger.raise_floor(floor)
+                self.assertEqual((refused.exception.status, refused.exception.code), (403, "refused"))
+        for floor in ("7", 7.0, 7.5, True, None, [7]):
+            with self.subTest(floor=floor):
+                with self.assertRaises(ValueError):
+                    self.ledger.raise_floor(floor)
+        for who in ("", None, 7):
+            with self.assertRaises(ValueError):
+                self.ledger.raise_floor(7, who)
+        self.assertEqual(tree(self.dir), before, "a refused floor changed something")
+        # Fifteen nines are taken, and the revision after them is still one a file can carry and a page can count.
+        self.assertEqual(self.plan.raise_floor(store.FLOOR_MAX).floor, 999999999999999)
+        self.assertEqual(self.plan.save(0, plan(banks=1), "mika").rev, 10 ** 15)
+        self.assertEqual(self.open("plan").read().rev, 10 ** 15)
+        self.assertLess(10 ** 15 + 1, 2 ** 53)
+        self.assertEqual(self.plan.save(10 ** 15, plan(banks=2), "mika").rev, 10 ** 15 + 1)
+
+    def test_a_marker_that_holds_no_number_of_fifteen_digits_is_no_floor_and_still_says_saved(self):
+        self.ledger.save(0, ledger(2), "mika")
+        rev = 1
+        for content in (b"9999999999999999\n", b"1" + b"0" * 30 + b"\n", b"", b"\n", b"three\n", b"12 13\n", b"-5\n",
+                        b"4.0\n", b"\xff\xfe"):
+            with self.subTest(marker=content):
+                write_new(self.marker(), content)
+                self.assertEqual(self.ledger.floor(), 0)
+                saved = self.ledger.save(rev, ledger(2, "rev %d" % (rev + 1)), "mika")
+                self.assertEqual(saved.rev, rev + 1, "a number nobody could store was taken for the floor")
+                rev += 1
+                self.assertEqual(read_file(self.marker()), b"%d\n" % rev, "and the save wrote the marker again")
+        write_new(self.marker(), b"not a number")
+        os.unlink(self.ledger.path)
+        with self.assertRaises(store.Damaged):              # whatever it holds, the marker says: saved before
+            self.ledger.read()
+
+    def test_a_document_never_saved_takes_a_floor_and_still_reads_as_never_saved(self):
+        # The cut-over: Money's ledger starts at revision 0 while pages opened on the platform hold its
+        # revision, say 40. The floor comes first, the import after it - and lands on 41.
+        document = self.ledger
+        self.assertEqual(document.raise_floor(0), store.FloorResult(floor=0, was=0, rev=0))
+        self.assertEqual(self.kept(), ([], []), "a floor of nothing made a file")
+        self.assertEqual(document.raise_floor(40), store.FloorResult(floor=40, was=0, rev=0))
+        self.assertEqual(self.kept()[0], ["EVER_SAVED", "NEVER_SAVED"])
+        self.assertEqual((read_file(self.marker()), read_file(self.marker(name="NEVER_SAVED"))), (b"40\n", b"40\n"))
+        for reader in (document, self.open("ledger")):
+            self.assertEqual((reader.read().body, reader.revision(), reader.floor()), (EMPTY, 0, 40))
+            said = reader.status()
+            self.assertEqual((said["state"], said["rev"], said["everSaved"], said["floor"]), ("empty", 0, False, 40))
+        self.assertEqual(store.doctor(self.dir, "dev", self.clock)["problems"], [])
+        self.assertEqual(store.verify(self.dir)["problems"], [])
+        self.assertEqual(document.raise_floor(35), store.FloorResult(floor=40, was=40, rev=0))
+        self.assertEqual(document.raise_floor(50), store.FloorResult(floor=50, was=40, rev=0))
+        self.assertEqual((read_file(self.marker()), read_file(self.marker(name="NEVER_SAVED"))), (b"50\n", b"50\n"))
+        self.assertEqual(document.read().body, EMPTY)
+        for held in (40, 50, 51, 1):                        # a page of the platform: 409, and the revision is 0
+            with self.assertRaises(store.Stale) as late:
+                document.save(held, ledger(1, "from the platform's page"), "misha")
+            self.assertEqual(late.exception.rev, 0)
+        self.assertEqual(self.kept()[0], ["EVER_SAVED", "NEVER_SAVED"], "a refused save wrote something")
+        imported = document.save(0, ledger(30, "the import"), "ctl")
+        self.assertEqual((imported.rev, imported.snapshot), (51, None))
+        self.assertEqual((self.kept()[0], read_file(self.marker())), (["EVER_SAVED", "current.json"], b"51\n"))
+        for held in (40, 50):
+            with self.assertRaises(store.Stale) as late:
+                document.save(held, ledger(1, "from the platform's page"), "misha")
+            self.assertEqual(late.exception.rev, 51)
+        self.assertEqual(document.save(51, ledger(30, "the first save in Money"), "mika").rev, 52)
+        os.unlink(document.path)                            # and from the first save on, missing is lost
+        with self.assertRaises(store.Damaged):
+            document.read()
+        self.assertEqual(self.plan.read().body, EMPTY)
+
+    def test_the_two_files_of_a_bare_floor_never_make_a_document_read_as_lost_or_a_lost_one_as_new(self):
+        never = self.marker(name="NEVER_SAVED")
+        # raise_floor writes NEVER_SAVED first. Stopped between its two writes: still never saved, the floor in force.
+        write_new(never, b"40\n")
+        self.assertEqual((self.ledger.read().body, self.ledger.floor(), self.ledger.status()["everSaved"]), (EMPTY, 40, False))
+        self.assertEqual(self.ledger.raise_floor(40), store.FloorResult(floor=40, was=40, rev=0))
+        self.assertEqual(read_file(self.marker()), b"40\n", "the marker was not completed")
+        self.assertEqual(self.ledger.save(0, ledger(2), "mika").rev, 41)
+        self.assertEqual(self.kept()[0], ["EVER_SAVED", "current.json"])
+        # The marker alone - as ever - says saved: a missing file is lost.
+        write_new(self.marker("plan"), b"40\n")
+        with self.assertRaises(store.Damaged):
+            self.plan.read()
+        os.unlink(self.marker("plan"))
+        # A NEVER_SAVED that says less than the marker vouches for nothing: saves have happened since.
+        self.ledger.save(41, ledger(2), "mika")
+        for stale in (b"40\n", b"41\n", b"0\n", b"", b"never\n"):
+            with self.subTest(never_saved=stale):
+                write_new(never, stale)
+                kept = read_file(self.ledger.path)
+                os.unlink(self.ledger.path)
+                with self.assertRaises(store.Damaged):
+                    self.ledger.read()
+                with self.assertRaises(store.Damaged):
+                    self.ledger.save(0, ledger(1), "mika")
+                write_new(self.ledger.path, kept)
+        # And the next save takes a left-over NEVER_SAVED away.
+        self.assertEqual(self.ledger.save(42, ledger(2), "mika").rev, 43)
+        self.assertEqual(self.kept()[0], ["EVER_SAVED", "current.json"])
+
+    def test_a_floor_raised_on_a_damaged_document_is_under_its_restore(self):
+        for rev in range(3):
+            self.ledger.save(rev, ledger(30, "save %d" % (rev + 1)), "mika")
+        write_new(self.ledger.path, read_file(self.ledger.path)[:60])
+        self.assertEqual(self.ledger.raise_floor(20), store.FloorResult(floor=20, was=3, rev=None))
+        self.assertEqual(self.ledger.restore("day-2026-10-07-rev000001.json.gz", "ctl").rev, 21)
+        os.unlink(self.ledger.path)                         # lost: the floor is all that is left to count from
+        self.assertEqual(self.ledger.raise_floor(30), store.FloorResult(floor=30, was=21, rev=None))
+        self.assertEqual(self.ledger.restore("day-2026-10-07-rev000001.json.gz", "ctl").rev, 31)
+
+    def test_raising_the_floor_waits_for_the_lock_and_says_so_when_the_disk_does_not_keep_it(self):
+        self.ledger.save(0, ledger(2), "mika")
+        impatient = self.open("ledger", lock_timeout=0.05)
+        with store.FileLock(self.path("ledger", ".lock"), timeout=1.0):
+            with self.assertRaises(store.Busy):
+                impatient.raise_floor(9)
+        self.assertEqual(read_file(self.marker()), b"1\n")
+        for call, fault in (("write", OSError(errno.ENOSPC, "No space left on device")),
+                            ("fsync", OSError(errno.EIO, "Input/output error")),
+                            ("replace", OSError(errno.EROFS, "Read-only file system"))):
+            with self.subTest(call=call):
+                with mock.patch.object(store.os, call, side_effect=fault):
+                    with self.assertRaises(store.StorageFailed) as failed:
+                        self.ledger.raise_floor(9)
+                self.assertEqual((failed.exception.status, failed.exception.code), (507, "storage_failed"))
+                self.assertEqual((read_file(self.marker()), self.ledger.floor()), (b"1\n", 1))
+                self.assertNoLitter()
+        self.assertEqual(self.ledger.raise_floor(9).floor, 9)
+
+    def test_every_call_leaves_its_line_in_the_security_log_and_nothing_of_the_document(self):
+        journal = log.SecurityLog(self.dir, self.clock)
+        document = self.open("ledger", security_log=journal)
+        document.save(0, json.dumps({"tx": [{"l": CANARY}], CANARY: CANARY}), "mika")
+        document.raise_floor(108, "money-restore")
+        document.raise_floor(5)                             # high enough already: said all the same
+        with self.assertRaises(store.Refused):
+            document.raise_floor(-1)
+        lines = [entry for entry in reversed(journal.tail(20)) if entry["event"] == "floor-raised"]
+        self.assertEqual([(entry["doc"], entry["floor"], entry["was"], entry["by"]) for entry in lines],
+                         [("ledger", 108, 1, "money-restore"), ("ledger", 108, 108, "ctl")])
+        self.assertEqual([sorted(entry) for entry in lines], [["by", "doc", "event", "floor", "t", "was"]] * 2)
+        self.assertNotIn(CANARY, read_file(journal.path).decode("utf-8"))
+
+
+class WholeStandRestoreTests(DoorCase):
+    """A stand put back from a tarball, with the server's doors asked as the pages ask them."""
+
+    def back_up(self):
+        """What money-backup's tar holds: the data directory without sessions and without temporary files."""
+        parent = tempfile.mkdtemp(prefix="money-store-")
+        self.addCleanup(shutil.rmtree, parent, True)
+        return shutil.copytree(self.stand.data_dir, os.path.join(parent, "backup"),
+                               ignore=shutil.ignore_patterns("sessions.json*", "*.tmp-*"))
+
+    def put_back(self, backup):
+        """money-restore's steps: the directory as it stands is moved aside, the tarball unpacked in its place."""
+        parent = tempfile.mkdtemp(prefix="money-store-")
+        self.addCleanup(shutil.rmtree, parent, True)
+        aside = os.path.join(parent, "before-restore")
+        os.rename(self.stand.data_dir, aside)
+        shutil.copytree(backup, self.stand.data_dir)
+        return aside
+
+    def test_a_page_left_open_from_before_the_restore_gets_409_and_never_saves_over_what_came_after(self):
+        stand = self.stand
+        for rev in range(3):
+            self.assertSaved(self.put(LEDGER, rev, ledger(30, "before the backup, save %d" % (rev + 1))), rev + 1)
+        backup = self.back_up()                             # last night's tarball: the ledger at revision 3
+        for rev in (3, 4):
+            self.assertSaved(self.put(LEDGER, rev, ledger(30, "the lost day, save %d" % (rev + 1))), rev + 1)
+        held = stand.get(LEDGER, cookie=stand.session("vanya")).json()
+        self.assertEqual(held["rev"], 5)                    # Vanya's tab: revision 5, and it is never reloaded
+
+        aside = self.put_back(backup)
+        # Before the stand is started again, the restore raises the floor to what the set-aside directory
+        # had counted to. It reads a number, and nothing else.
+        counted = int(read_file(os.path.join(aside, "ledger", "EVER_SAVED")))
+        self.assertEqual(counted, 5)
+        raised = stand.stores["ledger"].raise_floor(counted, "money-restore")
+        self.assertEqual((raised.floor, raised.was, raised.rev), (5, 3, 3))
+
+        mika = stand.session("mika")                        # everybody signs in again: a tarball has no sessions
+        self.assertEqual(stand.get(LEDGER, cookie=mika).json()["rev"], 3)
+        vanya = stand.session("vanya")                      # so does Vanya - in a new tab; the old one gets its cookie
+        early = stand.put(LEDGER, {"base": 5, "doc": json.dumps(held["doc"])}, cookie=vanya)
+        self.assertRefused(early, 409, "money_stale")
+        self.assertEqual(early.json()["rev"], 3)
+        first = stand.put(LEDGER, {"base": 3, "doc": ledger(30, "AFTER THE RESTORE, first")}, cookie=mika)
+        self.assertEqual((first.status, first.json()), (200, {"rev": 6}))
+        second = stand.put(LEDGER, {"base": 6, "doc": ledger(30, "AFTER THE RESTORE, second")}, cookie=mika)
+        self.assertEqual((second.status, second.json()), (200, {"rev": 7}))
+        for base in (5, 4):                                 # the old tab, whenever it speaks: never accepted
+            late = stand.put(LEDGER, {"base": base, "doc": json.dumps(held["doc"])}, cookie=vanya)
+            self.assertRefused(late, 409, "money_stale")
+            self.assertEqual(late.json()["rev"], 7)
+        self.assertEqual(stand.get(LEDGER, cookie=mika).json()["doc"]["note"], "AFTER THE RESTORE, second")
+        self.assertEqual([entry["event"] for entry in stand.security_events() if entry["event"] == "floor-raised"],
+                         ["floor-raised"], "the restore left its line")
+
+    def test_an_import_made_after_the_floor_lands_above_the_revision_the_platforms_pages_hold(self):
+        stand = self.stand
+        self.assertEqual(stand.stores["ledger"].raise_floor(40).rev, 0)     # the platform's ledger stood at 40
+        self.assertEqual(self.get(LEDGER).body, EMPTY)
+        self.assertEqual(stand.ctl("empty").status, 0, "a floor is not a document: the stand is still empty")
+        before = self.put(LEDGER, 40, ledger(1, "a page of the platform, before the import"))
+        self.assertRefused(before, 409, "money_stale")
+        self.assertEqual(before.json()["rev"], 0)
+        self.assertSaved(self.put(LEDGER, 0, ledger(30, "the import")), 41)
+        after = self.put(LEDGER, 40, ledger(1, "a page of the platform, after the founder signed in to Money"))
+        self.assertRefused(after, 409, "money_stale")
+        self.assertEqual(after.json()["rev"], 41)
+        self.assertSaved(self.put(LEDGER, 41, ledger(31, "the first save in Money")), 42)
+        self.assertEqual(self.get(PLAN).body, EMPTY, "the plan has a floor of its own, and none was asked for")
+        self.assertSaved(self.put(PLAN, 0, plan(banks=1)), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1652,6 +2280,29 @@ class DoorSpaceTests(DoorCase):
         self.assertEqual(self.copies(), [])
         self.assertSaved(self.put(PLAN, 0, plan(banks=1)), 1)
 
+    def test_a_page_whose_save_is_in_place_but_was_not_synced_is_told_its_revision_and_goes_on_saving(self):
+        # As it was: 507 "what was stored is untouched" while GET already served the new revision; the page
+        # kept its old base, its next save was 409, and it stopped saving for good.
+        self.assertSaved(self.put(LEDGER, 0, ledger(3, "stored")), 1)
+        directory = os.path.realpath(os.path.dirname(self.file()))
+        real = store._fsync_dir
+
+        def fsync_dir(target):
+            if os.path.realpath(target) == directory:
+                raise OSError(errno.EIO, "Input/output error")
+            return real(target)
+
+        with mock.patch.object(store, "_fsync_dir", fsync_dir):
+            self.assertSaved(self.put(LEDGER, 1, ledger(3, "typed while the disk was failing")), 2)
+            self.assertEqual(self.get(LEDGER).body, envelope(2, ledger(3, "typed while the disk was failing")))
+            self.assertSaved(self.put(LEDGER, 2, ledger(3, "the next edit of the same page")), 3)
+        said = [entry for entry in self.stand.security_events() if entry["event"] == "storage-unsynced"]
+        self.assertEqual([(entry["file"], entry["rev"], entry["by"]) for entry in said], [("ledger", 2, "mika"), ("ledger", 3, "mika")])
+        # What fails before anything is in place is still 507, and then "untouched" is true.
+        with mock.patch.object(store.os, "replace", side_effect=OSError(errno.EROFS, "Read-only file system")):
+            self.assertRefused(self.put(LEDGER, 3, ledger(3, "refused by the disk")), 507, "storage_failed")
+        self.assertEqual(self.get(LEDGER).json()["rev"], 3)
+
 
 # ---------------------------------------------------------------------------
 # The data directory: one stand's own, and never the laptop's (BUILD-SPEC 2.7; design 1.1, 1.4)
@@ -1675,6 +2326,68 @@ class DataDirTests(unittest.TestCase):
                 before = tree(directory)
                 store.prepare_data_dir(directory, stand)
                 self.assertEqual(tree(directory), before)
+
+    def test_the_marker_is_the_last_thing_a_first_start_writes(self):
+        # With the marker there, the three directories have been made - so one that is missing later was lost.
+        directory = self.directory()
+        seen = []
+        real = store.atomic_write
+
+        def watching(path, *args, **options):
+            if os.path.basename(path) == "STAND":
+                seen.append(sorted(os.listdir(directory)))
+                seen.append(sorted(os.listdir(os.path.join(directory, "ledger")) + os.listdir(os.path.join(directory, "plan"))))
+            return real(path, *args, **options)
+        with mock.patch.object(store, "atomic_write", watching):
+            store.prepare_data_dir(directory, "test")
+        self.assertEqual(seen, [["auth", "ledger", "plan"], ["snapshots", "snapshots"]])
+        self.assertTrue(store.has_run(directory))
+        for name in ("ledger", "plan", "auth", os.path.join("ledger", "snapshots")):
+            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(directory, name)).st_mode), 0o700, name)
+
+    def test_a_first_start_that_cannot_finish_leaves_nothing_behind_and_the_next_one_starts_fresh(self):
+        directory = self.directory()
+        with mock.patch.object(store, "atomic_write", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+            for stand in config.STANDS:
+                with self.assertRaises(store.DataDirError):
+                    store.prepare_data_dir(directory, stand)
+                self.assertEqual(os.listdir(directory), [], "half a layout was left for the next start to trip over")
+        self.assertFalse(store.has_run(directory))
+        store.prepare_data_dir(directory, "test")
+        self.assertEqual(sorted(os.listdir(directory)), ["STAND", "auth", "ledger", "plan"])
+
+    def test_what_a_first_start_that_was_killed_left_behind_is_not_adopted_and_is_called_what_it_is(self):
+        directory = self.directory()
+        os.makedirs(os.path.join(directory, "ledger", "snapshots"))
+        os.mkdir(os.path.join(directory, "plan"))
+        before = tree(directory)
+        for stand in config.STANDS:
+            with self.assertRaisesRegex(store.DataDirError, r"first start that did not finish.*Remove them") as refused:
+                store.prepare_data_dir(directory, stand)
+            self.assertIn("no STAND marker", str(refused.exception))
+        self.assertEqual(tree(directory), before)
+        # One file in there, and they are somebody's files: whose, is a person's call.
+        write_new(os.path.join(directory, "plan", "current.json"), b"{}")
+        with self.assertRaisesRegex(store.DataDirError, "write that name into"):
+            store.prepare_data_dir(directory, "test")
+
+    def test_a_later_start_makes_nothing_anew_that_has_gone(self):
+        for gone in ("ledger", "plan", "auth"):
+            with self.subTest(gone=gone):
+                directory = self.directory()
+                store.prepare_data_dir(directory, "prod")
+                shutil.rmtree(os.path.join(directory, gone))
+                before = tree(directory)
+                store.prepare_data_dir(directory, "prod")       # no refusal: the boot goes on and says what is damaged
+                self.assertEqual(tree(directory), before, "what was lost came back empty, as if it had never been")
+        # Only the place for a document's copies is made again, beside a document that is there.
+        directory = self.directory()
+        store.prepare_data_dir(directory, "prod")
+        store.DocStore(directory, "ledger").save(0, ledger(3), "mika")
+        os.rmdir(os.path.join(directory, "ledger", "snapshots"))
+        store.prepare_data_dir(directory, "prod")
+        self.assertTrue(os.path.isdir(os.path.join(directory, "ledger", "snapshots")))
+        self.assertEqual(store.DocStore(directory, "ledger").read().rev, 1)
 
     def test_a_marker_that_names_another_stand_stops_every_stand_and_nothing_is_touched(self):
         for marked in config.STANDS:

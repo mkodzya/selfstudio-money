@@ -10,6 +10,7 @@ from tests import _safety  # noqa: F401  - first: no test runs beside a ledger
 
 import base64
 import dataclasses
+import datetime
 import errno
 import hashlib
 import html
@@ -19,10 +20,13 @@ import json
 import os
 import re
 import shutil
+import random
 import socket
+import subprocess
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -155,6 +159,128 @@ class PageFactsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             httpd.inspect_page(b"<script>\xff</script>")
 
+    def test_the_dashes_of_a_comment_start_are_also_the_dashes_of_its_end(self):
+        # "<!-->" and "<!--->" end an escaped section for a browser: their last characters are "-->".
+        # Read otherwise, a "<script" further on is taken for a nested one, the script is ended at a later
+        # </script> than the browser ends it, and the policy carries the hash of text no browser ever sees.
+        cases = {
+            "<script>a<!--b<!-->c<script>d</script>e</script>": "a<!--b<!-->c<script>d",
+            "<script>a<!--b<!--->c<script>d</script>e</script>": "a<!--b<!--->c<script>d",
+            "<script>a<!--b<!---->c<script>d</script>e</script>": "a<!--b<!---->c<script>d",
+            # ... in plain script data they open and close in one breath, as before:
+            "<script>a<!-->b<script>c</script>d</script>": "a<!-->b<script>c",
+            "<script>a<!--->b<script>c</script>d</script>": "a<!--->b<script>c",
+            # ... and inside a nested script they end the whole escape, so the next </script> is the end:
+            "<script>a<!--<script>b<!-->c</script>d</script>": "a<!--<script>b<!-->c",
+            # What already was right stays right: a real comment around a nested script,
+            "<script>a<!-- <script>b</script> -->c</script>": "a<!-- <script>b</script> -->c",
+            "<script>var s='<!--<script>x</script>-->';three()</script>": "var s='<!--<script>x</script>-->';three()",
+            # The reviewer's page: a mail template's conditional comment in a string, then "<script>" in another.
+            "<script>t='<!--[if !mso]><!-->';u='<script>'</script>z</script>": "t='<!--[if !mso]><!-->';u='<script>'",
+            "<script>t='<!--[if !mso]><!-->x<!--<![endif]-->';u='<script>'</script>z</script>":
+                "t='<!--[if !mso]><!-->x<!--<![endif]-->';u='<script>'",
+            # Dashes that are no comment at all change nothing.
+            "<script>a--b->c<!- -<script>d</script>": "a--b->c<!- -<script>d",
+        }
+        for page, script in cases.items():
+            with self.subTest(page=page):
+                self.assertEqual(httpd.inspect_page(page.encode("utf-8")).script_hashes, (self.sha(script),))
+
+    def test_what_the_policy_will_not_run_is_counted_and_what_may_not_run_is_pointed_at(self):
+        # Certain: handlers and javascript: addresses in the markup. A guess, for a person to look at:
+        # markup with a handler inside a template the script draws, and vendor names that are not served.
+        clean = httpd.inspect_page(read(INDEX))
+        self.assertEqual((clean.inline_handlers, clean.scripted_handlers, clean.unknown_vendor), (0, 0, ()),
+                         "the page as it is in the repository gives no warning")
+        page = ("<body><button onclick=\"go()\">x</button>"
+                "<script>el.innerHTML = `<button class=\"b\" onclick=\"go()\">ok</button>`;"
+                "row = '<tr onmouseover=\\'tip()\\'>'; frame.onload = start; if (i<n) { online = 1 }"
+                "load(VENDOR + 'pdf.min.js'); load('/money/vendor/pdf.worker.min.mjs'); also('/money/vendor/cmaps/x.bcmap');"
+                "said = 'see /money/vendor/xlsx.full.min.js.'</script></body>")
+        facts = httpd.inspect_page(page.encode("utf-8"))
+        self.assertEqual(facts.inline_handlers, 1)
+        self.assertEqual(facts.scripted_handlers, 2, "two templates with a handler; a property and a comparison are neither")
+        self.assertEqual(facts.unknown_vendor, ("cmaps/x.bcmap", "pdf.worker.min.mjs"))
+        # A page of megabytes of script is read in a moment: the guess is bounded.
+        began = time.monotonic()
+        httpd.inspect_page(("<script>" + "if(a<b){x=1;} " * 200000 + "</script>").encode("ascii"))
+        self.assertLess(time.monotonic() - began, 5.0)
+
+
+class HeaderLineTests(unittest.TestCase):
+    """The headers of a request are read before any limit knows whose request it is: a line must cost
+    what its length costs and no more, whatever a stranger put into it."""
+
+    #: Inside every limit the documents name: 8 KiB a line, 32 KiB and 100 lines in all.
+    SHAPES = {
+        "a letter, blanks, a letter": lambda number: b"X-%d: a" % number + b" " * 8170 + b"b\r\n",
+        "tabs": lambda number: b"X-%d: a" % number + b"\t" * 8170 + b"b\r\n",
+        "blanks and tabs in turn": lambda number: b"X-%d: a" % number + b" \t" * 4085 + b"b\r\n",
+        "nothing but blanks": lambda number: b"X-%d:" % number + b" " * 8180 + b"\r\n",
+        "words between runs of blanks": lambda number: b"X-%d: " % number + b"word    \t  " * 740 + b"\r\n",
+        "a blank line of blanks": lambda number: b"X-%d: x" % number + (b" " * 63 + b"x") * 127 + b"\r\n",
+    }
+
+    def read(self, block):
+        """``Handler._read_headers`` on ``block``, as the server runs it: (accepted, the headers, CPU seconds of this thread)."""
+        refused = []
+        reader = types.SimpleNamespace(rfile=io.BytesIO(block), headers=None,
+                                       _refuse=lambda status, *more, **options: refused.append(status))
+        began = time.thread_time()
+        accepted = httpd.Handler._read_headers(reader)
+        return accepted and not refused, reader.headers, time.thread_time() - began
+
+    def test_a_block_of_the_worst_lines_is_read_in_well_under_50_ms(self):
+        # The pattern this replaced took a second of the processor for one such block: a quarter of a
+        # second a line, growing with the square of its length.
+        for what, line in self.SHAPES.items():
+            with self.subTest(shape=what):
+                block = b"".join(line(number) for number in range(4)) + b"\r\n"
+                self.assertLessEqual(max(len(line(number)) for number in range(4)), 8192)
+                self.assertLessEqual(len(block), 32 * 1024)
+                self.assertGreater(len(block), 30 * 1024, "a block at the limit, not a small one")
+                accepted, headers, took = min((self.read(block) for _run in range(3)), key=lambda result: result[2])
+                self.assertTrue(accepted)
+                self.assertEqual(len(headers), 4)
+                self.assertLess(took, 0.05, "%d bytes of header lines took %.3f s of the processor" % (len(block), took))
+
+    def test_the_time_grows_with_the_length_of_a_line_and_not_with_its_square(self):
+        def cost(size):
+            block = b"X: a" + b" " * size + b"b\r\n\r\n"
+            return min(self.read(block)[2] for _run in range(5))
+        short, long = cost(1000), cost(8000)
+        # Eight times the line: about eight times the work. Sixty-four times is the old pattern's.
+        self.assertLess(long, short * 24 + 0.002, "8 000 blanks cost %.6f s where 1 000 cost %.6f s" % (long, short))
+
+    def test_what_it_reads_is_what_the_strict_grammar_reads(self):
+        # The grammar as a pattern - the one the server used to match with. It is only ever run here, on
+        # short lines, where its cost does not matter; the one-pass reader has to agree with it on every line.
+        grammar = re.compile(rb"([!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}):[ \t]*([\t\x20-\x7e\x80-\xff]*?)[ \t]*\r?\n")
+        pieces = [b"a", b"B", b"-", b":", b" ", b"\t", b"\r", b"\n", b"\x00", b"\x7f", b"\x80", b"\xff", b"1", b"_", b"(",
+                  b"=", b"\x0b", b"\x1f", b"~", b"!"]
+        names = [b"Name", b"X-A", b"a" * 64, b"a" * 65, b"", b"N m", b"Host", b"x" * 63]
+        ends = [b"\r\n", b"\n", b"\r\r\n", b" \r\n", b"\t\n", b"", b"\r"]
+        dice = random.Random(20261007)
+        agreed = accepted = 0
+        tame = [b"a", b"B", b"-", b":", b" ", b" ", b"\t", b"\x80", b"\xff", b"1", b"=", b"~", b"; "]
+        for number in range(20000):
+            among = tame if number % 2 else pieces      # half the lines of bytes a value may hold, half of anything
+            line = b"".join(dice.choice(among) for _piece in range(dice.randint(0, 12))) + dice.choice(ends)
+            if dice.random() < 0.6:
+                line = dice.choice(names) + b":" + line
+            expected = grammar.fullmatch(line)
+            got = httpd._header(line)
+            self.assertEqual(got, None if expected is None else (expected.group(1), expected.group(2)), line)
+            agreed += 1
+            accepted += got is not None
+        self.assertGreater(accepted, 2000, "the lines were not all refusals: %d of %d were read" % (accepted, agreed))
+        for line, read_as in ((b"Name: value\r\n", (b"Name", b"value")), (b"Name:value\n", (b"Name", b"value")),
+                              (b"Name:  a  b \t \r\n", (b"Name", b"a  b")), (b"Name:\r\n", (b"Name", b"")),
+                              (b"N: a:b\r\n", (b"N", b"a:b")), (b"N: caf\xe9\r\n", (b"N", b"caf\xe9")),
+                              (b":x\r\n", None), (b"Name : x\r\n", None), (b"Name: v\ralue\r\n", None),
+                              (b"Name: x\r\r\n", None), (b"Name: x", None), (b" Name: x\r\n", None)):
+            self.assertEqual(httpd._header(line), read_as, line)
+
 
 class OwnPagesTests(unittest.TestCase):
     def web(self, stand):
@@ -165,7 +291,7 @@ class OwnPagesTests(unittest.TestCase):
 
     def pages(self, web):
         return {
-            "login": web.render("login", state="form", firstName=""),
+            "login": web.render("login", state="form", firstName="", login=""),
             "set-password": web.render("set-password"),
             "data": web.render("data", firstName="Mika", entries="[]"),
         }
@@ -209,8 +335,11 @@ class OwnPagesTests(unittest.TestCase):
 
     def test_what_a_page_is_filled_with_is_escaped(self):
         web = self.web("dev")
-        text = web.render("login", state="signed-in", firstName="<b>\"O'Neil\" & co</b>").decode("utf-8")
+        text = web.render("login", state="signed-in", firstName="<b>\"O'Neil\" & co</b>",
+                          login="<i>o'neil</i>").decode("utf-8")
         self.assertIn("Вы вошли как &lt;b&gt;&quot;O&#x27;Neil&quot; &amp; co&lt;/b&gt;", text)
+        self.assertIn("&lt;i&gt;o&#x27;neil&lt;/i&gt;", text)
+        self.assertEqual(httpd.inspect_page(text.encode("utf-8")), httpd.PageFacts((), 0))
         entries = json.dumps([{"t": "x", "event": "\"><script>alert(1)</script>"}])
         page = web.render("data", firstName="Mika", entries=entries)
         self.assertEqual(httpd.inspect_page(page), httpd.PageFacts((), 0))
@@ -254,7 +383,8 @@ class OwnPagesTests(unittest.TestCase):
                         self.assertIn('data-download="%s"' % kind, outline.attributes)
                         self.assertEqual('data-upload="%s"' % kind in outline.attributes, stand != "test")
                     self.assertEqual("data-upload-confirm" in outline.attributes, stand != "test")
-            uploads = {"confirm", "confirm-title", "confirm-file", "confirm-server", "confirm-yes", "confirm-no"}
+            uploads = {"confirm", "confirm-title", "confirm-file", "confirm-server", "confirm-keeps", "confirm-yes",
+                       "confirm-no"}
             self.assertEqual(asked - found, uploads if stand == "test" else set(), stand)
         # The states of /login are told apart by the stylesheet alone: the page works before its script has loaded.
         style = read(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.css")).decode("utf-8")
@@ -271,6 +401,475 @@ class OwnPagesTests(unittest.TestCase):
         self.assertIn('autocomplete="current-password"', text)
         self.assertRegex(text, r'<form[^>]*method="post"')
         self.assertEqual(self.pages(self.web("prod"))["set-password"].decode("utf-8").count('autocomplete="new-password"'), 2)
+
+    def test_the_login_is_said_where_the_password_is_asked_and_where_it_is_set(self):
+        # Nothing else ever tells a founder what to type into «Логин», and on this host name browsers
+        # offer the e-mail the platform used to ask for.
+        web = self.web("prod")
+        form = web.render("login", state="form", firstName="", login="").decode("utf-8")
+        self.assertRegex(form, r'<label for="login">Логин</label>\s*<input id="login"[^>]*aria-describedby="login-hint"[^>]*>'
+                               r'\s*<p class="hint" id="login-hint">Логин — имя из ссылки-приглашения, не e-mail\.</p>')
+        self.assertRegex(form, r'<input id="login" name="login" type="text" value=""')
+        for state in ("signed-in", "ending"):
+            page = web.render("login", state=state, firstName="Misha", login="misha").decode("utf-8")
+            self.assertIn("Вы вошли как Misha", page)
+            self.assertRegex(page, r'Ваш логин: <b class="mono">misha</b>')
+            # In its last day a session is shown the form again: the login is already in it, the password is all that is typed.
+            self.assertRegex(page, r'<input id="login" name="login" type="text" value="misha"')
+        # A stranger's page names nobody and nobody's login - not even in what is hidden.
+        for name in ("Mika", "Misha", "Vanya", "mika", "misha", "vanya"):
+            self.assertNotIn(name, form)
+        # The set-password page: a read-only login field in the form itself, for the password manager -
+        # empty and out of sight until the link has been accepted.
+        page = self.pages(web)["set-password"].decode("utf-8")
+        form = page[page.index("<form"):page.index("</form>")]
+        self.assertRegex(form, r'<div id="setup-whose" hidden>\s*<label for="setup-login">Ваш логин</label>\s*'
+                               r'<input id="setup-login" name="login" type="text" autocomplete="username"[^>]*\breadonly>')
+        self.assertNotRegex(form, r'<input id="setup-login"[^>]*\bvalue=')
+        self.assertLess(form.index('autocomplete="username"'), form.index('autocomplete="new-password"'),
+                        "the login stands before the passwords, as a password manager expects")
+        self.assertRegex(page, r'<p class="ok" id="setup-done" role="status" hidden></p>')
+        self.assertRegex(page, r'<p class="actions" id="setup-next" hidden>'
+                               r'<a class="button primary" id="setup-go" href="/">Открыть Money</a></p>')
+        for name in ("Mika", "Misha", "Vanya", "mika", "misha", "vanya"):
+            self.assertNotIn(name, page, "the page is the same for everybody: it knows no login until a link was accepted")
+
+    def test_what_belongs_to_another_state_of_the_login_page_is_hidden_in_the_markup_itself(self):
+        # The stylesheet tells the three states apart too. But a page whose stylesheet did not arrive
+        # must not show a stranger «Вы вошли как», «Выйти», the form and the "ending" line all at once.
+        web = self.web("dev")
+        shown = {}
+        for state in ("form", "ending", "signed-in"):
+            page = web.render("login", state=state, firstName="Mika", login="mika").decode("utf-8")
+            marked = re.findall(r'<[a-z]+\b[^>]*\bdata-when="([a-z -]+)"( hidden)?>', page)
+            self.assertEqual(len(marked), 3, "the two sections and the line of the last day")
+            for states, hidden in marked:
+                self.assertEqual(bool(hidden), state not in states.split(), (state, states))
+            shown[state] = sorted(states for states, hidden in marked if not hidden)
+            self.assertIn('data-state="%s"' % state, page)
+        self.assertEqual(shown, {"form": ["form ending"], "ending": ["ending", "form ending"], "signed-in": ["signed-in"]})
+        style = read(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.css")).decode("utf-8")
+        self.assertIn("[hidden] { display: none !important; }", style, "and no rule of the stylesheet shows it again")
+
+    def test_the_data_page_hands_over_a_file_by_its_script_and_never_by_a_link_to_a_door(self):
+        # A link to a document door saves the door's answer - {rev, doc, updatedAt} - which the page's own
+        # import refuses and the laptop tool takes for an empty ledger. The buttons save the bare document.
+        for stand in ("dev", "test", "prod"):
+            page = self.pages(self.web(stand))["data"].decode("utf-8")
+            self.assertNotIn("/api/founder/money", page, stand)
+            self.assertNotRegex(page, r"<a\b[^>]*\bdownload")
+            self.assertRegex(page, r'<button type="button" data-download="ledger">Скачать выписки</button>')
+            self.assertRegex(page, r'<button type="button" data-download="plan">Скачать план</button>')
+        script = read(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.js")).decode("utf-8")
+        self.assertIn("'money-ledger'", script)
+        self.assertIn("'money-plan'", script)
+        self.assertNotIn("setAttribute('download'", script)
+
+    def test_the_script_takes_its_own_copy_before_a_replace_and_empties_the_file_control_at_once(self):
+        # What the script does is run for real in PageScriptTests, where this machine can run JavaScript, and
+        # in a browser by checks/stand-smoke.mjs. This reads the order of things off its text, for everywhere else.
+        script = read(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.js")).decode("utf-8")
+        replace = script[script.index("$('confirm-yes').addEventListener('click'"):]
+        copy, sent = replace.index("saveFile(kept, now.text);"), replace.index("await call('PUT', spec.path")
+        self.assertLess(replace.index("const now = await serverState(job.kind);"), copy)
+        self.assertLess(replace.index("if (now.rev !== job.base) {"), copy, "nothing is copied or sent once the server has moved on")
+        self.assertLess(copy, sent, "the copy of what is replaced is saved before anything is sent")
+        chosen = script[script.index("const chosen = input.files && input.files[0];"):]
+        self.assertLess(chosen.index("input.value = '';"), chosen.index("return;"),
+                        "the control is emptied before any refusal leaves the handler: the same file can be chosen again")
+        save = script[script.index("function saveFile(name, text) {"):]
+        save = save[:save.index("\n  }\n")]
+        self.assertIn("new Blob([text]", save)
+        self.assertIn("link.download = name;", save)
+        self.assertNotIn("fetch", save, "a file is made of the text in hand, not of another request")
+
+
+# ---------------------------------------------------------------------------
+# The script of Money's own pages, run for real where this machine can run JavaScript
+# ---------------------------------------------------------------------------
+
+#: macOS ships a JavaScript shell with the system. Where there is none these tests are skipped: the
+#: pages are then driven in a real browser by checks/stand-smoke.mjs, in CI.
+JSC = next((path for path in (shutil.which("jsc"),
+                              "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc")
+            if path and os.access(path, os.X_OK)), None)
+
+#: What auth.js asks of a browser, and no more: elements with attributes, text, a value and listeners;
+#: fetch, Blob, an address bar. `server` is the door the scenario scripts; `saved` is what was handed
+#: over as a file; `calls` is every request made.
+_BROWSER = r"""
+'use strict';
+const all = [], saved = [], blobs = {}, calls = [];
+function El(tag, attrs, parent) {
+  this.tagName = tag.toUpperCase(); this.attrs = attrs || {}; this.children = []; this.parentNode = parent || null;
+  this.listeners = {}; this.textContent = ''; this.value = this.attrs.value || ''; this.disabled = false; this.files = null;
+  this.className = this.attrs['class'] || ''; this.title = '';
+  if (parent) parent.children.push(this);
+  all.push(this);
+}
+Object.defineProperty(El.prototype, 'hidden', {
+  get() { return 'hidden' in this.attrs; },
+  set(on) { if (on) this.attrs.hidden = ''; else delete this.attrs.hidden; },
+});
+El.prototype.getAttribute = function (name) { return name in this.attrs ? this.attrs[name] : null; };
+El.prototype.setAttribute = function (name, value) { this.attrs[name] = String(value); };
+El.prototype.removeAttribute = function (name) { delete this.attrs[name]; };
+El.prototype.addEventListener = function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); };
+El.prototype.fire = async function (type) {
+  const event = { type: type, currentTarget: this, target: this, prevented: false, preventDefault() { this.prevented = true; } };
+  for (const fn of this.listeners[type] || []) await fn.call(this, event);
+  return event;
+};
+El.prototype.appendChild = function (child) { child.parentNode = this; this.children.push(child); return child; };
+El.prototype.removeChild = function (child) {
+  this.children = this.children.filter((one) => one !== child); child.parentNode = null; return child;
+};
+El.prototype.focus = function () { document.activeElement = this; };
+El.prototype.select = function () {};
+El.prototype.scrollIntoView = function () {};
+El.prototype.click = function () {
+  if (this.tagName === 'A' && this.download !== undefined) saved.push({ name: this.download, text: blobs[this.href] });
+  return this.fire('click');
+};
+El.prototype.visible = function () { for (let el = this; el; el = el.parentNode) if (el.hidden) return false; return true; };
+function matches(el, selector) {
+  const found = /^([a-z]*)(?:\[([a-z-]+)(?:="([^"]*)")?\])?$/.exec(selector);
+  if (!found) throw new Error('this stand-in for a browser knows no selector ' + selector);
+  if (found[1] && el.tagName !== found[1].toUpperCase()) return false;
+  if (found[2] && !(found[2] in el.attrs)) return false;
+  return found[3] === undefined || el.attrs[found[2]] === found[3];
+}
+function under(root, el) { for (let up = el.parentNode; up; up = up.parentNode) if (up === root) return true; return false; }
+El.prototype.querySelectorAll = function (selector) { return all.filter((el) => under(this, el) && matches(el, selector)); };
+El.prototype.querySelector = function (selector) { return this.querySelectorAll(selector)[0] || null; };
+const nodes = [];
+PAGE.forEach(function (spec) { nodes.push(new El(spec.tag, spec.attrs, spec.parent === null ? null : nodes[spec.parent])); });
+PAGE.forEach(function (spec, index) { nodes[index].textContent = spec.text; });
+const document = {
+  documentElement: nodes[0], body: all.filter((el) => el.tagName === 'BODY')[0], activeElement: null,
+  getElementById(id) { return all.filter((el) => el.attrs.id === id)[0] || null; },
+  querySelectorAll(selector) { return all.filter((el) => matches(el, selector)); },
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+  createElement(tag) { return new El(tag, {}, null); },
+};
+function Blob(parts) { this.text = parts.join(''); this.size = unescape(encodeURIComponent(this.text)).length; }
+const URL = {
+  createObjectURL(blob) { const address = 'blob:' + Object.keys(blobs).length; blobs[address] = blob.text; return address; },
+  revokeObjectURL() {},
+};
+const setTimeout = function () {};      // nothing here waits: the shell would wait with it
+const location = { hash: HASH, pathname: PATH, went: null, replace(address) { this.went = address; } };
+const history = { replaceState() { location.hash = ''; } };
+let server = function () { return { status: 0 }; };
+function fetch(path, init) {
+  calls.push(init.method + ' ' + path);
+  const answer = server(init.method, path, init.body);
+  if (!answer.status) return Promise.reject(new Error('no link'));
+  const said = answer.text === undefined ? JSON.stringify(answer.json) : answer.text;
+  return Promise.resolve({ status: answer.status, text() { return Promise.resolve(said); } });
+}
+const $ = (id) => document.getElementById(id);
+const shown = (id) => ($(id) && $(id).visible() ? $(id).textContent : null);
+const file = (name, content) => ({
+  name: name, size: unescape(encodeURIComponent(content)).length, text() { return Promise.resolve(content); },
+});
+"""
+
+
+class _Elements(html.parser.HTMLParser):
+    """A page as the list of its elements, each with its attributes, its own text and the index of its parent."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.nodes, self.open = [], []
+
+    def handle_starttag(self, tag, attrs):
+        self.nodes.append({"tag": tag, "attrs": {name: value if value is not None else "" for name, value in attrs},
+                           "parent": self.open[-1] if self.open else None, "text": ""})
+        if tag not in ("meta", "link", "input", "br", "hr", "img"):
+            self.open.append(len(self.nodes) - 1)
+
+    def handle_endtag(self, tag):
+        if self.open:
+            self.open.pop()
+
+    def handle_data(self, data):
+        if self.open and data.strip():
+            self.nodes[self.open[-1]]["text"] += data
+
+
+@unittest.skipUnless(JSC, "no JavaScript shell on this machine; checks/stand-smoke.mjs drives these pages in a browser")
+class PageScriptTests(unittest.TestCase):
+    """assets/auth.js as a browser would run it, on the pages as the server sends them."""
+
+    #: A ledger as a door answers it, with things in it that only survive when the text is cut out and not re-made.
+    DOC = '{"v": 1, "tx": [{"id": "t-0", "a": 1.10}, {"id": "t-1", "a": 12345678901234567890}], "note": "как есть,   так и есть"}'
+    #: The document doors of a stand whose ledger is at revision 7 and whose plan was never saved.
+    DOORS = r"""
+      let rev = 7, stored = DOC, puts = [];
+      server = function (method, path, body) {
+        if (path !== '/api/founder/money') return { status: 200, text: '{"rev":0,"doc":{},"updatedAt":null}' };
+        if (method === 'GET') {
+          return { status: 200, text: rev ? '{"rev":' + rev + ',"doc":' + stored + ',"updatedAt":"2026-10-07T12:00:00.000Z"}'
+                                         : '{"rev":0,"doc":{},"updatedAt":null}' };
+        }
+        const sent = JSON.parse(body); puts.push(sent);
+        if (sent.base !== rev) return { status: 409, json: { error: 'money_stale', message: 'x', rev: rev } };
+        stored = sent.doc; rev += 1; return { status: 200, json: { rev: rev } };
+      };
+      const button = document.querySelector('[data-download="ledger"]');
+      const input = document.querySelector('input[data-upload="ledger"]');
+    """
+
+    def web(self, stand="dev"):
+        directory = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        settings = config.Settings.from_env(_harness.dev_environ(directory, 8123))
+        return httpd.WebFiles(dataclasses.replace(settings, stand=stand))
+
+    def run_page(self, page, scenario, path="/", fragment=""):
+        """Load ``page`` (bytes, as served), run auth.js on it, then ``scenario`` - the body of an async
+        function - and return what that returns."""
+        elements = _Elements()
+        elements.feed(page.decode("utf-8"))
+        elements.close()
+        script = read(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.js")).decode("utf-8")
+        source = "\n".join((
+            "const PAGE = %s, HASH = %s, PATH = %s, DOC = %s;" % (json.dumps(elements.nodes), json.dumps(fragment),
+                                                                 json.dumps(path), json.dumps(self.DOC)),
+            _BROWSER, script,
+            "(async function () {", scenario, "})().then(function (out) { print('RESULT ' + JSON.stringify(out)); },",
+            "  function (error) { print('FAILED ' + error + ' ' + error.stack); quit(4); });", ""))
+        directory = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        name = os.path.join(directory, "page.js")
+        with open(name, "w", encoding="utf-8") as handle:
+            handle.write(source)
+        done = subprocess.run([JSC, name], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+        said = done.stdout.decode("utf-8", "replace")
+        result = [line for line in said.splitlines() if line.startswith("RESULT ")]
+        self.assertEqual((done.returncode, len(result)), (0, 1), "the page's script failed:\n" + said[-2000:])
+        return json.loads(result[0][len("RESULT "):])
+
+    def test_the_set_password_page_says_the_login_once_the_link_is_accepted_and_only_then(self):
+        page = self.web().render("set-password")
+        token = "t" * 43
+        out = self.run_page(page, r"""
+          let sent = null;
+          server = function (method, path, body) {
+            sent = JSON.parse(body);
+            return { status: 200, json: { ok: true, firstName: 'Misha', login: 'misha' } };
+          };
+          const before = [$('setup-whose').visible(), $('setup-login').value, shown('setup-done'), $('setup-next').visible()];
+          $('new-password').value = 'correct horse battery staple';
+          $('new-password-again').value = 'correct horse battery staple';
+          const event = await $('setup-form').fire('submit');
+          return { before: before, prevented: event.prevented, calls: calls, sent: sent, hash: location.hash, went: location.went,
+                   done: shown('setup-done'), login: $('setup-login').value, whose: $('setup-whose').visible(),
+                   readonly: 'readonly' in $('setup-login').attrs, fields: $('setup-fields').visible(),
+                   kept: $('new-password').value, intro: $('setup-intro').visible(), next: $('setup-next').visible(),
+                   go: $('setup-go').attrs.href, focus: document.activeElement === $('setup-go'), error: shown('setup-error') };
+        """, path="/set-password", fragment="#t=" + token)
+        self.assertEqual(out["before"], [False, "", None, False], "before the link is accepted the page says no login")
+        self.assertEqual((out["prevented"], out["calls"]), (True, ["POST /api/auth/setup"]))
+        self.assertEqual(out["sent"], {"token": token, "password": "correct horse battery staple"})
+        self.assertEqual(out["hash"], "", "the token left the address bar")
+        self.assertEqual(out["done"], "Пароль сохранён. Логин: misha")
+        self.assertEqual((out["login"], out["whose"], out["readonly"]), ("misha", True, True),
+                         "the login stands in the form's own read-only username field")
+        self.assertEqual(out["kept"], "correct horse battery staple", "beside the password a password manager files it with")
+        self.assertEqual((out["fields"], out["intro"], out["error"]), (False, False, None))
+        self.assertEqual((out["next"], out["go"], out["focus"]), (True, "/", True), "a button to go on, and the page waits for it")
+        self.assertIsNone(out["went"], "the page does not leave before the founder has seen the login")
+
+    def test_a_link_that_does_not_work_is_told_nothing_but_that(self):
+        page = self.web().render("set-password")
+        refusals = r"""
+          $('new-password').value = 'correct horse battery staple'; $('new-password-again').value = 'correct horse battery staple';
+          await $('setup-form').fire('submit');
+          return { done: shown('setup-done'), login: $('setup-login').value, whose: $('setup-whose').visible(),
+                   error: shown('setup-error'), form: $('setup-form').visible(), next: $('setup-next').visible(), went: location.went };
+        """
+        dead = self.run_page(page, "server = function () { return { status: 404, json: { error: 'invalid_link', message: 'x' } }; };"
+                             + refusals, path="/set-password", fragment="#t=" + "t" * 43)
+        self.assertEqual(dead, {"done": None, "login": "", "whose": False, "form": False, "next": False, "went": None,
+                                "error": "Эта ссылка больше не работает: она одноразовая и действует 48 часов. Попросите новую."})
+        weak = self.run_page(
+            page, "server = function () { return { status: 400, json: { error: 'weak_password', message: 'x', min: 12 } }; };"
+            + refusals, path="/set-password", fragment="#t=" + "t" * 43)
+        self.assertEqual((weak["done"], weak["login"], weak["whose"], weak["form"], weak["next"]), (None, "", False, True, False))
+        self.assertIn("от 12 знаков", weak["error"])
+        none = self.run_page(page, "return { missing: shown('setup-missing'), form: $('setup-form').visible(), calls: calls };",
+                             path="/set-password")
+        self.assertEqual((none["form"], none["calls"]), (False, []))
+        self.assertIn("В адресе нет ключа ссылки", none["missing"])
+
+    def test_the_download_is_the_bare_document_cut_out_of_the_doors_answer_as_it_stands(self):
+        today = datetime.date.today().isoformat()
+        for stand in ("dev", "test"):       # the test stand draws no upload, and hands a document over all the same
+            page = self.web(stand).render("data", firstName="Mika", entries="[]")
+            out = self.run_page(page, self.DOORS + r"""
+              await button.click();
+              const first = { saved: saved.slice(), done: shown('data-done'), error: shown('data-error') };
+              saved.length = 0;
+              const doors = server;
+              server = function () { return { status: 503, json: { error: 'storage_damaged', message: 'x' } }; };
+              await button.click();
+              const damaged = { saved: saved.slice(), done: shown('data-done'), error: shown('data-error') };
+              server = function () { return { status: 0 }; };
+              await button.click();
+              const away = { saved: saved.slice(), error: shown('data-error') };
+              server = doors; rev = 0;
+              await button.click();
+              const empty = { saved: saved.slice(), error: shown('data-error'), done: shown('data-done') };
+              return { first: first, damaged: damaged, away: away, empty: empty, tag: button.tagName };
+            """, path="/data")
+            with self.subTest(stand=stand):
+                self.assertEqual(out["tag"], "BUTTON")
+                (handed,) = out["first"]["saved"]
+                self.assertEqual(handed["text"], self.DOC, "the document itself, character for character - not the door's answer")
+                self.assertRegex(handed["name"], r"^money-ledger-\d{4}-\d\d-\d\d\.json$")
+                self.assertIn(handed["name"], ("money-ledger-%s.json" % today,
+                                               "money-ledger-%s.json" % datetime.date.today().isoformat()))
+                self.assertEqual(out["first"]["done"], "Скачано: %s — выписки, ревизия 7, 2 строки." % handed["name"])
+                self.assertIsNone(out["first"]["error"])
+                # Nothing is saved when the door does not answer 200 - or has nothing to hand over.
+                self.assertEqual((out["damaged"]["saved"], out["damaged"]["done"]), ([], None))
+                self.assertTrue(out["damaged"]["error"].startswith("Файл не скачан. Документ на сервере повреждён"))
+                self.assertEqual(out["away"], {"saved": [], "error": "Файл не скачан. Нет связи с сервером. "
+                                                                     "Проверьте интернет и повторите."})
+                self.assertEqual(out["empty"], {"saved": [], "done": None, "error": "Скачивать нечего: на сервере ещё нет выписок."})
+
+    def test_a_replace_first_saves_what_it_replaces_and_replaces_nothing_without_that_copy(self):
+        page = self.web().render("data", firstName="Mika", entries="[]")
+        out = self.run_page(page, self.DOORS + r"""
+          const NEW = '{"tx":[{"id":"n"}],"note":"новый"}';
+          input.files = [file('new.json', NEW)]; await input.fire('change');
+          const asked = { panel: $('confirm').visible(), keeps: shown('confirm-keeps'), server: shown('confirm-server') };
+          let mark = calls.length;
+          await $('confirm-yes').click();
+          const replaced = { saved: saved.slice(), puts: puts.slice(), order: calls.slice(mark), done: shown('data-done'),
+                             error: shown('data-error'), panel: $('confirm').visible(), stored: stored };
+          // Somebody saves between the question and the press: nothing is replaced, and no file is made.
+          saved.length = 0; puts.length = 0;
+          input.files = [file('new.json', DOC)]; await input.fire('change');
+          rev += 1;
+          await $('confirm-yes').click();
+          const moved = { saved: saved.slice(), puts: puts.slice(), error: shown('data-error'), panel: $('confirm').visible() };
+          // The copy cannot be had: nothing is replaced.
+          input.files = [file('new.json', DOC)]; await input.fire('change');
+          const doors = server;
+          server = function (method, path, body) {
+            return method === 'GET' ? { status: 503, json: { error: 'storage_busy', message: 'x' } } : doors(method, path, body);
+          };
+          await $('confirm-yes').click();
+          const uncopied = { saved: saved.slice(), puts: puts.slice(), error: shown('data-error') };
+          // A server that holds nothing yet: there is nothing to keep, and the file becomes the first version.
+          server = doors; rev = 0; await $('confirm-no').click();
+          input.files = [file('new.json', NEW)]; await input.fire('change');
+          const first = shown('confirm-keeps');
+          await $('confirm-yes').click();
+          return { asked: asked, replaced: replaced, moved: moved, uncopied: uncopied,
+                   fresh: { keeps: first, saved: saved.slice(), puts: puts.slice(), done: shown('data-done') } };
+        """, path="/data")
+        kept = "money-ledger-before-replace-%s.json" % datetime.date.today().isoformat()
+        self.assertTrue(out["asked"]["panel"])
+        self.assertIn("Перед ней страница сама скачает то, что сейчас на сервере", out["asked"]["keeps"])
+        self.assertIn(kept, out["asked"]["keeps"])
+        replaced = out["replaced"]
+        self.assertEqual(replaced["saved"], [{"name": kept, "text": self.DOC}], "what was on the server, as it stood")
+        self.assertEqual(replaced["order"], ["GET /api/founder/money", "PUT /api/founder/money", "GET /api/founder/money"],
+                         "the copy is taken before anything is sent")
+        self.assertEqual(replaced["puts"], [{"base": 7, "doc": '{"tx":[{"id":"n"}],"note":"новый"}'}])
+        self.assertEqual((replaced["stored"], replaced["error"], replaced["panel"]), ('{"tx":[{"id":"n"}],"note":"новый"}', None, False))
+        self.assertEqual(replaced["done"], "Готово: на сервере теперь выписки из файла, ревизия 8. То, что было до замены "
+                                           "(ревизия 7), скачано: %s. Открытые вкладки Money обновите." % kept)
+        self.assertEqual(out["moved"], {"saved": [], "puts": [], "panel": False,
+                                        "error": "Пока вы выбирали файл, документ на сервере изменился. Выберите файл ещё раз."})
+        self.assertEqual((out["uncopied"]["saved"], out["uncopied"]["puts"]), ([], []))
+        self.assertTrue(out["uncopied"]["error"].startswith("Замена не началась: не удалось скачать то, что сейчас на сервере."))
+        fresh = out["fresh"]
+        self.assertEqual((fresh["saved"], fresh["puts"]), ([], [{"base": 0, "doc": '{"tx":[{"id":"n"}],"note":"новый"}'}]))
+        self.assertTrue(fresh["keeps"].startswith("На сервере пока пусто: файл станет первой версией."))
+        self.assertEqual(fresh["done"], "Готово: на сервере теперь выписки из файла, ревизия 1. Открытые вкладки Money обновите.")
+
+    def test_the_same_file_can_be_chosen_again_after_it_was_refused(self):
+        # A browser reports no change when the file chosen is the one the control already holds.
+        page = self.web().render("data", firstName="Mika", entries="[]")
+        out = self.run_page(page, self.DOORS + r"""
+          const tries = {};
+          const cases = { 'not json': 'not json', 'the other document': '{"banks":[]}', 'no document': '{"x":1}', 'too large': null };
+          for (const what of Object.keys(cases)) {
+            const huge = { name: 'big.json', size: 17 * 1024 * 1024, text() { return Promise.resolve('{}'); } };
+            input.files = [cases[what] === null ? huge : file('x.json', cases[what])];
+            input.value = 'C:\\fakepath\\x.json';
+            await input.fire('change');
+            tries[what] = { value: input.value, error: shown('data-error'), panel: $('confirm').visible() };
+          }
+          const doors = server;
+          server = function () { return { status: 502, text: 'Bad Gateway' }; };
+          input.files = [file('good.json', DOC)]; input.value = 'C:\\fakepath\\good.json';
+          await input.fire('change');
+          tries['the stand is restarting'] = { value: input.value, error: shown('data-error'), panel: $('confirm').visible() };
+          server = doors;
+          input.files = [file('good.json', DOC)]; input.value = 'C:\\fakepath\\good.json';
+          await input.fire('change');
+          return { tries: tries, then: { value: input.value, error: shown('data-error'), panel: $('confirm').visible() } };
+        """, path="/data")
+        for what, tried in out["tries"].items():
+            with self.subTest(refused=what):
+                self.assertEqual((tried["value"], tried["panel"]), ("", False), "the control still holds the refused file")
+                self.assertTrue(tried["error"])
+        self.assertEqual(out["tries"]["the stand is restarting"]["error"], "Сервер ответил ошибкой 502. Повторите позже.")
+        self.assertEqual(out["then"], {"value": "", "error": None, "panel": True})
+
+    def test_the_journal_words_what_the_server_writes_and_a_sign_out_that_did_not_reach_the_server(self):
+        entries = [{"t": "2026-10-07T12:00:00Z", "event": "floor-raised", "doc": "ledger", "floor": 108, "was": 100, "by": "ctl"},
+                   {"t": "2026-10-07T12:00:01Z", "event": "link-retired", "login": "vanya", "by": "ctl"},
+                   {"t": "2026-10-07T12:00:02Z", "event": "storage-unsynced", "file": "ledger", "rev": 9, "by": "mika"}]
+        page = self.web().render("data", firstName="Mika", entries=json.dumps(entries))
+        out = self.run_page(page, r"""
+          const rows = $('journal').querySelector('tbody').children.map(
+            (row) => [row.className].concat(row.children.map((cell) => cell.textContent).slice(1)));
+          server = function () { return { status: 507, json: { error: 'storage_failed', message: 'x' } }; };
+          await $('logout').click();
+          const failed = { error: shown('logout-error'), went: location.went, disabled: $('logout').disabled };
+          server = function () { return { status: 200, json: { ok: true } }; };
+          await $('logout').click();
+          return { rows: rows, failed: failed, went: location.went };
+        """, path="/data")
+        self.assertEqual(out["rows"], [
+            ["", "Нумерация ревизий поднята: открытые раньше страницы попросят обновить", "", "с сервера",
+             "документ: выписки · следующие ревизии выше: 108 · было: 100"],
+            ["", "Одноразовая ссылка отозвана: она больше не работает", "vanya", "с сервера", ""],
+            ["alarm", "Диск не подтвердил запись: сохранённое на месте, но может не пережить сбой питания", "", "",
+             "что записано: выписки · ревизия: 9 · кем: mika"]])
+        # The door cleared this browser's cookie; only the server's copy of the session is still open. Not "nothing changed".
+        self.assertTrue(out["failed"]["error"].startswith("Этот браузер вышел, но сервер не смог закрыть вход у себя"))
+        self.assertEqual((out["failed"]["went"], out["failed"]["disabled"], out["went"]), (None, False, "/login"))
+
+    def test_the_sign_in_form_sends_what_was_typed_and_says_what_the_door_said(self):
+        page = self.web().render("login", state="form", firstName="", login="")
+        out = self.run_page(page, r"""
+          let sent = null;
+          server = function (method, path, body) {
+            sent = JSON.parse(body);
+            return { status: 401, json: { error: 'invalid_credentials', message: 'x' } };
+          };
+          $('login').value = ' misha@selfstudio.se '; $('password').value = 'correct horse battery staple';
+          await $('login-form').fire('submit');
+          const refused = { sent: sent, error: shown('login-error'), went: location.went, hint: shown('login-hint') };
+          server = function () { return { status: 200, json: { ok: true, firstName: 'Misha' } }; };
+          $('login').value = 'misha';
+          await $('login-form').fire('submit');
+          return { refused: refused, went: location.went, state: document.body.attrs['data-state'], who: shown('logout') };
+        """, path="/login", fragment="#cash")
+        self.assertEqual(out["refused"]["sent"], {"login": "misha@selfstudio.se", "password": "correct horse battery staple"})
+        self.assertEqual(out["refused"]["error"], "Логин и пароль не подходят. Проверьте логин: это имя из ссылки-приглашения, не e-mail.")
+        self.assertEqual(out["refused"]["hint"], "Логин — имя из ссылки-приглашения, не e-mail.")
+        self.assertIsNone(out["refused"]["went"])
+        self.assertEqual((out["went"], out["state"], out["who"]), ("/#cash", "form", None),
+                         "back to the page, on the tab the address asked for; what belongs to a founder is not shown to a stranger")
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +902,15 @@ class WalkTests(StandCase):
         link = re.search(r"http://finance\.localhost:%d/set-password#t=(\S+)" % stand.port, invited.out)
         self.assertIsNotNone(link, "the link is built from the public URL, with the token after the #")
         token = link.group(1)
-        self.assertEqual(stand.get("/set-password").status, 200)
-        self.assertRefused(stand.post("/api/auth/setup", {"token": token, "password": "short"}), 400, "weak_password")
+        self.assertRegex(invited.out, r"\nlogin: mika\nhttp://[^\n]+\n$", "the login on a line of its own, above the link")
+        page = stand.get("/set-password")
+        self.assertEqual(page.status, 200)
+        self.assertNotIn("mika", page.text.lower(), "the page knows no login before a link has been accepted")
+        weak = stand.post("/api/auth/setup", {"token": token, "password": "short"})
+        self.assertRefused(weak, 400, "weak_password")
+        self.assertNotIn("mika", weak.text.lower())
         setup = stand.post("/api/auth/setup", {"token": token, "password": PASSWORD})
-        self.assertEqual((setup.status, setup.json()), (200, {"ok": True, "firstName": "Mika"}))
+        self.assertEqual((setup.status, setup.json()), (200, {"ok": True, "firstName": "Mika", "login": "mika"}))
         first = setup.cookie("money-dev")
         self.assertEqual(setup.all("Set-Cookie"), [first + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"])
         self.assertRefused(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD + "!"}), 404, "invalid_link")
@@ -394,6 +998,7 @@ class WalkTests(StandCase):
         self.assertEqual(login.status, 200)
         self.assertIn('data-state="signed-in"', login.text)
         self.assertIn("Вы вошли как Mika", login.text)
+        self.assertIn('Ваш логин: <b class="mono">mika</b>', login.text)
         data = stand.get("/data", cookie=cookie)
         self.assertEqual((data.status, data.header("Content-Security-Policy")), (200, httpd.CSP_OWN_PAGES))
         self.assertIn('data-upload="ledger"', data.text)
@@ -946,21 +1551,49 @@ class LimitsTests(unittest.TestCase):
                 pass
             self.assertLess(time.monotonic() - began, 2.5)
 
-    def test_strangers_work_within_their_slots_and_founders_do_not_wait_behind_them(self):
+    def test_strangers_with_a_body_work_within_their_slots_and_nobody_waits_behind_them(self):
         with _harness.Stand(tune={"signed_out_slots": 2, "auth_body_deadline": 5.0}) as stand:
             cookie = stand.session()
             held = [self.hold(stand, self.half_a_sign_in(stand)) for _slot in range(2)]
-            busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.get("/login")))
-            self.assertIsNotNone(busy, "with both slots taken a stranger is turned away at once")
+            # With both slots taken, a stranger who brings a body is turned away at once ...
+            busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.post("/api/auth/login", {})))
+            self.assertIsNotNone(busy, "with both slots taken a stranger's body is turned away at once")
             self.assertEqual(busy.json()["error"], "busy")
             self.assertEqual(busy.header("Retry-After"), "1")
-            self.assertEqual(stand.get("/api/me").status, 503)
+            self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}).status, 503)
+            # ... and one who brings none is answered: such a request cannot stall, so it takes no slot.
+            self.assertEqual(stand.get("/login").status, 200)
+            self.assertEqual(stand.get("/assets/auth.js").status, 200)
+            self.assertEqual(stand.get("/api/me").status, 401)
+            self.assertEqual(stand.get("/").status, 302)
+            self.assertEqual(stand.server.signed_out(), 2)
+            # Founders never wait behind strangers, whatever they bring.
             self.assertEqual(stand.get("/api/me", cookie=cookie).status, 200)
             self.assertEqual(stand.get("/", cookie=cookie).status, 200)
-            self.assertEqual(stand.get("/healthz").status, 200, "the health check is not a stranger")
+            self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json(), {"rev": 1})
+            self.assertEqual(stand.get("/healthz").status, 200)
             for connection in held:
                 connection.close()
-            self.assertTrue(until(lambda: stand.get("/login").status == 200))
+            self.assertTrue(until(lambda: stand.post("/api/auth/login", {}).status == 400))
+            self.assertTrue(until(lambda: stand.server.signed_out() == 0))
+
+    def test_one_address_holds_two_of_the_eight_slots_and_everybody_else_gets_in(self):
+        env = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}
+        with _harness.Stand(env=env, tune={"auth_body_deadline": 5.0}) as stand:
+            token = stand.invite("misha")
+            held = [self.hold(stand, self.half_a_sign_in(stand, "203.0.113.7")) for _connection in range(2)]
+            self.assertTrue(until(lambda: stand.server.signed_out("203.0.113.7") == 2))
+            mine, other = {"X-Forwarded-For": "203.0.113.7"}, {"X-Forwarded-For": "203.0.113.8"}
+            third = stand.post("/api/auth/login", {}, headers=mine)
+            self.assertEqual((third.status, third.json()["error"], third.header("Retry-After")), (503, "busy", "1"))
+            self.assertEqual(stand.server.signed_out(), 2, "the six other slots are everybody else's")
+            # Another address signs in through the link - the way out of a lock-out - while the first stalls.
+            self.assertEqual(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}, headers=other).status, 200)
+            self.assertEqual(stand.get("/login", headers=mine).status, 200, "and a page is no body: even the address itself gets it")
+            for connection in held:
+                connection.close()
+            self.assertTrue(until(lambda: stand.server.signed_out("203.0.113.7") == 0))
+            self.assertEqual(stand.post("/api/auth/login", {}, headers=mine).status, 400)
 
     def test_no_thread_free_is_a_bare_503(self):
         with _harness.Stand(tune={"max_connections": 3}) as stand:
@@ -1056,6 +1689,12 @@ class CtlTests(StandCase):
         self.assertEqual(shown.status, 0, shown.err)
         self.assertRegex(shown.out, r"\nhttp://finance\.localhost:%d/set-password#t=[A-Za-z0-9_-]{20,}\n$" % stand.port)
         self.assertIn("until 2026-10-09T12:00:00Z", shown.out)
+        # The login stands on a line of its own right above the link: both are passed on to the founder.
+        lines = shown.out.splitlines()
+        self.assertEqual(lines[-2], "login: mika")
+        self.assertTrue(lines[-1].startswith("http://finance.localhost:"))
+        self.assertEqual(len(lines), 4)
+        self.assertIn("not an e-mail", shown.out)
         printed = stand.ctl("user", "invite", "mika", "--print")
         self.assertEqual(printed.status, 0)
         old, new = shown.out.split("#t=")[1].strip(), printed.out.split("#t=")[1].strip()
@@ -1170,6 +1809,175 @@ class CtlTests(StandCase):
                          "ledger: 0 snapshot(s) older than 2 day(s) purged\nplan: 0 snapshot(s) older than 2 day(s) purged\n")
         self.assertRegex(stand.ctl("purge-snapshots", "--older-than-days", "0").out, r"^ledger: 2 snapshot\(s\)")
         self.assertIn("0 snapshot(s) of the ledger", stand.ctl("snapshots", "ledger").out)
+
+    def test_floor_puts_every_later_revision_above_what_a_page_may_hold(self):
+        # A whole stand put back from a backup: the ledger is at 3 again, and a page opened before holds 8.
+        stand = self.stand
+        cookie = stand.session()
+        for base in range(3):
+            self.assertEqual(stand.put(LEDGER, {"base": base, "doc": ledger(3 + base)}, cookie=cookie).status, 200)
+        before = stand.get(LEDGER, cookie=cookie).body
+        raised = stand.ctl("floor", "ledger", "8")
+        self.assertEqual((raised.status, raised.err), (0, ""))
+        self.assertEqual(raised.out, "ledger: revision 3; floor 8 (was 3). The next save or restore becomes revision 9.\n")
+        self.assertEqual(stand.get(LEDGER, cookie=cookie).body, before, "the document and its revision are not touched")
+        self.assertIn("  ledger: revision 3, 5 rows, ", stand.ctl("doctor").out)
+        self.assertIn("; floor 8 (the next save becomes revision 9)", stand.ctl("doctor").out)
+        # The page from before the restore is told to reload, at whatever number the stand stands ...
+        stale = stand.put(LEDGER, {"base": 8, "doc": ledger(1)}, cookie=cookie)
+        self.assertEqual((stale.status, stale.json()["rev"]), (409, 3))
+        # ... and the page that did reload saves - above every number a page from before can hold.
+        self.assertEqual(stand.put(LEDGER, {"base": 3, "doc": ledger(6)}, cookie=cookie).json(), {"rev": 9})
+        for base in (4, 5, 6, 7, 8):
+            self.assertEqual(stand.put(LEDGER, {"base": base, "doc": ledger(1)}, cookie=cookie).status, 409, base)
+        # It never lowers anything, and says so.
+        again = stand.ctl("floor", "ledger", "5")
+        self.assertEqual((again.status, again.out), (0, "ledger: revision 9; floor 9 (it was that already; nothing "
+                                                        "was changed). The next save or restore becomes revision 10.\n"))
+        # A document that was never saved takes a floor and stays empty: the cut-over runs it before the import.
+        plan_floor = stand.ctl("floor", "plan", "000041")
+        self.assertEqual((plan_floor.status, plan_floor.out),
+                         (0, "plan: never saved (revision 0); floor 41 (was 0). The next save or restore becomes revision 42.\n"))
+        self.assertEqual(stand.get(PLAN, cookie=cookie).body, b'{"rev":0,"doc":{},"updatedAt":null}')
+        self.assertEqual(stand.ctl("empty").status, 1, "the ledger holds something; the plan alone would still be empty")
+        self.assertIn("  plan: never saved (revision 0); floor 41 (the next save becomes revision 42)", stand.ctl("doctor").out)
+        self.assertEqual(stand.put(PLAN, {"base": 0, "doc": plan(2)}, cookie=cookie).json(), {"rev": 42})
+        self.assertEqual([(entry["doc"], entry["floor"], entry["was"], entry["by"])
+                          for entry in stand.security_events() if entry["event"] == "floor-raised"],
+                         [("ledger", 8, 3, "ctl"), ("ledger", 9, 9, "ctl"), ("plan", 41, 0, "ctl")])
+        # A damaged document takes a floor as well; its revision is then said to be unknown, not made up.
+        with open(os.path.join(stand.data_dir, "ledger", "current.json"), "r+b") as handle:
+            handle.truncate(30)
+        damaged = stand.ctl("floor", "ledger", "20")
+        self.assertEqual(damaged.status, 0, damaged.err)
+        self.assertEqual(damaged.out, "ledger: its stored file is damaged or lost, so its revision is not known (run: ctl "
+                                      "doctor); floor 20 (was 9). The next save or restore becomes revision 21 or higher.\n")
+
+    def test_floor_takes_a_whole_number_of_fifteen_digits_at_most_and_nothing_else(self):
+        stand = self.stand
+        cookie = stand.session()
+        stand.put(LEDGER, {"base": 0, "doc": ledger(3)}, cookie=cookie)
+        for number in ("-1", "-5", "1" + "0" * 15, "9" * 16, "9" * 400):
+            refused = stand.ctl("floor", "ledger", number)
+            self.assertEqual((refused.status, refused.out), (2, ""), number)
+            self.assertIn("refused: A floor is a revision: a whole number from 0 to 999999999999999", refused.err)
+            self.assertIn("Nothing was changed.", refused.err)
+        for arguments in (("floor",), ("floor", "ledger"), ("floor", "other", "5"), ("floor", "ledger", "five"),
+                          ("floor", "ledger", "1_000"), ("floor", "ledger", "+5"), ("floor", "ledger", "5.0"),
+                          ("floor", "ledger", "1e3"), ("floor", "ledger", ""), ("floor", "ledger", "5", "6"),
+                          ("floor", "ledger", "٥")):
+            wrong = stand.ctl(*arguments)
+            self.assertEqual((wrong.status, wrong.out), (2, ""), arguments)
+            self.assertIn("usage: ", wrong.err)
+        self.assertEqual(stand.stores["ledger"].floor(), 1, "none of them moved anything")
+        self.assertEqual([entry for entry in stand.security_events() if entry["event"] == "floor-raised"], [])
+        self.assertEqual(stand.ctl("floor", "ledger", "999999999999999").status, 0, "fifteen digits are taken")
+        self.assertEqual(stand.put(LEDGER, {"base": 1, "doc": ledger(4)}, cookie=cookie).json(), {"rev": 10 ** 15})
+
+    def test_retire_links_ends_every_pending_link_and_says_whose(self):
+        # A whole stand put back from a backup: a link that was used since is pending again in the accounts file.
+        stand = self.stand
+        stand.set_password("mika")
+        spent, waiting = stand.invite("misha"), stand.invite("vanya")
+        cookie = stand.session("mika")
+        done = stand.ctl("user", "retire-links")
+        self.assertEqual((done.status, done.err), (0, ""))
+        lines = done.out.splitlines()
+        self.assertEqual(lines[:2], ["misha: its pending one-time link is retired; issue a new one with: user invite misha",
+                                     "vanya: its pending one-time link is retired; issue a new one with: user invite vanya"])
+        self.assertEqual(lines[2].split()[:2], ["login", "name"], "then the table of user list")
+        self.assertEqual(lines[2:], stand.ctl("user", "list").out.splitlines())
+        self.assertEqual(len(lines), 6)
+        for row in lines[3:]:
+            self.assertTrue(row.rstrip().endswith(" -"), "no link is pending any more: %r" % row)
+        for token in (spent, waiting):
+            self.assertRefused(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}), 404, "invalid_link")
+        self.assertNotIn(spent, done.out)
+        self.assertNotIn(waiting, done.out)
+        # Nothing but the links is touched: the password and the open session are what they were.
+        self.assertEqual(stand.get("/api/me", cookie=cookie).status, 200)
+        self.assertEqual(stand.post("/api/auth/login", {"login": "mika", "password": PASSWORD}).status, 200)
+        self.assertEqual([(entry["login"], entry["by"]) for entry in stand.security_events() if entry["event"] == "link-retired"],
+                         [("misha", "ctl"), ("vanya", "ctl")])
+        # With none pending it says so, shows the table and is still 0: a restore script runs it unconditionally.
+        none = stand.ctl("user", "retire-links")
+        self.assertEqual((none.status, none.err), (0, ""))
+        self.assertEqual(none.out.splitlines()[0], "no one-time link was pending; nothing was changed")
+        self.assertEqual(none.out.splitlines()[1:], stand.ctl("user", "list").out.splitlines())
+        self.assertEqual(len([entry for entry in stand.security_events() if entry["event"] == "link-retired"]), 2)
+        # A founder who needs one is issued a new link afterwards, and that one works.
+        fresh = stand.ctl("user", "invite", "misha", "--print").out.split("#t=")[1].strip()
+        self.assertEqual(stand.post("/api/auth/setup", {"token": fresh, "password": PASSWORD}).status, 200)
+        self.assertEqual(stand.ctl("user", "retire-links", "now").status, 2)
+        with open(os.path.join(stand.data_dir, "auth", "users.json"), "wb") as handle:
+            handle.write(b"{")
+        broken = stand.ctl("user", "retire-links")
+        self.assertEqual((broken.status, broken.out), (1, ""))
+        self.assertIn("auth_damaged", broken.err)
+
+    def test_purge_takes_a_number_of_days_a_calendar_reaches(self):
+        stand = self.stand
+        cookie = stand.session()
+        stand.put(LEDGER, {"base": 0, "doc": ledger(3)}, cookie=cookie)
+        stand.clock.tick(days=1)
+        stand.put(LEDGER, {"base": 1, "doc": ledger(4)}, cookie=cookie)
+        for days in ("36501", "3660000", "99999999999999999999", "9" * 5000, "-1"):
+            refused = stand.ctl("purge-snapshots", "--older-than-days", days)
+            self.assertEqual((refused.status, refused.out), (2, ""), days[:24])
+            self.assertIn("--older-than-days takes a whole number of days from 0 to 36500", refused.err)
+            self.assertIn("Nothing was deleted.", refused.err)
+            self.assertNotIn("Traceback", refused.err)
+        self.assertIn("1 snapshot(s) of the ledger", stand.ctl("snapshots", "ledger").out)
+        self.assertEqual([entry for entry in stand.security_events() if entry["event"] == "snapshots-purged"], [])
+        kept = stand.ctl("purge-snapshots", "--older-than-days", "36500")
+        self.assertEqual((kept.status, kept.out.splitlines()[0]), (0, "ledger: 0 snapshot(s) older than 36500 day(s) purged"))
+
+    def page_with(self, change):
+        """A web directory whose page is the repository's with ``change`` applied to its text; its vendor files are the real ones."""
+        directory = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        with open(os.path.join(directory, "index.html"), "w", encoding="utf-8") as handle:
+            handle.write(change(read(INDEX).decode("utf-8")))
+        os.symlink(os.path.join(_harness.CHECKOUT, "vendor"), os.path.join(directory, "vendor"))
+        return directory
+
+    def test_selfcheck_fails_a_page_whose_handlers_the_enforced_policy_will_not_run(self):
+        # The deploy goes back to the previous image when the self-check fails. A page with an inline
+        # handler passed it with a warning above fifteen "ok" lines - and its control did nothing in a browser.
+        with_handler = self.page_with(lambda page: page.replace("<body", "<body onload=\"start()\"", 1))
+        self.assertEqual(httpd.inspect_page(read(os.path.join(with_handler, "index.html"))).inline_handlers, 1)
+        with _harness.Stand(env={"MONEY_WEB_DIR": with_handler}) as stand:
+            check = stand.ctl("selfcheck")
+            self.assertEqual(check.status, 1, check.out)
+            self.assertIn("FAIL  the page's markup has no inline event handler and no javascript: address "
+                          "(the enforced policy does not run them)\n        got: 1 found", check.out)
+            self.assertRegex(check.out, r"self-check: FAILED - 1 of \d+ checks\n$")
+            self.assertIn("ok    / is the page of this image, byte for byte", check.out, "the other checks are still made")
+        # Under report-only - the documented way to carry such a page for a dated while - it is said and passed.
+        with _harness.Stand(env={"MONEY_WEB_DIR": with_handler, "MONEY_CSP": "report-only"}) as stand:
+            check = stand.ctl("selfcheck")
+            self.assertEqual(check.status, 0, check.out)
+            self.assertIn("  WARNING: the page has 1 inline event handler(s); the policy will not run them once it is enforced\n",
+                          check.out)
+            self.assertNotIn("FAIL", check.out)
+        # The page as it is: the check is made, and passed.
+        check = self.stand.ctl("selfcheck")
+        self.assertEqual(check.status, 0, check.out)
+        self.assertIn("ok    the page's markup has no inline event handler and no javascript: address", check.out)
+        self.assertNotIn("WARNING", check.out)
+
+    def test_selfcheck_points_at_what_may_not_run_without_failing_for_a_guess(self):
+        template = "<script>extra.innerHTML = '<button onclick=\"go()\">x</button>'; load('/money/vendor/pdf.min.mjs');</script></body>"
+        guessed = self.page_with(lambda page: page.replace("</body>", template, 1))
+        with _harness.Stand(env={"MONEY_WEB_DIR": guessed}) as stand:
+            check = stand.ctl("selfcheck")
+            self.assertEqual(check.status, 0, check.out)
+            self.assertIn("  WARNING: 1 place(s) in the page's inline script look like markup with an inline event handler",
+                          check.out)
+            self.assertIn("  WARNING: the page names pdf.min.mjs under /money/vendor/, and only pdf.min.js, "
+                          "pdf.worker.min.js, xlsx.full.min.js are served there\n", check.out)
+            said = [line.get("text", "") for line in stand.log_lines() if line.get("event") == "warning"]
+            self.assertEqual(said, [], "the in-process stand prints no boot line; the boot's own words are tested below")
 
     def test_seed_and_purge_exist_on_made_up_data_only(self):
         directory = tempfile.mkdtemp(prefix="money-test-")
@@ -1294,6 +2102,33 @@ class BootTests(unittest.TestCase):
             status, _out, err = self.boot(_harness.dev_environ(directory, stand.port))
             self.assertEqual(status, 2)
             self.assertIn("cannot listen on 127.0.0.1 port %d" % stand.port, err)
+        # Said by the server class itself, whatever the Python under it would do by default: on a release
+        # where a listener shares its port unless told otherwise, the second moneyd would bind and serve.
+        self.assertIs(httpd.MoneyServer.allow_reuse_port, False)
+
+    def test_a_page_the_policy_will_not_run_in_full_boots_and_says_so_under_the_boot_line(self):
+        # The boot goes on - `ctl selfcheck` is what fails the deploy - but what is known is said out loud.
+        directory = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        page = read(INDEX).decode("utf-8").replace("<body", "<body onload=\"start()\"", 1).replace(
+            "</body>", "<script>x.innerHTML = '<a onclick=\"go()\">x</a>'; load('/money/vendor/pdf.min.mjs');</script></body>", 1)
+        with open(os.path.join(directory, "index.html"), "w", encoding="utf-8") as handle:
+            handle.write(page)
+        os.symlink(os.path.join(_harness.CHECKOUT, "vendor"), os.path.join(directory, "vendor"))
+        stand = _harness.ProcessStand(env={"MONEY_WEB_DIR": directory})
+        self.addCleanup(stand.stop)
+        self.assertEqual(stand.get("/login").status, 200)
+        self.assertEqual(stand.stop(), 0)
+        lines = [json.loads(line) for line in stand.output().splitlines()]
+        self.assertEqual((lines[0]["event"], lines[0]["inlineScripts"]), ("boot", 2))
+        warnings = [line["text"] for line in lines if line.get("event") == "warning"]
+        self.assertEqual(warnings, [
+            "the page has 1 inline event handler(s); its policy does not run them",
+            "1 place(s) in the page's inline script look like markup with an inline event handler; its policy does "
+            "not run such a handler either",
+            "the page names pdf.min.mjs under /money/vendor/, and only pdf.min.js, pdf.worker.min.js, "
+            "xlsx.full.min.js are served there",
+        ])
 
     def test_the_real_thing_from_boot_to_sigterm(self):
         stand = _harness.ProcessStand()

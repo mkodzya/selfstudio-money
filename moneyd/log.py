@@ -75,6 +75,8 @@ EVENTS = {
     "sign-out": "a session was closed by its owner (login, addr)",
     "link-issued": "a one-time link was issued (login, by, expires)",
     "link-used": "a one-time link was used (login, addr)",
+    "link-retired": "a pending one-time link was retired from the server before it was used - after a stand was "
+                    "put back from a backup, in which a link spent since is pending again (login, by)",
     "link-refused": "a set-password attempt with a link that does not work (addr, n)",
     "link-blocked": "the limiter refused the set-password door; once per address and window (addr, retryAfter)",
     "password-set": "a password was set through a link; the login's other sessions were closed (login, addr, count)",
@@ -84,9 +86,16 @@ EVENTS = {
     "user-enabled": "a login was enabled again (login, by)",
     "sessions-damaged": "sessions.json could not be read and was moved aside; everybody signs in again (detail)",
     "seed": "a document was written by ctl seed (doc, by, rev)",
-    "doc-shrunk": "a save dropped more than half of a document's rows; the copy it replaced is a shrink- snapshot "
+    "doc-shrunk": "a save dropped more than half of a document's rows; what it replaced is kept in the snapshot "
+                  "named - a shrink- copy, or the day's copy when that save was the day's first "
                   "(doc, by, rev, rows, fromRows, snapshot)",
     "restore": "a snapshot was restored as a new revision (doc, snapshot, rev, fromRev, kept, by)",
+    "floor-raised": "the server was told that no revision of a document at or below `floor` may be given out "
+                    "again - after a stand was put back from a backup, or before the cut-over import; `was` is "
+                    "the number before, and equal to `floor` when it was high enough already (doc, floor, was, by)",
+    "storage-unsynced": "a file was put in place, but the disk did not confirm that it will survive a power cut; "
+                        "the write is what everybody now reads (file: ledger, plan, users.json or sessions.json; "
+                        "for a document also rev, by)",
     "snapshots-purged": "snapshots were deleted on a test or dev stand (doc, count, days, by)",
 }
 

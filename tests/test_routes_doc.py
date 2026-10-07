@@ -2,8 +2,9 @@
 
     python3 -m unittest tests.test_routes_doc -v
 
-The document is the contract the frozen page was written against, so the document and the
-server have to say the same thing. A parser reads three parts of it here:
+The document is the contract the page was written against - the released page and every tab a
+founder has open speak it - so the document and the server have to say the same thing. A parser
+reads three parts of it here:
 
 * the table under ``## Routes``, against ``moneyd.httpd.ROUTES`` and against what a running
   stand answers on every row;
@@ -625,6 +626,52 @@ class AnswerShapeTests(unittest.TestCase):
         out = stand.post(LOGOUT, {}, cookie=signed.cookie(stand.settings.cookie_name))
         self.assertEqual(sorted(out.json()), sorted(self.sketched("POST /api/auth/logout")))
 
+    def sent(self, title: str) -> List[str]:
+        """The members of the body a door takes, as its section sketches it: "The body is `{...}`"."""
+        found = re.search(r"The body is `([^`]+)`", section(self.text, title, 3))
+        self.assertIsNotNone(found, "'### %s' must say what the body is, as an object in backticks" % title)
+        return members(found.group(1))
+
+    def test_the_sign_in_doors_take_the_members_the_document_sketches(self):
+        # A client is written from the document: the names it gives are the names the server reads.
+        stand = self.stand
+        stand.set_password("mika")
+        self.assertEqual(self.sent("POST /api/auth/login"), ["login", "password"])
+        self.assertEqual(self.sent("POST /api/auth/setup"), ["token", "password"])
+        self.assertEqual(self.sent("POST /api/auth/logout"), [])
+        values = {"login": "mika", "password": PASSWORD, "token": stand.invite("misha")}
+        for title, door in (("POST /api/auth/login", LOGIN), ("POST /api/auth/setup", SETUP)):
+            names = self.sent(title)
+            for name in names:
+                with self.subTest(door=door, without=name):
+                    other = {member: values[member] for member in names if member != name}
+                    other[name.upper()] = values[name]          # the same value under a name the document does not give
+                    self.assertGreaterEqual(stand.post(door, other).status, 400)
+            with self.subTest(door=door, members=names):
+                self.assertEqual(stand.post(door, {name: values[name] for name in names}).status, 200)
+        # The sign-out door takes the empty object, and no body at all.
+        self.assertEqual(stand.post(LOGOUT, {}).status, 200)
+        self.assertEqual(stand.post(LOGOUT, body=b"", headers=JSON).status, 200)
+
+    def test_the_setup_answer_names_the_login_the_sign_in_door_then_takes(self):
+        # The one place a founder is told what to type into «Логин»: it has to be the thing that works there.
+        stand = self.stand
+        self.assertIn("login", self.sketched("POST /api/auth/setup"))
+        self.assertNotIn("login", self.sketched("POST /api/auth/login"))
+        fresh = stand.post(SETUP, {"token": stand.invite("vanya"), "password": PASSWORD})
+        self.assertEqual(fresh.json(), {"ok": True, "firstName": "Vanya", "login": "vanya"})
+        signed = stand.post(LOGIN, {"login": fresh.json()["login"], "password": PASSWORD})
+        self.assertEqual((signed.status, signed.json()), (200, {"ok": True, "firstName": "Vanya"}))
+        # No other answer of the door says whose link it was: not the refusal of a weak password, not a dead link.
+        token = stand.invite("misha")
+        for body in ({"token": token, "password": "short"}, {"token": "A" * 43, "password": PASSWORD},
+                     {"token": token}, {"password": PASSWORD}):
+            answer = stand.post(SETUP, body)
+            self.assertGreaterEqual(answer.status, 400)
+            self.assertNotIn("login", answer.json())
+            for word in ("misha", "Misha"):
+                self.assertNotIn(word, answer.text)
+
     def test_who_am_i_answers_the_members_the_document_sketches(self):
         me = self.stand.get("/api/me", cookie=self.stand.session("mika")).json()
         self.assertEqual(sorted(me), sorted(self.sketched("GET /api/me")))
@@ -793,6 +840,13 @@ def refusals_of_logout(case: unittest.TestCase) -> Dict[str, Any]:
         if CAN_DENY:
             with read_only(os.path.join(stand.data_dir, "auth")):
                 out["the disk refuses to forget the session"] = stand.post(LOGOUT, {}, cookie=cookie)
+        # The lock of the sessions file is held by somebody else (ctl is a second process) for longer
+        # than a sign-out waits. A session's use is noted once in five minutes, so reading it needs no lock.
+        patient = stand.auth.sessions
+        stand.auth.sessions = auth.Sessions(stand.data_dir, stand.clock, lock_timeout=0.05)
+        with store.FileLock(os.path.join(stand.data_dir, "auth", ".sessions.json.lock")):
+            out["the lock of the sessions is taken"] = stand.post(LOGOUT, {}, cookie=cookie)
+        stand.auth.sessions = patient
     return out
 
 
@@ -951,6 +1005,37 @@ class DoorAnswersTests(unittest.TestCase):
                  if answer.status >= 400}
         self.assertEqual(sorted(reads, key=str), sorted(self.refusals("GET"), key=str))
 
+    def test_a_refusal_that_is_about_load_says_when_to_come_back_as_the_document_lists_it(self):
+        text = section(self.text, "When to come back", 2)
+        listed = {}     # type: Dict[Tuple[int, Optional[str]], Set[str]]
+        for item in re.split(r"(?m)^- ", text)[1:]:
+            value = re.match(r"`Retry-After: (\d+)`", item)
+            if value is None:
+                continue
+            for named in answers(item):
+                listed.setdefault(named, set()).add(value.group(1))
+        self.assertEqual(listed, {(503, "busy"): {"1", "2"}, (503, "too_many_connections"): {"1"},
+                                  (503, "storage_busy"): {"2"}},
+                         "'## When to come back' lists these answers, each with the seconds it carries")
+        # What the HTTP layer says by itself: no signed-out slot, too many connections, no thread.
+        met = EveryRequestTests("test_every_way_of_being_turned_away_was_met").met()
+        self.assertEqual(pair(met["no signed-out slot"]), (503, "busy"))
+        self.assertEqual(met["no signed-out slot"].header("Retry-After"), "1")
+        self.assertEqual(met["too many connections of one address"].header("Retry-After"), "1")
+        self.assertIn(b"\r\nRetry-After: 1\r\n", met["no thread, as it was sent"])
+        self.assertTrue(met["no thread, as it was sent"].endswith(b"\r\n\r\n"), "the answer without a body")
+        # The doors' own: no hash slot in time, a lock that stays taken.
+        slow = self.seen("POST /api/auth/login")["no hash slot in time"]
+        self.assertEqual((pair(slow), slow.header("Retry-After")), ((503, "busy"), "2"))
+        locked = self.seen("POST /api/auth/logout")["the lock of the sessions is taken"]
+        self.assertEqual((pair(locked), locked.header("Retry-After")), ((503, "busy"), "2"))
+        stalled = self.seen("PUT")["the lock is taken"]
+        self.assertEqual((pair(stalled), stalled.header("Retry-After")), ((503, "storage_busy"), "2"))
+        # ... and the two that waiting does not mend carry none.
+        self.assertIsNone(met["the accounts file is damaged"].header("Retry-After"))
+        damaged = self.seen("GET")["the stored file is cut short"]
+        self.assertEqual((pair(damaged), damaged.header("Retry-After")), ((503, "storage_damaged"), None))
+
     def test_a_refusal_carries_what_the_document_says_goes_with_it(self):
         # 409 names the stored revision; 429 says how long to wait, twice; weak_password says the minimum.
         stale = self.seen("PUT")["a stale base"]
@@ -963,6 +1048,41 @@ class DoorAnswersTests(unittest.TestCase):
             self.assertEqual(limited.header("Retry-After"), str(seconds))
         weak = self.seen("POST /api/auth/setup")["a weak password"]
         self.assertEqual((pair(weak), weak.json()["min"]), ((400, "weak_password"), 12))
+
+
+class DataPageTests(unittest.TestCase):
+    """What ``/data`` hands over as a file, as the document describes it, against the page and its script."""
+
+    def test_the_files_have_the_names_the_document_gives_and_hold_the_bare_document(self):
+        text = section(document(), "GET /data", 3)
+        named = sorted(set(re.findall(r"`(money-[a-z-]+)-YYYY-MM-DD\.json`", text)))
+        self.assertEqual(named, ["money-ledger", "money-ledger-before-replace", "money-plan"])
+        with open(os.path.join(_harness.CHECKOUT, "moneyd", "assets", "auth.js"), encoding="utf-8") as handle:
+            script = handle.read()
+        for stem in ("money-ledger", "money-plan"):
+            self.assertIn("file: '%s'" % stem, script)
+        self.assertIn("DOCS[kind].file + '-' + today() + '.json'", script)
+        self.assertIn("DOCS[kind].file + '-before-replace-' + today() + '.json'", script)
+        with _harness.Stand() as stand:
+            cookie = stand.session("mika")
+            saved = ledger(4, note="как есть,   and 1.10")
+            self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": saved}, cookie=cookie).status, 200)
+            page = stand.get("/data", cookie=cookie).text
+            # The door's own answer is not what a button saves: no control of the page is a link to a document door.
+            self.assertNotIn('href="/api/', page)
+            self.assertNotRegex(page, r"<a\b[^>]*\bdownload\b")
+            for kind in ("ledger", "plan"):
+                self.assertRegex(page, r'<button\b[^>]*\bdata-download="%s"' % kind)
+            # "The text between the head and the tail of the door's answer, cut out as it stands":
+            # the two patterns the script cuts with, on what the door really answers.
+            head = re.search(r"const head = /(.+?)/\.exec\(text\.slice\(0, 64\)\);", script)
+            tail = re.search(r"const tail = /(.+?)/\.exec\(text\.slice\(cut\)\);", script)
+            self.assertIsNotNone(head and tail, "the script no longer cuts the document out the way this test reads")
+            answer = stand.get(LEDGER, cookie=cookie).text
+            opened = re.match(head.group(1).replace("\\/", "/"), answer)
+            closed = re.search(tail.group(1).replace("\\/", "/"), answer)
+            self.assertEqual(answer[opened.end():closed.start()], saved, "what is cut out is the document, character for character")
+            self.assertEqual(json.loads(answer)["doc"], json.loads(saved))
 
 
 class EveryRequestTests(unittest.TestCase):
@@ -1015,16 +1135,25 @@ class EveryRequestTests(unittest.TestCase):
             out["an expectation nobody meets"] = send("GET /login HTTP/1.1\r\n%sExpect: something\r\n\r\n" % host)
             with mock.patch.object(stand.stores["plan"], "read", side_effect=RuntimeError("a fault of ours")):
                 out["a fault of the server's own"] = stand.get(PLAN, cookie=cookie)
+            # The disk has no room: said before the body is read - here the body is never sent at all.
+            roomy = stand.stores["ledger"]
+            stand.stores["ledger"] = store.DocStore(stand.data_dir, "ledger", stand.clock,
+                                                    max_bytes=stand.settings.put_limit("ledger"),
+                                                    free_bytes=lambda _path: 64 * MIB)
+            out["no room on the disk"] = bare(stand.raw(
+                head(stand, "PUT", LEDGER, "Content-Length: 4000", *lines, cookie=cookie), half_close=True))
+            stand.stores["ledger"] = roomy
             with open(os.path.join(stand.data_dir, "auth", "users.json"), "wb") as handle:
                 handle.write(b"{")
             out["the accounts file is damaged"] = stand.get("/api/me", cookie=cookie)
         with _harness.Stand(tune={"signed_out_slots": 1, "max_connections_per_address": 2}) as stand:
             cookie = stand.session("mika")
             lines = ("Origin: " + stand.origin, "Content-Type: application/json", "Content-Length: 40")
-            # A sign-in whose body never comes holds the one signed-out slot ...
+            # A sign-in whose body never comes holds the one signed-out slot: the next request without a
+            # session that brings a body is turned away (one that brings none is not - it cannot stall).
             with held(stand, head(stand, "POST", LOGIN, *lines)):
                 out["no signed-out slot"] = until(
-                    lambda: (lambda a: a if a.status == 503 else None)(stand.get("/login")))
+                    lambda: (lambda a: a if a.status == 503 else None)(stand.post(LOGIN, {})))
                 # ... and with a founder's save that stalls as well, the address has its two connections.
                 with held(stand, head(stand, "PUT", LEDGER, *lines, cookie=cookie)):
                     out["too many connections of one address"] = until(
@@ -1032,12 +1161,18 @@ class EveryRequestTests(unittest.TestCase):
                             stand.get("/api/me", cookie=cookie)))
         with _harness.Stand(tune={"max_connections": 1}) as stand:
             with held(stand, b""):
-                out["no thread"] = until(lambda: (lambda a: a if a.status == 503 else None)(
-                    bare(stand.raw(b"", half_close=True))))
+                sent = until(lambda: (lambda raw: raw if raw.startswith(b"HTTP/1.1 503 ") else None)(
+                    stand.raw(b"", half_close=True)))
+        out["no thread"] = bare(sent or b"")
+        out["no thread, as it was sent"] = sent or b""
         return out
 
+    def answered(self) -> Dict[str, Any]:
+        """``met()`` without the one entry that is the raw bytes of another."""
+        return {label: answer for label, answer in self.met().items() if not isinstance(answer, bytes)}
+
     def test_every_way_of_being_turned_away_was_met(self):
-        for label, answer in self.met().items():
+        for label, answer in self.answered().items():
             with self.subTest(when=label):
                 self.assertIsNotNone(answer, "the server never turned this request away")
                 self.assertGreaterEqual(answer.status, 400)
@@ -1045,14 +1180,14 @@ class EveryRequestTests(unittest.TestCase):
     def test_every_status_the_http_layer_refuses_with_is_named_in_the_document(self):
         named = {status for status, _code in self.generic}
         unnamed = {}    # type: Dict[int, str]
-        for label, answer in self.met().items():
+        for label, answer in self.answered().items():
             if answer is not None and answer.status not in named:
                 unnamed.setdefault(answer.status, label)
         self.assertEqual(unnamed, {}, "the server answers these statuses (status -> when), and none of the "
                                       "sections %s of docs/api.md names them" % (GENERIC,))
 
     def test_every_code_the_document_gives_for_every_request_is_the_code_the_server_gives(self):
-        met = {pair(answer) for answer in self.met().values() if answer is not None}
+        met = {pair(answer) for answer in self.answered().values() if answer is not None}
         for status, code in sorted(self.generic, key=str):
             if status < 400:
                 continue
@@ -1061,6 +1196,35 @@ class EveryRequestTests(unittest.TestCase):
                     self.assertIn(status, {seen for seen, _code in met})
                 else:
                     self.assertIn((status, code), met)
+
+    def test_the_numbers_the_document_gives_are_the_settings(self):
+        # Slots, limits and deadlines are numbers a person plans by. They are read out of the document here.
+        text = section(document(), "What every request passes first", 2)
+        with _harness.Stand(start=False) as stand:
+            settings = stand.settings
+
+        def number(pattern: str) -> int:
+            found = re.search(pattern, " ".join(text.split()))
+            self.assertIsNotNone(found, "the document no longer says: %s" % pattern)
+            return int(found.group(1).replace(" ", ""))
+
+        self.assertEqual(number(r"(\d+) connection threads in all"), settings.max_connections)
+        self.assertEqual(number(r"At most (\d+) concurrent connections per client address"), settings.max_connections_per_address)
+        self.assertEqual(number(r"one of (\d+) signed-out slots"), settings.signed_out_slots)
+        self.assertEqual(number(r"one of the (\d+) that its client address may hold"), settings.signed_out_body_slots_per_address)
+        self.assertEqual(number(r"(\d+) seconds for the three `/api/auth/` doors"), settings.auth_body_deadline)
+        self.assertEqual(number(r"`(\d+) s \+ 1 s per [\d ]+ bytes of Content-Length`"), settings.put_deadline_base)
+        self.assertEqual(number(r"`\d+ s \+ 1 s per ([\d ]+) bytes of Content-Length`"), settings.put_deadline_bytes_per_second)
+        self.assertEqual(number(r"(\d+) seconds at most"), settings.put_deadline_max)
+        self.assertEqual(number(r"nested deeper than (\d+) levels"), settings.json_max_depth)
+        self.assertEqual(number(r"have (\d+) seconds between them"), settings.socket_timeout)
+        self.assertEqual(settings.put_deadline(2000000), 220.0, "'about four minutes for a ledger of 2 MB'")
+        self.assertLess(settings.signed_out_body_slots_per_address, settings.signed_out_slots,
+                        "one address must not be able to take every slot")
+        # The limits of the head of a request, as the document gives them.
+        self.assertEqual((number(r"A request line over (\d+) KiB"), number(r"a header line over (\d+) KiB"),
+                          number(r"more than (\d+) header lines"), number(r"more than (\d+) KiB of them")),
+                         (httpd._LINE_MAX // KIB, httpd._LINE_MAX // KIB, httpd._HEADER_COUNT_MAX, httpd._HEADERS_MAX // KIB))
 
     def test_every_refusal_of_the_code_is_in_the_document_or_has_no_door(self):
         # The classes are the code's own list of what a door can answer with.

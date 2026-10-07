@@ -501,7 +501,8 @@ class EveryRouteTests(Case):
                     self.assertEqual(stand.get(ME, cookie=fresh).status, 200)
                 elif (method, path) == ("POST", SETUP):
                     answer = stand.post(path, {"token": stand.invite("misha"), "password": PASSWORD}, cookie=cookie)
-                    self.assertEqual(self.json_answer(answer), {"ok": True, "firstName": "Misha"})
+                    # The login goes back with the answer: the page that set the password says what to type at the next sign-in.
+                    self.assertEqual(self.json_answer(answer), {"ok": True, "firstName": "Misha", "login": "misha"})
                     fresh = answer.cookie("money-dev")
                     self.assertEqual(answer.all("Set-Cookie"),
                                      ["%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" % fresh])
@@ -1314,6 +1315,29 @@ class BodyGateTests(Case):
                     told["%s, a length of %d digits" % (path, len(str(length)))] = got
         self.assertEqual(told, {}, "a numeric Content-Length over the limit was not answered 413 body_too_large")
 
+    def test_a_length_of_thousands_of_digits_is_413_too_and_never_a_fault_of_the_server(self):
+        # Nothing counts such a number out: it is over every limit by its length alone.
+        for method, path, cookie, _limit in self.doors:
+            for digits in (1000, 5000, 8000):
+                with self.subTest(path=path, digits=digits):
+                    wire = self.wire(self.head(method, path, "Origin: " + self.stand.origin,
+                                               "Content-Type: application/json", "Content-Length: " + "9" * digits,
+                                               cookie=cookie))
+                    self.assertRefused(wire.answer(3.0), 413, "body_too_large")
+                    wire.done()
+        self.assertEqual(self.events("exception"), [])
+        self.assertNothingStored()
+
+    def test_a_length_written_with_leading_zeros_is_the_number_it_says(self):
+        body = b'{"login":"mika","password":"not the password"}'
+        for zeros in (1, 12, 40):
+            with self.subTest(zeros=zeros):
+                answer = self.sent("POST", LOGIN, None, "Content-Type: application/json", body=body,
+                                   length="0" * zeros + str(len(body)))
+                self.assertRefused(answer, 401, "invalid_credentials")
+        nothing = self.sent("POST", LOGOUT, None, "Content-Type: application/json", body=b"", length="0" * 30)
+        self.assertEqual((nothing.status, nothing.json()), (200, {"ok": True}))
+
     def test_a_sign_in_body_of_exactly_4096_bytes_is_let_in(self):
         stand = self.stand
         bodies = {LOGIN: (b'{"login":"mika","password":"not the password"}', 401, "invalid_credentials"),
@@ -1378,15 +1402,21 @@ class DeadlineTests(Case):
                         "Content-Length: %d" % length, cookie=cookie) + b'{"login":'
 
     def test_the_deadlines_are_the_documented_ones(self):
+        # The edge does not buffer request bodies, so a document's deadline runs against the founder's own
+        # uplink: 10 000 bytes a second is what a phone has on a train. (It was 50 000 until a reviewer
+        # showed that a slow link could then never save today's ledger.)
         settings = self.new_stand(start=False).settings
         self.assertEqual(settings.auth_body_deadline, 5.0, "5 seconds for the three /api/auth/ doors")
         self.assertEqual(settings.put_deadline(0), 20.0)
-        self.assertEqual(settings.put_deadline(50000), 21.0, "20 s + 1 s per 50 000 bytes of Content-Length")
-        self.assertEqual(settings.put_deadline(2000000), 60.0, "about a minute for a ledger of 2 MB")
+        self.assertEqual(settings.put_deadline(50000), 25.0, "20 s + 1 s per 10 000 bytes of Content-Length")
+        self.assertEqual(settings.put_deadline(2000000), 220.0, "about four minutes for a ledger of 2 MB")
+        self.assertEqual(settings.put_deadline(16 * MIB), 600.0, "and ten minutes at most, whatever the length")
+        self.assertEqual(settings.put_deadline(10 ** 30), 600.0)
         self.assertEqual(settings.socket_timeout, 30.0)
 
     def test_half_a_body_at_a_sign_in_door_is_cut_at_the_deadline_without_an_answer(self):
-        stand = self.new_stand(tune={"auth_body_deadline": 0.3})
+        # Three doors at once from one address: for this test the address may hold three slots (its share is two).
+        stand = self.new_stand(tune={"auth_body_deadline": 0.3, "signed_out_body_slots_per_address": 3})
         began = time.monotonic()
         wires = {door: self.wire(self.half(stand, "POST", door), stand) for door in AUTH_DOORS}
         for door, wire in wires.items():
@@ -1399,8 +1429,9 @@ class DeadlineTests(Case):
         said = until(lambda: len([line for line in stand.log_lines() if line.get("status") == 408]) == 3 and
                      [line for line in stand.log_lines() if line.get("status") == 408])
         self.assertEqual(sorted(line["path"] for line in said), sorted(AUTH_DOORS))
-        self.assertEqual(stand.get("/login").status, 200, "and the slots it held are free again")
         self.assertTrue(until(lambda: stand.server.connections() == 0))
+        for _slot in range(3):      # and the three slots they held are free again
+            self.assertRefused(stand.post(LOGIN, {}), 400, "missing_credentials")
 
     def test_a_body_that_trickles_in_is_cut_at_the_same_deadline_for_all_of_it(self):
         stand = self.new_stand(tune={"auth_body_deadline": 0.4})
@@ -1569,7 +1600,8 @@ class HeadersTests(Case):
         cookie = stand.session("mika")
         stalled = ("Origin: " + stand.origin, "Content-Type: application/json", "Content-Length: 40")
         self.wire(lines_of(stand, "POST", LOGIN, *stalled), stand)
-        busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.get("/login")))
+        # The one signed-out slot is taken by a body that never comes: the next request that brings a body is told so.
+        busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.post(LOGIN, {})))
         self.assertRefused(busy, 503, "busy")
         self.assertFixedHeaders(busy)
         self.assertEqual(busy.header("Retry-After"), "1")
@@ -2252,6 +2284,8 @@ class ForwardedForTests(Case):
 # ---------------------------------------------------------------------------
 
 class CapacityTests(Case):
+    EDGE = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}     # the tests' own address stands in for the edge: it says who asks
+
     def setUp(self):
         pass
 
@@ -2280,34 +2314,135 @@ class CapacityTests(Case):
         settings = self.new_stand(start=False).settings
         self.assertEqual((settings.max_connections, settings.signed_out_slots, settings.max_connections_per_address),
                          (32, 8, 12))
+        self.assertEqual(settings.signed_out_body_slots_per_address, 2, "one address holds two of the eight, no more")
 
-    def test_eight_stalled_sign_ins_keep_no_founder_waiting_and_the_ninth_stranger_gets_503_at_once(self):
-        stand = self.new_stand()                    # nothing tuned: eight slots, five seconds a body
+    # -- the signed-out slots ----------------------------------------------------
+    #
+    # A request without a session that announces a body takes one of 8 slots, and one of the 2 its
+    # client address may hold; with no slot it is told 503 busy at once. A request without a body
+    # takes none: once its head is read it cannot make the server wait.
+
+    def fill(self, stand: Any) -> List[Wire]:
+        """Eight sign-ins whose bodies never come, two from each of four addresses: every signed-out slot is taken."""
+        wires = []     # type: List[Wire]
+        for last in (1, 2, 3, 4):
+            wires += self.hold(stand, 2, self.stalled_sign_in(stand, "X-Forwarded-For: 203.0.113.%d" % last),
+                               already=len(wires))
+        return wires
+
+    def test_eight_stalled_sign_ins_keep_no_founder_waiting_and_the_ninth_body_gets_503_at_once(self):
+        stand = self.new_stand(env=self.EDGE)       # nothing tuned: eight slots, two an address, five seconds a body
         cookie = stand.session("mika")
-        wires = self.hold(stand, 8, self.stalled_sign_in(stand))
+        wires = self.fill(stand)
         began = time.monotonic()
         self.assertEqual(stand.get(ME, cookie=cookie).json()["firstName"], "Mika")
         self.assertEqual(len(stand.get("/", cookie=cookie).body), os.path.getsize(INDEX))
         self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json(), {"rev": 1})
         self.assertEqual(stand.get("/data", cookie=cookie).status, 200)
         self.assertEqual(stand.get("/login", cookie=cookie).status, 200)
+        self.assertEqual(stand.post(LOGOUT, {}, cookie=stand.session("vanya")).status, 200)
         self.assertLess(time.monotonic() - began, 3.0, "signed-in requests never wait behind signed-out ones")
-        for method, path in (("GET", "/login"), ("GET", "/"), ("GET", ME), ("GET", "/assets/auth.css"),
-                             ("GET", "/robots.txt"), ("GET", "/nothing"), ("POST", LOGIN), ("POST", LOGOUT)):
-            with self.subTest(ninth=path):
+        ninth = {"X-Forwarded-For": "203.0.113.9"}  # an address that holds no slot of its own
+        for method, path in (("POST", LOGIN), ("POST", SETUP), ("POST", LOGOUT), ("PUT", LEDGER), ("PUT", "/nothing"),
+                             ("POST", "/login")):
+            with self.subTest(ninth="%s %s" % (method, path)):
                 began = time.monotonic()
-                answer = stand.request(method, path, {} if method == "POST" else None)
+                answer = stand.request(method, path, {"base": 0, "doc": ledger()}, headers=ninth)
                 self.assertRefused(answer, 503, "busy")
                 self.assertEqual(answer.header("Retry-After"), "1")
                 self.assertLess(time.monotonic() - began, 2.5, "503 at once, not after somebody's deadline")
+        # A body announced on a door that takes none is still a body somebody may dawdle over.
+        odd = exchange(stand, lines_of(stand, "GET", "/login", "Content-Length: 2", "X-Forwarded-For: 203.0.113.9") + b"{}")
+        self.assertRefused(odd, 503, "busy")
         # A cookie that is no session does not make a stranger a founder.
-        self.assertRefused(stand.get(ME, cookie="money-dev=" + "A" * 43), 503, "busy")
+        self.assertRefused(stand.post(LOGIN, {}, cookie="money-dev=" + "A" * 43, headers=ninth), 503, "busy")
         # The container's own health check is not a stranger: a full house is not an unhealthy one.
         self.assertEqual(stand.get("/healthz").status, 200)
         self.assertWaitedFor(wires, "the eight are still being waited for")
 
+    def test_a_request_without_a_body_takes_no_slot_so_the_pages_stay_reachable_when_every_slot_is_taken(self):
+        # Once its head is read, a request without a body cannot make the server wait: it is answered
+        # whatever is stalled. So the sign-in page, its script and stylesheet and every refusal stay
+        # reachable - a founder who opens /login during an attack sees the page, not a line of JSON.
+        stand = self.new_stand(env=self.EDGE)
+        wires = self.fill(stand)
+        for who in ("203.0.113.9", "203.0.113.1"):  # a bystander, and an address that holds its two slots
+            mine = {"X-Forwarded-For": who}
+            for path in ("/login", "/set-password", "/assets/auth.js", "/assets/auth.css", "/robots.txt"):
+                with self.subTest(who=who, path=path):
+                    self.assertEqual(stand.get(path, headers=mine).status, 200)
+                    self.assertEqual(stand.request("HEAD", path, headers=mine).status, 200)
+            self.assertToLogin(stand.get("/", headers=mine))
+            self.assertToLogin(stand.get("/nothing", headers=mine))
+            self.assertRefused(stand.get(ME, headers=mine), 401, "unauthenticated")
+            self.assertRefused(stand.get(VENDOR[0], headers=mine), 401, "unauthenticated")
+            self.assertEqual(stand.get("/logout", headers=mine).header("Location"), "/login")
+            # "Content-Length: 0" announces no body either: the request is judged by its door, not turned away.
+            empty = dict(mine, **JSON)
+            self.assertEqual(stand.post(LOGOUT, body=b"", headers=empty).status, 200)
+            self.assertRefused(stand.post(LOGIN, body=b"", headers=empty), 400, "bad_json")
+            # ... and so does a request that names no length at all: 411 from its door, as ever.
+            unsized = exchange(stand, lines_of(stand, "POST", LOGIN, "Origin: " + stand.origin,
+                                               "Content-Type: application/json", "X-Forwarded-For: " + who))
+            self.assertRefused(unsized, 411, "length_required")
+        # The self-check that gates a deploy asks for pages as a stranger does: a deploy made while
+        # somebody stalls the slots must not be told that the new image is broken, and go back.
+        check = stand.ctl("selfcheck")
+        self.assertEqual(check.status, 0, check.out)
+        self.assertWaitedFor(wires, "none of the eight was let go to make room")
+
+    def test_one_address_holds_two_slots_and_cannot_shut_the_sign_in_or_the_way_out_of_a_lock_out(self):
+        # The reviewers' attack: eight sign-ins whose bodies never come, from ONE address, renewed as they
+        # are cut. It used to keep every stranger - a founder on a new phone - at 503, the one-time link included.
+        stand = self.new_stand(env=self.EDGE)
+        stand.set_password("mika")
+        token = stand.invite("misha")
+        attacker = "X-Forwarded-For: 203.0.113.7"
+        held = self.hold(stand, 2, self.stalled_sign_in(stand, attacker))
+        for _more in range(6):                      # the other six are turned away at once, each of them
+            began = time.monotonic()
+            wire = self.wire(self.stalled_sign_in(stand, attacker), stand)
+            answer = wire.answer(3.0)
+            self.assertRefused(answer, 503, "busy")
+            self.assertEqual(answer.header("Retry-After"), "1")
+            self.assertLess(time.monotonic() - began, 2.5)
+            wire.close()
+        self.assertWaitedFor(held, "the address keeps the two slots it may hold")
+        self.assertTrue(until(lambda: stand.server.in_flight() == 2))
+        # Everybody else is served: the page, the sign-in, and the link that is the way out of a lock-out.
+        founder = {"X-Forwarded-For": "203.0.113.8"}
+        self.assertEqual(stand.get("/login", headers=founder).status, 200)
+        self.assertEqual(stand.get("/assets/auth.css", headers=founder).status, 200)
+        signed = stand.post(LOGIN, {"login": "mika", "password": PASSWORD}, headers=founder)
+        self.assertEqual((signed.status, signed.json()["firstName"]), (200, "Mika"))
+        linked = stand.post(SETUP, {"token": token, "password": PASSWORD}, headers=founder)
+        self.assertEqual((linked.status, linked.json()["firstName"]), (200, "Misha"), "a valid link always gets through")
+        # The address itself is not shut out of what cannot stall: it still gets the page.
+        self.assertEqual(stand.get("/login", headers={"X-Forwarded-For": "203.0.113.7"}).status, 200)
+        # An IPv6 subscriber is one address whichever of its addresses it uses, here as for every other count.
+        six = self.hold(stand, 2, self.stalled_sign_in(stand, "X-Forwarded-For: 2001:db8:1:2::1"), already=2)
+        same = stand.post(LOGIN, {}, headers={"X-Forwarded-For": "2001:db8:1:2:aaaa::9"})
+        self.assertRefused(same, 503, "busy")
+        self.assertRefused(stand.post(LOGIN, {}, headers={"X-Forwarded-For": "2001:db8:1:3::1"}), 400, "missing_credentials")
+        self.assertWaitedFor(six, "two of one /64 are let in")
+        # And when its two are over, the address is taken in again: its share is given back.
+        for wire in held:
+            wire.close()
+        self.assertTrue(until(lambda: stand.server.in_flight() == 2))
+        again = self.hold(stand, 2, self.stalled_sign_in(stand, attacker), already=2)
+        self.assertWaitedFor(again, "the address did not get its two slots back")
+
+    def test_without_a_trusted_proxy_a_header_gets_an_address_no_more_slots(self):
+        stand = self.new_stand()                    # nobody is believed about who is asking: one address, the peer's
+        held = self.hold(stand, 2, self.stalled_sign_in(stand, "X-Forwarded-For: 198.51.100.1"))
+        for forwarded in ("198.51.100.2", "10.0.0.1", "::1"):
+            answer = stand.post(LOGIN, {}, headers={"X-Forwarded-For": forwarded})
+            self.assertRefused(answer, 503, "busy")
+        self.assertWaitedFor(held, "the peer's own two")
+
     def test_a_slot_is_given_back_however_its_request_ended(self):
-        stand = self.new_stand(tune={"auth_body_deadline": 0.3})
+        # One address may take all eight on this stand, so that what is counted is the eight themselves.
+        stand = self.new_stand(tune={"auth_body_deadline": 0.3, "signed_out_body_slots_per_address": 8})
         ends = {
             "the caller hung up": lambda wires: [wire.close() for wire in wires],
             "the body missed its deadline": lambda wires: [wire.hangs_up(4.0) for wire in wires],
@@ -2316,20 +2451,42 @@ class CapacityTests(Case):
         for how, end in ends.items():
             with self.subTest(how=how):
                 wires = self.hold(stand, 8, self.stalled_sign_in(stand))
-                self.assertRefused(stand.get("/login"), 503, "busy")
+                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
                 end(wires)
                 self.assertTrue(until(lambda: stand.server.connections() == 0))
                 # All eight are free again - not seven: eight more strangers can be served at the same time.
                 again = self.hold(stand, 8, self.stalled_sign_in(stand))
-                self.assertRefused(stand.get("/login"), 503, "busy")
+                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
                 self.assertWaitedFor(again, "one of the eight was turned away: a slot was not given back")
                 for wire in again:
                     wire.close()
                 self.assertTrue(until(lambda: stand.server.connections() == 0))
-                self.assertEqual(stand.get("/login").status, 200)
+                self.assertRefused(stand.post(LOGIN, {}), 400, "missing_credentials")
+
+    def test_an_address_gets_its_two_back_however_its_requests_ended(self):
+        stand = self.new_stand(tune={"auth_body_deadline": 0.2})
+        ends = {
+            "the caller hung up": lambda wires: [wire.close() for wire in wires],
+            "the body missed its deadline": lambda wires: [wire.hangs_up(4.0) for wire in wires],
+            "the body came": lambda wires: [wire.send(b" " * 40) and wire.hangs_up(4.0) for wire in wires],
+        }
+        for how, end in ends.items():
+            with self.subTest(how=how):
+                wires = self.hold(stand, 2, self.stalled_sign_in(stand))
+                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
+                end(wires)
+                self.assertTrue(until(lambda: stand.server.connections() == 0))
+                again = self.hold(stand, 2, self.stalled_sign_in(stand))
+                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
+                self.assertWaitedFor(again, "one of the two was turned away: the address's share was not given back")
+                for wire in again:
+                    wire.close()
+                self.assertTrue(until(lambda: stand.server.connections() == 0))
+        self.assertEqual((stand.server.signed_out(), stand.server.signed_out("127.0.0.1")), (0, 0))
 
     def test_a_request_that_is_refused_gives_its_slot_back_too(self):
-        stand = self.new_stand()
+        stand = self.new_stand(tune={"signed_out_body_slots_per_address": 8})
+        body = ("Content-Type: application/json", "Content-Length: 2")
         for _round in range(3):
             for request in (self.head("GET", ME, stand=stand), self.head("GET", "/nothing", stand=stand),
                             self.head("DELETE", "/login", stand=stand), self.head("POST", "/login", stand=stand),
@@ -2341,11 +2498,19 @@ class CapacityTests(Case):
                                       "Content-Length: 9999", stand=stand),
                             self.head("POST", LOGIN, "Origin: " + stand.origin, "Content-Type: application/json",
                                       "Content-Length: 1", stand=stand) + b"{",
+                            # a body sent to a door behind the session, to no door at all, under no method at all
+                            self.head("PUT", LEDGER, "Origin: " + stand.origin, *body, stand=stand) + b"{}",
+                            self.head("POST", "/nothing", *body, stand=stand) + b"{}",
+                            self.head("DELETE", LEDGER, *body, stand=stand) + b"{}",
                             b"not a request\r\n\r\n"):
-                self.assertGreaterEqual(exchange(stand, request).status, 300)
+                answered = exchange(stand, request)
+                self.assertGreaterEqual(answered.status, 300)
+                self.assertNotEqual(answered.status, 503, "a slot was lost on the way")
+            # ... and a body sent to a door that takes none: served, the body never read, its slot given back.
+            self.assertEqual(exchange(stand, self.head("GET", "/login", *body, stand=stand) + b"{}").status, 200)
         self.assertTrue(until(lambda: stand.server.connections() == 0))
         again = self.hold(stand, 8, self.stalled_sign_in(stand))
-        self.assertRefused(stand.get("/login"), 503, "busy")
+        self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
         self.assertWaitedFor(again, "a refused request kept a slot")
 
     def test_twelve_connections_of_one_address_and_the_thirteenth_is_turned_away(self):
@@ -2582,6 +2747,91 @@ class MalformedTests(Case):
                 self.assertEqual(answer.status, 200)
         self.assertEqual(self.events("exception"), [])
 
+    # -- a header line is read in one pass, whatever it holds ----------------------------------------
+    #
+    # The headers are read before anything knows whose request this is: before the per-address cap,
+    # before the signed-out slots. So what a header line costs must not depend on what a stranger put
+    # into it. (It did: a value with a long run of blanks inside cost time that grew with the square of
+    # the line - a second of the stand's one processor for four lines inside every documented limit.)
+
+    def blanks(self, shape: bytes) -> bytes:
+        """A whole request for /robots.txt with four header lines of about 8 KiB each, made of ``shape``:
+        just inside every limit the documents name (8 KiB a line, 32 KiB and 100 headers in all)."""
+        head = b"GET /robots.txt HTTP/1.1\r\nHost: " + self.stand.host.encode("ascii") + b"\r\n"
+        lines = []
+        for number in range(4):
+            name = b"X-Pad-%d: " % number
+            fill = (shape * (8150 // len(shape) + 1))[:8150 - len(name)]
+            lines.append(name + b"a" + fill + b"b\r\n")
+        data = head + b"".join(lines) + b"\r\n"
+        self.assertLess(max(len(line) for line in lines), 8192)
+        self.assertLess(len(b"".join(lines)), 32 * KIB)
+        return data
+
+    def served_in(self, data: bytes) -> float:
+        """The quickest of three: how long the server takes over this request, in seconds."""
+        took = []
+        for _run in range(3):
+            began = time.monotonic()
+            answer = exchange(self.stand, data)
+            took.append(time.monotonic() - began)
+            self.assertEqual(answer.status, 200, answer.raw[:120])
+        return min(took)
+
+    def test_a_header_line_full_of_blanks_costs_what_any_line_of_its_length_costs(self):
+        plain = self.served_in(self.blanks(b"x"))
+        for what, shape in (("spaces", b" "), ("tabs", b"\t"), ("spaces and tabs", b" \t"), ("blanks between words", b"a  \t "),
+                            ("a blank, a letter, a run of blanks", b"x" + b" " * 63)):
+            with self.subTest(value=what):
+                took = self.served_in(self.blanks(shape))
+                # The pattern this replaced needed about a second here, three hundred times the plain line.
+                self.assertLess(took, plain * 10 + 0.1,
+                                "a header line of blanks took %.3f s where a plain one of its length takes %.3f s"
+                                % (took, plain))
+
+    def test_a_header_value_loses_the_blanks_around_it_and_keeps_what_stands_inside(self):
+        stand = self.new_stand(env={"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"})
+        cookie = stand.session("mika")
+        pad = b" \t" * 1500                         # 3 000 bytes of blanks: the line stays under 8 KiB
+        cases = (
+            (b"X-Forwarded-For:" + pad + b"203.0.113.9" + pad, "203.0.113.9"),                  # blanks around: gone
+            (b"X-Forwarded-For:198.51.100.1," + pad + b"203.0.113.9", "203.0.113.9"),           # blanks inside: kept
+            (b"X-Forwarded-For:203.0.113.9", "203.0.113.9"),                                    # none at all
+        )
+        for line, address in cases:
+            with self.subTest(line=line[:32]):
+                before = len(stand.log_lines())
+                answer = exchange(stand, lines_of(stand, "GET", "/api/me", cookie=cookie)[:-2] + line + b"\r\n\r\n")
+                self.assertEqual((answer.status, answer.json()["firstName"]), (200, "Mika"))
+                self.assertEqual(stand.log_lines()[before]["addr"], address)
+        # A value of nothing but blanks is an empty value, and a cookie between blanks is still the cookie.
+        blank = exchange(stand, lines_of(stand, "GET", "/login")[:-2] + b"X-Empty:" + b" " * 8000 + b"\r\n\r\n")
+        self.assertEqual(blank.status, 200)
+        spaced = exchange(stand, lines_of(stand, "GET", "/api/me")[:-2] + b"Cookie:\t  " + cookie.encode("ascii") + b" \t \r\n\r\n")
+        self.assertEqual(spaced.status, 200)
+
+    def test_a_header_line_is_still_a_name_a_colon_and_a_value_and_nothing_else(self):
+        stand = self.stand
+        start = lines_of(stand, "GET", "/login")[:-2]
+        good = (b"X: y", b"X:y", b"X:", b"X: ", b"x-" + b"a" * 62 + b": 1", b"X: a:b:c", b"X: \xe9\xff", b"X: a\tb",
+                b"!#$%&'*+-.^_`|~0aZ: token", b"X: " + b"a" * 8000)
+        bad = (b": no name", b"X y", b"X : y", b" X: y", b"X\t: y", b"x-" + b"a" * 63 + b": 1", b"X: a\x00b", b"X: a\x7fb",
+               b"X: a\x0bb", b"X: a\rb", b"X: y\r", b"X(y): z", b"X\xff: y", b"X=y", b"\xd0\xa5: y", b"")
+        for line in good:
+            with self.subTest(good=line[:24]):
+                self.assertEqual(exchange(stand, start + line + b"\r\n\r\n").status, 200)
+                self.assertEqual(exchange(stand, start + line + b"\n\n").status, 200, "a bare line feed ends a line too")
+        for line in bad:
+            with self.subTest(bad=line[:24]):
+                answer = exchange(stand, start + line + b"\r\n" + (b"\r\n" if line else b"X: y\r\n\r\n")) \
+                    if line else exchange(stand, start + b"\r\nX y\r\n\r\n")
+                self.assertIsNotNone(answer)
+                if line:
+                    self.assertRefused(answer, 400, "bad_request")
+                else:
+                    self.assertEqual(answer.status, 200, "a blank line ends the headers; what follows is not read as one")
+        self.assertEqual(self.events("exception"), [])
+
     def test_nothing_asked_is_nothing_answered(self):
         stand = self.stand
         for data in (b"",):
@@ -2618,7 +2868,7 @@ class MalformedTests(Case):
     def test_two_thousand_requests_broken_at_random_never_get_a_5xx_or_stop_the_server(self):
         # The same breakage every run: the generator has a fixed seed.
         stand = self.new_stand(tune={"limiter_per_address": 10 ** 6, "limiter_per_login": 10 ** 6,
-                                     "limiter_setup_per_address": 10 ** 6})
+                                     "limiter_setup_per_address": 10 ** 6, "signed_out_body_slots_per_address": 8})
         stand.set_password("mika")
         cookie = stand.session("mika")
         body = json.dumps({"base": 7, "doc": ledger()}).encode("ascii")
@@ -2666,12 +2916,13 @@ class MalformedTests(Case):
         self.assertEqual(self.events("connection-error", stand), [])
         self.assertTrue(until(lambda: stand.server.connections() == 0))
         self.assertEqual([line for line in stand.log_lines() if line.get("status", 0) >= 500], [])
-        # Every thread, every slot and every count is back where it was.
+        # Every thread, every slot and every count is back where it was: the eight signed-out slots can all
+        # be taken again (this stand lets one address take them all, so that the count of all is what is seen).
         self.assertEqual(stand.get("/login").status, 200)
         wires = [self.wire(lines_of(stand, "POST", LOGIN, "Origin: " + stand.origin, "Content-Type: application/json",
                                     "Content-Length: 40"), stand) for _slot in range(8)]
         self.assertTrue(until(lambda: stand.server.in_flight() == 8))
-        self.assertRefused(stand.get("/login"), 503, "busy")
+        self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
         self.assertEqual([wire.peek() for wire in wires], [b""] * 8, "a slot was lost on the way")
         self.assertIn(stand.get(LEDGER, cookie=stand.session("vanya")).json()["rev"], (0, 1))
 

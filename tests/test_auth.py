@@ -21,6 +21,7 @@ second, and that only to keep a password hash busy while a burst piles up behind
 from tests import _safety  # noqa: F401  - first: no test runs beside a ledger
 
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -49,8 +50,10 @@ LEDGER = "/api/founder/money"
 
 #: The test client is the edge: what it writes into X-Forwarded-For is who is asking.
 EDGE = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}
-#: Room for a burst of fifty connections at once, so that only the limiter stands in its way.
-ROOMY = {"signed_out_slots": 64, "max_connections": 64, "max_connections_per_address": 64}
+#: Room for a burst of fifty connections at once, so that only the limiter stands in its way: one
+#: address may hold only two signed-out bodies by default (docs/security.md, "Signed-out slots").
+ROOMY = {"signed_out_slots": 64, "signed_out_body_slots_per_address": 64,
+         "max_connections": 64, "max_connections_per_address": 64}
 
 INVALID = b'{"error":"invalid_credentials","message":"That login and password do not match."}'
 WRONG = "not the password, not at all"
@@ -660,6 +663,23 @@ class LimiterTests(AuthCase):
         self.clock.tick(seconds=900)
         self.assertEqual(self.auth.set_password(token, PASSWORD, "2001:db8:5:5:9::9").identity.login, "mika")
 
+    def test_every_spelling_of_a_login_is_that_login_and_shares_its_one_count(self):
+        # What is typed into the login field is compared trimmed, lower-cased and NFKC-folded. So "MIKA"
+        # signs in as mika - and, the half that matters here, another spelling is not another count.
+        self.give_password()
+        spellings = ("mika", "MIKA", "Mika", "  mika  ", "\tmika\n", full_width("mika"), full_width("MIKA"), "mIkA ")
+        for number, spelling in enumerate(spellings):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(self.auth.sign_in(spelling, PASSWORD, "203.0.113.%d" % (number + 1)).identity.login, "mika")
+        for number in range(30):                                               # thirty failures, in eight spellings
+            self.wrong(spellings[number % len(spellings)], "198.51.100.%d" % (number // 10 + 1))
+        self.assertEqual(self.auth.limiter.count("login", "mika"), 30)
+        for number, spelling in enumerate(spellings):
+            with self.subTest(refused=spelling):
+                self.assertEqual(self.refused(spelling, "203.0.113.%d" % (number + 100)).key, "login")
+        for other in ("mikа", "mika2", "m ika"):                               # a Cyrillic а; a digit; a space inside
+            self.wrong(other, "203.0.113.200")                                  # somebody else: not held, and not mika
+
 
 class BurstTests(AuthCase):
     """BUILD-SPEC 2.4: checked and counted under one lock before the hash - a burst gets no more hashed than the limit."""
@@ -841,9 +861,10 @@ class LinkTests(StandCase):
     def test_a_link_works_once(self):
         token = self.stand.invite("mika")
         first = self.set_up(token)
-        self.assertEqual((first.status, first.json()), (200, {"ok": True, "firstName": "Mika"}))
+        self.assertEqual((first.status, first.json()), (200, {"ok": True, "firstName": "Mika", "login": "mika"}))
         second = self.set_up(token, "another long passphrase")
         self.assertRefused(second, 404, "invalid_link")
+        self.assertNotIn(b"mika", second.body.lower(), "a link that does not work is told no login")
         self.assertEqual(second.all("Set-Cookie"), [])
         self.assertEqual(self.sign_in(password="another long passphrase").status, 401, "the second use set nothing")
         self.assertEqual(self.sign_in().status, 200)
@@ -911,7 +932,7 @@ class LinkTests(StandCase):
         laptop = self.sign_in(password="the password before it", addr="203.0.113.2").cookie("money-dev")
         misha = stand.session("misha")
         answer = self.set_up(stand.invite("mika"), addr="203.0.113.3", cookie=laptop)
-        self.assertEqual((answer.status, answer.json()), (200, {"ok": True, "firstName": "Mika"}))
+        self.assertEqual((answer.status, answer.json()), (200, {"ok": True, "firstName": "Mika", "login": "mika"}))
         fresh = answer.cookie("money-dev")
         self.assertEqual(answer.all("Set-Cookie"), [fresh + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"])
         self.assertSignedIn(fresh)
@@ -982,6 +1003,101 @@ class LinkTests(StandCase):
         for target in ("/set-password%23t=" + token, "/set-password?t=" + token, "/" + token):
             stand.get(target)
         self.assertNotIn(token, stand.log_text())
+
+
+class RetireLinksTests(StandCase):
+    """A pending link is a record in users.json, and users.json is in every backup. So a stand that is put
+    back from a tarball has every link pending again that was pending when the tarball was made - also the
+    ones spent or replaced since. ``Auth.retire_links`` is what the restore runs before the stand starts."""
+
+    env = EDGE
+
+    def put_back(self, accounts):
+        """What a whole-stand restore does to the accounts: the backup's file in place, and no sessions."""
+        path = self.path("auth", "users.json")
+        with open(path + ".unpacked", "wb") as handle:
+            handle.write(accounts)
+        os.replace(path + ".unpacked", path)
+        if os.path.exists(self.path("auth", "sessions.json")):
+            os.unlink(self.path("auth", "sessions.json"))
+
+    def test_a_link_spent_after_the_backup_does_not_come_back_to_life_with_the_restored_accounts(self):
+        stand = self.stand
+        token = stand.invite("vanya")                           # 22:00 - sent in the messenger, where it stays
+        stand.clock.tick(hours=1, minutes=40)
+        backup = read(self.path("auth", "users.json"))          # 23:40 - the nightly tarball
+        stand.clock.tick(hours=8, minutes=20)
+        self.assertEqual(self.set_up(token, addr="203.0.113.1").status, 200)       # 08:00 - Vanya uses it
+        self.assertRefused(self.set_up(token, "another long passphrase", addr="203.0.113.2"), 404, "invalid_link")
+        stand.clock.tick(hours=6)                               # 14:00 - the stand is put back from the tarball
+        self.put_back(backup)
+        self.assertEqual(stand.auth.invites.peek(token).login, "vanya", "the file that came back holds the link")
+        self.assertEqual(stand.auth.retire_links(by="money-restore"), ["vanya"])
+        stolen = self.set_up(token, "whoever can read that chat", addr="198.51.100.66")
+        self.assertRefused(stolen, 404, "invalid_link")
+        self.assertEqual(stolen.all("Set-Cookie"), [])
+        self.assertIsNone(self.users()["vanya"]["hash"], "a password was set through a link that had been spent")
+        self.assertEqual([(entry["login"], entry["by"]) for entry in self.events("link-retired")], [("vanya", "money-restore")])
+        fresh = stand.invite("vanya")                           # and Mika issues him a new one
+        self.assertEqual(self.set_up(fresh, addr="203.0.113.1").json()["firstName"], "Vanya")
+
+    def test_every_pending_link_goes_in_one_write_and_nothing_else_is_touched(self):
+        stand = self.stand
+        stand.set_password("mika")
+        cookie = self.sign_in(addr="203.0.113.1").cookie("money-dev")
+        misha, vanya = stand.invite("misha"), stand.invite("vanya")
+        stand.invite("mika")                                    # a founder with a password may hold a link too
+        before = self.users()
+        inode = os.stat(self.path("auth", "users.json")).st_ino
+        self.assertEqual(stand.auth.retire_links(), ["mika", "misha", "vanya"], "in the order of MONEY_FOUNDERS")
+        after = self.users()
+        self.assertEqual([record["invite"] for record in after.values()], [None, None, None])
+        for record in before.values():
+            record["invite"] = None
+        self.assertEqual(after, before, "something other than the links was changed")
+        self.assertNotEqual(os.stat(self.path("auth", "users.json")).st_ino, inode)
+        for token in (misha, vanya):
+            self.assertRefused(self.set_up(token), 404, "invalid_link")
+        self.assertSignedIn(cookie)                             # sessions and passwords are as they were
+        self.assertEqual(self.sign_in(addr="203.0.113.2").status, 200)
+        self.assertEqual(sorted((entry["login"], entry["by"]) for entry in self.events("link-retired")),
+                         [("mika", "ctl"), ("misha", "ctl"), ("vanya", "ctl")])
+        self.assertEqual([sorted(entry) for entry in self.events("link-retired")], [["by", "event", "login", "t"]] * 3)
+
+    def test_with_no_link_pending_nothing_is_written_and_nothing_is_said(self):
+        stand = self.stand
+        stand.set_password("mika")
+        path = self.path("auth", "users.json")
+        before = (os.stat(path).st_ino, read(path))
+        self.assertEqual(stand.auth.retire_links(), [])
+        self.assertEqual((os.stat(path).st_ino, read(path)), before)
+        self.assertEqual(self.events("link-retired"), [])
+
+    def test_a_link_whose_time_has_run_out_and_one_of_a_dropped_login_are_retired_with_the_rest(self):
+        stand = self.stand
+        stand.invite("misha")
+        stand.clock.tick(hours=49)                              # dead already, and still on record
+        token = stand.invite("vanya")
+        fewer = auth.Auth(config.Settings.from_env(dict(stand.environ, MONEY_FOUNDERS="mika:Mika,misha:Misha"), stand.clock),
+                          stand.clock, stand.security_log)      # vanya is no founder any more; the record is still there
+        self.assertEqual(fewer.retire_links(), ["misha", "vanya"])
+        self.assertEqual([record["invite"] for record in self.users().values()], [None, None, None])
+        self.assertRefused(self.set_up(token), 404, "invalid_link")
+
+    def test_accounts_that_cannot_be_read_are_not_touched(self):
+        stand = self.stand
+        token = stand.invite("misha")
+        path = self.path("auth", "users.json")
+        good = read(path)
+        with open(path, "wb") as handle:
+            handle.write(good[:40])
+        with self.assertRaises(auth.AuthDamaged):
+            stand.auth.retire_links()
+        self.assertEqual(read(path), good[:40])
+        self.assertEqual(self.events("link-retired"), [])
+        with open(path, "wb") as handle:
+            handle.write(good)
+        self.assertEqual(self.set_up(token).status, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -1298,7 +1414,7 @@ class DamagedAccountsTests(StandCase):
         self.assertSignedIn(cookie)
         self.assertEqual(stand.get(LEDGER, cookie=cookie).body, b'{"rev":0,"doc":{},"updatedAt":null}', "nothing was saved meanwhile")
         self.assertEqual(self.sign_in(password=WRONG).body, INVALID, "the refused attempts were not counted")
-        self.assertEqual(self.set_up(token, "another long passphrase").json(), {"ok": True, "firstName": "Misha"})
+        self.assertEqual(self.set_up(token, "another long passphrase").json(), {"ok": True, "firstName": "Misha", "login": "misha"})
 
     def test_the_real_process_does_not_start_on_a_damaged_accounts_file_and_leaves_it_alone(self):
         stand = _harness.ProcessStand(start=False)
@@ -1317,6 +1433,123 @@ class DamagedAccountsTests(StandCase):
         self.assertEqual(read(path), b'{"v":1,"users":{"mika":{"hash":"MARKER-OF-A-HASH')
         with self.assertRaises(OSError):
             stand.get("/login", timeout=1.0)
+
+
+class LostAccountsTests(StandCase):
+    """A users.json that has gone is lost, not "no accounts yet": the first write leaves a marker beside it.
+
+    Without the marker a missing file made a running server answer 401 to every open page - which then
+    stops saving for good - and made the next start create three founders without passwords, with no
+    refusal, no warning and a doctor that said all was well."""
+
+    env = EDGE
+
+    def marker(self):
+        return self.path("auth", "USERS_WRITTEN")
+
+    def test_the_first_write_of_the_accounts_leaves_a_marker_beside_them(self):
+        self.assertTrue(os.path.isfile(self.marker()), "the boot wrote users.json and left no marker")
+        self.assertEqual(os.stat(self.marker()).st_mode & 0o777, 0o600)
+        self.assertNotIn(b"hash", read(self.marker()))
+        before = (os.stat(self.marker()).st_ino, read(self.marker()))
+        self.stand.set_password("mika")
+        self.stand.invite("misha")
+        self.assertEqual((os.stat(self.marker()).st_ino, read(self.marker())), before, "it is written once")
+        self.assertEqual(self.stand.ctl("doctor").status, 0)
+
+    def test_a_running_server_answers_503_and_never_401_when_the_accounts_file_has_gone(self):
+        stand = self.stand
+        stand.set_password("mika")
+        cookie = self.sign_in().cookie("money-dev")
+        token = stand.invite("misha")
+        path = self.path("auth", "users.json")
+        good = read(path)
+        os.unlink(path)
+        for answer in (stand.get(ME, cookie=cookie), stand.get(LEDGER, cookie=cookie),
+                       stand.put(LEDGER, {"base": 0, "doc": ledger(1)}, cookie=cookie), stand.get("/", cookie=cookie)):
+            self.assertRefused(answer, 503, "auth_damaged")     # 401 would stop the open page from saving, for good
+        for _attempt in range(12):                              # more than either limit of an address
+            self.assertRefused(self.sign_in(password=WRONG), 503, "auth_damaged")
+            self.assertRefused(self.set_up(token), 503, "auth_damaged")
+        self.assertFalse(os.path.exists(path), "the accounts were made anew: three founders without a password")
+        sick = stand.ctl("doctor")
+        self.assertEqual(sick.status, 1)
+        self.assertIn("accounts: DAMAGED", sick.out)
+        self.assertEqual(auth.verify(stand.data_dir)["users"]["state"], "damaged")
+        self.assertEqual(stand.auth.status()["users"]["state"], "damaged")
+        for command in (("user", "list"), ("user", "invite", "mika", "--print"), ("user", "disable", "misha")):
+            refused = stand.ctl(*command)
+            self.assertEqual(refused.status, 1, command)
+            self.assertIn("auth_damaged", refused.err)
+        self.assertFalse(os.path.exists(path), "ctl made the accounts anew")
+        with open(path, "wb") as handle:                        # put back from last night's tarball
+            handle.write(good)
+        self.assertSignedIn(cookie)
+        self.assertEqual(stand.get(LEDGER, cookie=cookie).body, b'{"rev":0,"doc":{},"updatedAt":null}', "nothing was saved meanwhile")
+        self.assertEqual(self.sign_in(password=WRONG).body, INVALID, "the refused attempts were not counted")
+        self.assertEqual(self.set_up(token, "another long passphrase").json()["firstName"], "Misha")
+
+    def test_a_stand_does_not_start_on_accounts_that_have_gone_and_makes_none_anew(self):
+        process = _harness.ProcessStand(start=False)
+        self.addCleanup(process.stop)
+        store.prepare_data_dir(process.data_dir, "dev")
+        first = auth.Auth(process.settings)                     # the first start, as far as the accounts go
+        first.boot()
+        first.users.set_password("mika", auth.hash_password(PASSWORD, "pbkdf2"))
+        path = os.path.join(process.data_dir, "auth", "users.json")
+        os.unlink(path)
+        done = subprocess.run([sys.executable, "-m", "moneyd"], cwd=_harness.CHECKOUT, env=process.environ,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, timeout=20)
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+        self.assertIn("moneyd: not starting: ", done.stderr)
+        self.assertIn("auth_damaged", done.stderr)
+        self.assertFalse(os.path.exists(path), "the boot made the accounts anew")
+        with self.assertRaises(OSError):
+            process.get("/login", timeout=1.0)
+
+    def test_where_no_account_was_ever_written_a_start_makes_them_and_an_older_stand_gets_its_marker(self):
+        directory = tempfile.mkdtemp(prefix="money-test-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        clock = _harness.FakeClock()
+        settings = config.Settings.from_env(_harness.dev_environ(directory, 8123), clock)
+        store.prepare_data_dir(directory, "dev")
+        path, marker = os.path.join(directory, "auth", "users.json"), os.path.join(directory, "auth", "USERS_WRITTEN")
+        self.assertEqual(auth.verify(directory)["users"], {"state": "missing", "problem": None})
+        auth.Auth(settings, clock).boot()                       # the first start
+        self.assertEqual(sorted(json.loads(read(path).decode("ascii"))["users"]), ["mika", "misha", "vanya"])
+        self.assertTrue(os.path.isfile(marker))
+        os.unlink(marker)                                       # a stand from before the marker existed
+        written = (os.stat(path).st_ino, read(path))
+        auth.Auth(settings, clock).boot()
+        self.assertTrue(os.path.isfile(marker), "an accounts file that is there and sound got no marker")
+        self.assertEqual((os.stat(path).st_ino, read(path)), written, "and was written again for it")
+        # To begin the accounts anew is a person's call: both files are deleted by hand.
+        os.unlink(path)
+        os.unlink(marker)
+        auth.Auth(settings, clock).boot()
+        self.assertTrue(os.path.isfile(path) and os.path.isfile(marker))
+
+    def test_the_accounts_directory_gone_from_a_stand_that_has_run_is_the_accounts_lost(self):
+        stand = self.stand
+        stand.set_password("mika")
+        cookie = self.sign_in().cookie("money-dev")
+        directory = self.path("auth")
+        aside = directory + ".moved-aside"
+        os.rename(directory, aside)
+        self.assertRefused(self.sign_in(), 503, "auth_damaged")
+        self.assertRefused(stand.post(LOGOUT, {}, cookie=cookie), 507, "storage_failed")   # nowhere to forget a session
+        with self.assertRaises(auth.AuthDamaged):
+            auth.Auth(stand.settings, stand.clock).boot()       # what the next start does
+        store.prepare_data_dir(stand.data_dir, "dev")           # ... after this, which makes nothing anew
+        with self.assertRaises(auth.AuthDamaged):
+            stand.auth.issue_invite("mika")
+        self.assertFalse(os.path.lexists(directory), "the lost directory was made anew")
+        self.assertEqual(auth.verify(stand.data_dir)["users"]["state"], "damaged")
+        self.assertIn("directory is missing", auth.verify(stand.data_dir)["users"]["problem"])
+        os.rename(aside, directory)
+        self.assertEqual(self.sign_in().status, 200)
+        self.assertSignedIn(cookie)
 
 
 class DiskTests(StandCase):
@@ -1344,6 +1577,34 @@ class DiskTests(StandCase):
         self.assertSignedIn(cookie)
         self.assertEqual(self.set_up(token).status, 200, "the link was not spent by the write that failed")
         self.assertEqual(self.sign_in().status, 200)
+
+    def test_a_write_that_is_in_place_but_could_not_be_synced_is_answered_for_what_is_on_disk(self):
+        # The rename has happened: the link is spent and the password set for every reader. Answering
+        # "the file is as it was" would leave the founder with a dead link and no word of the password.
+        stand = self.stand
+        token = stand.invite("mika")
+        directory = os.path.realpath(self.path("auth"))
+        real = store._fsync_dir
+
+        def fsync_dir(target):
+            if os.path.realpath(target) == directory:
+                raise OSError(errno.EIO, "Input/output error")
+            return real(target)
+
+        with mock.patch.object(store, "_fsync_dir", fsync_dir):
+            linked = self.set_up(token)
+            self.assertEqual(linked.status, 200, linked.body)
+            cookie = linked.cookie("money-dev")
+            self.assertSignedIn(cookie)
+            self.assertEqual(self.sign_in().status, 200)
+        self.assertTrue(self.users()["mika"]["hash"])
+        self.assertIsNone(self.users()["mika"]["invite"])
+        self.assertRefused(self.set_up(token, "another long passphrase"), 404, "invalid_link")
+        self.assertSignedIn(cookie)
+        said = self.events("storage-unsynced")
+        self.assertEqual(sorted(set(entry["file"] for entry in said)), ["sessions.json", "users.json"])
+        self.assertEqual([sorted(entry) for entry in said][0], ["event", "file", "t"])
+        self.assertEqual([name for name in os.listdir(self.path("auth")) if ".tmp-" in name], [])
 
     def test_a_temporary_file_left_by_a_crash_is_never_read_and_goes_with_the_next_write(self):
         stand = self.stand
