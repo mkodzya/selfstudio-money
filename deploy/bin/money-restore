@@ -575,7 +575,7 @@ for KIND in ledger plan; do
 done
 
 if [ -z "$NOW" ]; then
-  STAGE=done
+  STAGE="done"
   echo "money-restore: OK - the data of $TARBALL is in $DATA, with its accounts and revisions prepared. No container exists for the stand: start it with money-deploy."
   if [ "$HAD_DATA" -eq 1 ]; then
     echo "The directory as it was: $ASIDE (remove it by hand once you have looked)."
@@ -595,7 +595,7 @@ if [ "$HEALTHY" -ne 1 ]; then
   exit 1
 fi
 
-STAGE=done
+STAGE="done"
 echo "money-restore: OK - the stand runs on the data of $TARBALL and passes its self-check."
 if [ "$ACCOUNTS" = kept ]; then
   echo "Accounts: as they were before the restore (the list is above). Nothing of them went back in time."
