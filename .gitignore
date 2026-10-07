@@ -1,0 +1,8 @@
+# The ledger — the studio's money. Not in git on purpose (README, "The data").
+data/
+
+# Project and build notes for the live forecast: they quote figures taken from real statements.
+design/
+
+.DS_Store
+__pycache__/
