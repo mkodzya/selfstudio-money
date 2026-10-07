@@ -636,7 +636,8 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .ed-drift{color:var(--warn);font-size:12.5px}
 .ed-sets{display:flex;flex-direction:column;gap:10px;margin-top:14px}
 .ed-chk .note{font-size:12px}
-/* A question a press asks, inside the card: «Частично» — how much; «Не придёт» — this month or from now on. */
+/* A question a press asks, inside the card: «Частично» — how much, and on what day the rest; «Не придёт» — this
+   month or from now on. */
 .ed-ask{display:flex;flex-direction:column;gap:8px;padding:10px 0 0;border-top:1px solid var(--border-strong);font-size:13px}
 .ed-ask .fld{max-width:220px}
 .ed-ask .fld input{width:100%}
@@ -1722,12 +1723,12 @@ const Cash=(()=>{
  // balance by hand. Every open row has it, and the same one — a month of a «каждый месяц» row and a tax worked out
  // by a rule as much as a one-off row: marking one paid is what a founder does with a row during the month. Paid
  // means paid: the row stays closed whatever the statement shows later. Beside it stands the third answer,
- // «частично» — so much has been paid, and the rest is a debt of the next month. `at` is where the row's card is to
- // open when a press has a question to ask.
+ // «частично» — so much has been paid, and the rest is still owed, on a day the founder names. `at` is where the
+ // row's card is to open when a press has a question to ask.
  function status(it,at){
   const w=it.dir>0?"получено":"оплачено",d=it.done,id=esc(it.id),name=esc(it.name||"строка");
   const tog=on=>`<button class="chip cs-paid" data-ed-do="${on?"unpaid":"paid"}" data-ed-id="${id}" data-ed-at="${at}" aria-pressed="${on}" aria-label="${name}: ${w}" title="${on?"Нажмите, чтобы вернуть в план":"Отметить от руки: строка выйдет из расчёта, а в «Денег сейчас» будет учтена, пока выписка не дошла до этого дня"}">${on?w+" ✓":"✓ "+w}</button>`;
-  const part=it.src==="tax"?"":`<button class="sm ghost cs-partb" data-ed-open="${id}" data-ed-at="${at}" data-ed-ask="part" aria-label="${name}: частично" title="Оплачена часть: строка закроется на ней, остаток перейдёт в следующий месяц без даты">частично</button>`;
+  const part=it.src==="tax"?"":`<button class="sm ghost cs-partb" data-ed-open="${id}" data-ed-at="${at}" data-ed-ask="part" aria-label="${name}: частично" title="Оплачена часть: строка закроется на ней, остаток встанет отдельной строкой на день, который вы выберете">частично</button>`;
   if(d)return d.by==="row"?`<span class="cs-note">по выписке${d.on?" "+dRu(d.on):""}</span>`:d.by==="closed"?'<span class="cs-note">закрыто</span>':tog(true);
   return ["off","empty","doubt"].includes(it.state)?"":tog(false)+part;
  }
@@ -1918,7 +1919,7 @@ const Cash=(()=>{
   return `<div id="cs-plan" class="stack">${accounts()}${sw}${back}${past}${help}${ROWS.map(k=>section(k,adding&&cu.addAt===k)).join("")}
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
    <p class="note"><b>Как читать.</b> В плане только то, что вписали вы: разовые строки и строки «каждый месяц» — галочка в своей колонке. Правка в месяце такой строки меняет только этот месяц; «и дальше так же» — под строкой и в «ещё». Серым — налог студии, который страница посчитала по правилу: его сумму и дату можно поправить на месте, снятая галочка слева значит «не платим». Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
-    <b>Отметка.</b> «✓ получено» и «✓ оплачено» есть у каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. Второе нажатие снимает отметку. «Частично» — третий ответ: строка закрывается на том, что оплачено, а остаток переходит в следующий месяц строкой без даты.
+    <b>Отметка.</b> «✓ получено» и «✓ оплачено» есть у каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. Второе нажатие снимает отметку. «Частично» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Даты.</b> Строка без даты остаётся в своём месяце, но в расчёт по дням не идёт — её дата обведена пунктиром.</p>
    ${old()}${ROWS.map(k=>`<datalist id="cs-names-${k}">${Ed.names(k).map(x=>`<option value="${esc(x.l)}">`).join("")}</datalist>`).join("")}</div>`;
  }
@@ -2102,7 +2103,8 @@ const Cash=(()=>{
   // what is done: every one-off row, whenever that was, and the months and taxes closed in the last two months.
   const lately=dAdd(T,-62);
   rows+=group("__undated","cs-und","Без даты — не в расчёте",get(M.undated.ids),order);
-  // A debt carried over from a month paid in part that falls after the days in view: counted, but not on a day shown.
+  // A debt carried over from a month paid in part with no date — a plan from before the rest got a day of its own —
+  // that falls after the days in view: counted, but not on a day shown.
   rows+=group("__carry","cs-und","Долги без даты — в расчёте с первого дня своего месяца",M.items.filter(it=>it.state==="carry"&&inScope(it)&&V.ix[it.day]==null),order);
   rows+=group("__late","cs-und","Не пришло, не оплачено и под вопросом — не в расчёте",M.items.filter(it=>inScope(it)&&((it.state==="late"&&!it.day)||it.state==="doubt"||it.state==="missed")),order);
   rows+=group("__paid","cs-pgrp","Оплачено / получено",M.items.filter(it=>it.state==="done"&&inScope(it)&&(it.src==="row"||(it.done.day||it.date)>=lately)),l=>l.sort((a,b)=>((a.done.day||"9")<(b.done.day||"9")?-1:1)));
@@ -2443,10 +2445,14 @@ const Cash=(()=>{
 //    mon:"YYYY-MM"  the month an undated row belongs to (the month of T when absent)
 //    paid           {on:"YYYY-MM-DD", at:ms, by, amt?, ok?, legacy?} — a hand mark: «Оплачено» / «Получено». With
 //                   amt it is «Частично»: so much was paid (in cur, the tax on top included) and the line is closed
-//                   at that; the rest was written as a row of the next month. `true` (an old tab) reads as legacy
-//    carry:{ym}     a debt carried over from the month `ym`, written by «Частично»: a one-off row of the next month
-//                   (mon) with no date. Until it is dated, what the studio OWES is counted on the first day of its
-//                   month (today, once that has begun); what is owed TO the studio is counted nowhere
+//                   at that; the rest was written as a row of its own (carry). `true` (an old tab) reads as legacy
+//    carry:{ym}     what is left of a line of the month `ym` that was paid in part, written by «Частично»: a one-off
+//                   row on the day the founder named for the rest. With that date it is counted like any dated row —
+//                   but it is never «the month's own row» of its label, and a payment that fits both it and that row
+//                   goes to the nearer date. Without a date — as «Частично» wrote it before the founder named the
+//                   day (then in the month after `ym`), or once its date is emptied — it is a row of `mon`: what
+//                   the studio OWES is counted on the first day of that month (today, once it has begun), and what
+//                   is owed TO the studio nowhere
 //    tx[], notx[]   ledger row ids a founder said are / are not this row's payment        closed  «это всё»
 //    vat            inflows only, a boolean stored when the row is saved: its invoice carries the tax on top. Its
 //                   cash is amt × (1 + the rates of the on-top rules / 100) — 1.2 with UK VAT — whether those rules
@@ -2499,10 +2505,13 @@ const Cash=(()=>{
 //                                  vat as a boolean; a tax row gets of:false unless told otherwise. Returns the list
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it
-//  partial(P, it, got, id, now, by, on)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a new row
-//                                  (id) of the NEXT month — «{name} — остаток с {октября}», no date, carry:{ym}, the
-//                                  same list, link and VAT; a one-off row even when it came from a month of a
-//                                  repeating one. Not for a computed tax. Returns the new row (null if nothing is left)
+//  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
+//                                  new row (id) dated `date`, the day the founder named — «{name} — остаток с
+//                                  {октября}», carry:{ym}, no mon, the same list, link and VAT; a one-off row even
+//                                  when it came from a month of a repeating one. On a row that is itself such a rest
+//                                  the new one keeps its name and its carry.ym. Without `date` (a caller from
+//                                  before) the row has no date and mon = the NEXT month. Not for a computed tax.
+//                                  Returns the new row (null if nothing is left)
 //  off(P, it) / on(P, it)          the tick: row.on=false · x[ym].off for one month · per.none («не платим») for a tax
 //  tx(P, it, id) / notx / closed   «Это оно» / «Нет, другой» / «Это всё» — on the row or x[ym]
 //  link(P, it, sk)                 «{label} в таблице — это «{name}»? Да»: the row's link, by hand
@@ -2567,13 +2576,21 @@ const Cash=(()=>{
 //    Done once it has 0.7 of its cash — shown at the sum that came; under 0.7 the rest stays open until the statements
 //    reach date + g, then is dropped (note "part"). The difference is never a debt by itself. A month the table has
 //    no name for closes by amount, and from then on the chain knows who pays it (item.payer).
-//  «ОПЛАЧЕНО» MEANS PAID; «ЧАСТИЧНО» IS ITS OWN ANSWER (the founder's decision of 7 October)  A hand mark closes its
+//  «ОПЛАЧЕНО» MEANS PAID; «ЧАСТИЧНО» IS ITS OWN ANSWER (the founder's decisions of 7 October)  A hand mark closes its
 //    line for good. It stands in for the payment — and is counted in «сейчас» — until statements uploaded after it
 //    reach its day; then the payment that shows takes its place whatever its sum («заплатили £5,400, в плане
 //    £6,000»), and with none the line stays closed on the founder's word (done.by "ok"). Nothing is owed again by
 //    itself: no "unseen" state, no card. A debt remains only where a founder says «Частично» (paid.amt): the line
-//    is closed at what was paid, takes no payment beyond that, and the rest is a row of the next month (carry) —
-//    which a payment that fits it closes, unless that payment is exactly its own month's.
+//    is closed at what was paid, takes no payment beyond that, and the rest is a row of its own (carry) on the day
+//    he names — «пусть лучше не на следующий месяц уходит, а я сам выбираю дату оплаты остатка, как при переносе».
+//    On that day it is a dated one-off row like any other: an inflow is expected and an outflow planned on it, a
+//    payment that fits it closes it, and past its day it is asked about in «Нужно решить». Two rules are its own.
+//    A payment that is exactly what its own month of the same label still lacks goes to whichever of the two is
+//    dated nearer to the payment — a tie to the month. And it is never «the month's own row» of its label: the
+//    tick «каждый месяц» and the helper do not see it (R1, C7).
+//    A rest carried with NO date — as it was written before the day became the founder's to name, or once its
+//    date is emptied — stays as it was: what the studio owes is counted on the first day of its month (state
+//    `carry`), what is owed to it nowhere, and a payment that is exactly its own month's is never its.
 //  STATES (F1, R6)  measured at the day the statements of the line's bank reach (cov), never at today: due · blind
 //    (past, cov short of its date) · waiting (past by ≤ g) · late (inflow: step 1 still counted today, step 2 from
 //    2g out of the line; outflow: counted today, never dropped) · undated · done · off · empty · carry (an undated
@@ -2688,7 +2705,8 @@ const Cash=(()=>{
 //                                  its date does; stops — it is the late month that makes the later ones `doubt`;
 //                                  until — the month the repeat ends with, if a founder ended it ("" while it goes
 //                                  on); last — this is that month
-//    carry                         null | {ym} — a debt carried over from that month (see the plan document)
+//    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
+//                                  the plan document); dated, or — in a plan from before — without a date
 //    wd                            for a withdrawal: {from, to, got} — its window and what was taken (native)
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
@@ -2696,7 +2714,7 @@ const Cash=(()=>{
 //    payer                         for a month of an unlinked chain that an amount closed: {sk, label, id} — whom to
 //                                  ask about («{label} в таблице — это «{name}»?»)
 //    twins[]                       for a one-off row: [{ym, id, amt, cur}] — the later months that already hold a
-//                                  row of its label (what `tick` switches off)
+//                                  row of its label (what `tick` switches off); a row with `carry` is never one
 //    pays[]                        for an open computed tax: [{id, d, gbp, label}] — the unclaimed payments
 //                                  «Оплачено» lists first, nearest sum first
 //  days[]                          one per day of W
@@ -2848,6 +2866,10 @@ const Cash=(()=>{
 //  · The founder's decision of 7 October («оплачено — значит оплачено», «частично» as its own answer) outranks the
 //    design's R7.4, E6 and T9: `keep`, `unseen`, «Всё верно» and the cards that asked about a mark are gone. A
 //    stored paid.ok is still read, as the same closing on a founder's word.
+//  · His second word of that day replaced the end of the first: what is left after «Частично» no longer goes to
+//    the next month without a date — the founder names its day in the same question («я сам выбираю дату оплаты
+//    остатка, как при переносе»). Nothing stored is rewritten for it: a rest carried without a date is read as
+//    before, and the plan document is still version 3.
 //  · «Как в прошлый раз» in the helper is the latest cycle that holds as many payments as the label usually makes,
 //    due or not: a payment made on its day is "last time" at once, not a month later.
 //  · No «≈» is shown on «Сегодня» or «Касса»: the tabs show nothing that is a guess, and a tax worked out by a rule
@@ -3231,8 +3253,8 @@ const Live=(()=>{
   // Clients, now that the written inflows are known: each row is some client's, and says itself whether its
   // invoice carries the tax — stored when it was saved, so a proposal that changes later touches no written row.
   // «Частично» is a mark that says how much was paid (paid.amt — in the line's currency, the tax on top included).
-  // The line stands for that much and no more: the rest was written down as a row of the next month when it was
-  // pressed, so once the line has had what the founder said, no further payment is its.
+  // The line stands for that much and no more: the rest was written down as a row of its own when it was pressed,
+  // on the day the founder named, so once the line has had what he said, no further payment is its.
   const had=it=>it.pamt!=null&&it.got>=it.pamt-tol(it.pamt,it.dir)[0];
   items.forEach(it=>{it.fullG=gbp(it.amt*it.vk,it.cur);const s=it.sk&&SER[it.sk],p=it.paid;it.pamt=p&&p.amt!=null&&isFinite(+p.amt)&&isD(p.on)?Math.max(0,+p.amt):null;it.g=s&&s.was?s.g:10;it.cov=cov(it.bank);it.ck=it.list==="inflows"?(it.sk.startsWith("rev|")?it.sk.slice(4):clientKey(it.key)):"";
    // What tells "the same payment" from another: the label it is linked to, or, for a row the table has no name
@@ -3321,11 +3343,13 @@ const Live=(()=>{
    // R7. A month of a «каждый месяц» row is paid by its label, whatever the sum.
    const ok=o=>o.on&&o.amt>0&&!o.done&&!word(o)&&!had(o)&&o.dir===Math.sign(f.o.a)&&f.at>o.c0&&!o.notx.includes(f.id)&&f.d>=plus(o.date,-10);
    const lab=(f.lk&&byLab[f.lk]?byLab[f.lk]:[]).concat(f.lk.startsWith("tax|@")&&byLab["tax|@"]?byLab["tax|@"]:[]).concat(f.lk?loose.filter(o=>DL[o.chain]&&DL[o.chain].lk===f.lk):[]).filter(ok);
-   // A debt carried over from a month paid in part is a one-off row with no date, and one-off rows come first. But
-   // a payment that is exactly its own month's is that month's: the month would otherwise be given up as unpaid a
-   // month later, while the debt — which never leaves the line by itself — had been closed in its place.
-   const mo=lab.length?ownOf(lab,f):null,mine_=!!mo&&short(mo)&&cmpN(f,mo,mo.amt*mo.vk-mo.got).ok;
-   const cs=oneoff.filter(it=>canPay(it)&&!word(it)&&!had(it)&&cand(f,it)&&!(mine_&&it.carry&&!it.date)),nm=cs.filter(named);let hit;
+   // What is left of a line paid in part is a one-off row (carry), and one-off rows come first. But a payment that
+   // is exactly what its own month still lacks may be that month's: given to the rest, the month would be given up
+   // as unpaid a month later while the rest had been closed in its place. So it goes to whichever of the two is
+   // dated nearer to the payment, and a tie to the month — and always to the month while the rest has no date: an
+   // undated debt never leaves the line by itself.
+   const mo=lab.length?ownOf(lab,f):null,mine_=!!mo&&short(mo)&&cmpN(f,mo,mo.amt*mo.vk-mo.got).ok,apart=d=>Math.abs(dn(d)-dn(f.d));
+   const cs=oneoff.filter(it=>canPay(it)&&!word(it)&&!had(it)&&cand(f,it)&&!(mine_&&it.carry&&(!it.date||apart(mo.date)<=apart(it.date)))),nm=cs.filter(named);let hit;
    if(cs.length){
     if((hit=cs.find(it=>fits(f,it))))return close(hit,f,whole(hit)?"bill":hit.lk?"":"amount",whole(hit)?{got:paidIn(f,hit)}:null);   // 1. the oldest line it fits
     // 2. the invoice with the tax on top where the row had none, or without it where the row had it
@@ -3369,7 +3393,7 @@ const Live=(()=>{
   // R7.2–3. A month is done once what it received reaches 0.7 of it — 0.9 of the row or twice the row alike — and
   // is shown at the sum that came. Under that the rest stays open only until the statements of its bank reach its
   // date plus the grace; then it is dropped and the month is done at what came. The difference is never a debt by
-  // itself: what is really still owed a founder says with «Частично», and it becomes a row of the next month.
+  // itself: what is really still owed a founder says with «Частично», and it becomes a row of its own, on his day.
   occs.forEach(o=>{if(!canPay(o)||!o.got)return;const t=o.amt*o.vk,z=tol(t,o.dir),rows=o.match.slice();
    if(o.got>=0.7*t)o.done={by:"row",on:o.last,rows,note:o.got>=t-z[0]&&o.got<=t+z[1]?"":"other",got:r2(o.got)};
    else if(o.cov&&o.cov>=plus(o.date,o.g))o.done={by:"row",on:o.last,rows,note:"part",got:r2(o.got)};
@@ -3430,9 +3454,11 @@ const Live=(()=>{
    if(!(it.amt>0))return void(it.state="empty");
    if(it.done)return void(it.state="done");
    it.cash=it.cash0;
-   // A debt carried over from a month paid in part has no date until a founder gives it one. What the studio OWES
-   // is counted all the same — on the first day of its month, on today once that has begun — or the page would
-   // look richer by it. What is owed TO the studio is counted nowhere until it is dated, like any undated row.
+   // What is left of a line paid in part stands on the day the founder named for it, and is then a row like any
+   // other. One that has no date — written before the day was asked for, or emptied of it since — keeps the rule it
+   // was written under until a founder dates it. What the studio OWES is counted all the same — on the first day of
+   // its month, on today once that has begun — or the page would look richer by it. What is owed TO the studio is
+   // counted nowhere until it is dated, like any undated row.
    if(!it.date){if(it.carry&&it.dir<0){const d=(it.mon||ymT)+"-01";it.state="carry";it.day=d>T?d:T;return;}return void(it.state="undated");}
    if(it.date>=T){it.state="due";it.day=it.date;return;}
    if(!it.cov||it.date>it.cov){it.state="blind";it.day=T;return;}
@@ -3750,8 +3776,10 @@ const Live=(()=>{
   Object.keys(months).forEach(m=>{const a=m+"-01",b=mEnd(m),rs=RULES.filter(counts).map(rule=>({id:rule.id,name:rule.name,gbp:r2(factsOf(rule,a,b).g+sum(accr,c=>c.rule===rule.id&&c.day>=a&&c.day<=b?c.v:0)),due:dueOf(rule,perOf(rule.per,m))})).filter(x=>x.gbp>0.005);
    months[m].tax={gbp:r2(sum(rs,x=>x.gbp)),rules:rs};});
   // R1. A row that is about to repeat must not count a later month twice: the later months that already hold a
-  // one-off row of the same label are named here, for the tick to switch the repeat off in them.
-  const ones=items.filter(it=>it.src==="row"&&it.date&&it.on&&it.amt>0),twinsOf=(lab,list,after,skip)=>{const seen={},out=[];
+  // one-off row of the same label are named here, for the tick to switch the repeat off in them. What is left of a
+  // line paid in part (carry) is never such a row, dated or not: it is a debt beside the month's own line, not that
+  // line — the repeat stays on in its month, and the helper does not start a month later because of it.
+  const ones=items.filter(it=>it.src==="row"&&it.date&&it.on&&it.amt>0&&!it.carry),twinsOf=(lab,list,after,skip)=>{const seen={},out=[];
    ones.forEach(o=>{if(o.lab!==lab||o.list!==list||o.id===skip||!(o.ym>after)||seen[o.ym])return;seen[o.ym]=1;out.push({ym:o.ym,id:o.id,amt:r2(o.amt),cur:o.cur});});return out.sort((a,b)=>a.ym<b.ym?-1:1);};
 
   // ---- verdict, and what needs deciding ----
@@ -3921,13 +3949,17 @@ const Live=(()=>{
   notx(P,it,id){const s=slot(P,it,true);if(s)push(s,"notx",id);},
   closed(P,it){const s=slot(P,it,true);if(s)s.closed=true;},
   // «Частично»: so much has been paid (`got`, in the line's currency, the tax on top included) and the rest is
-  // still owed. The line is closed for its month at what was paid, and the rest becomes a row of the NEXT month
-  // with no date — a one-off row even when it came from a month of a «каждый месяц» row, named after where it came
-  // from; next month's own line stands beside it untouched. `on` is the day of the mark. Returns the new row.
-  partial(P,it,got,id,now,by,on){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
-   const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r;
+  // still owed. The line is closed for its month at what was paid, and the rest becomes a row of its own on the day
+  // the founder names (`date`) — a one-off row even when it came from a month of a «каждый месяц» row, named after
+  // where it came from; that row's own months stand beside it untouched. Said of a row that is itself such a rest,
+  // the new row keeps its name and the month the debt first came from: nothing is «остаток с октября — остаток с
+  // ноября». `on` is the day of the mark. Called without a date it writes what it wrote before the founder chose
+  // the day — a row of the NEXT month with no date (mon) — which is what a plan from before may hold. Returns the
+  // new row.
+  partial(P,it,got,id,now,by,on,date){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
+   const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,from=obj(it.carry)&&isM(it.carry.ym)?it.carry.ym:"",day=isD(date)?date:"";
    s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
-   const z={id:String(id),name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:"",mon:ymAdd(ym,1),c0:now,m:{t:now,by},blk:r.blk,carry:{ym}};
+   const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
    ["sk","skBy","vat","ptax","f"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
    P[h.k].splice(h.i+1,0,z);return z;},
@@ -4064,7 +4096,7 @@ Plan.watch(()=>Cash.draw());
 //  · Ed.use(M) before it draws — the model its rows come from;
 //  · data-ed-open="<item id>" on a row (or a button) opens that item's card; where a tab draws one item in two
 //    places, data-ed-at names the place; data-ed-focus="date" puts the cursor on the date; data-ed-ask="part" opens
-//    it on the question «Частично» asks;
+//    it on the question «Частично» asks — how much has been paid, and on what day the rest will be;
 //  · Ed.under(id, at) right after the row — the card, or nothing;
 //  · data-ed-add opens «Добавить» (data-ed-add="inflows|team|taxes|other|div" skips its first question, data-ed-mon
 //    gives the month an undated row belongs to, data-ed-amt and data-ed-date fill the sum and the day in);
@@ -4120,7 +4152,8 @@ const Ed=(()=>{
    :d.note==="amount"&&d.label?`закрыто по сумме: ${d.label}`:d.note==="vat"?"пришло с VAT":d.note==="novat"?"пришло без VAT":d.note==="over"?`пришло больше на ${fmt(Math.round(d.over))}`:d.note==="sum"?"одним платежом с другими":d.note==="period"?"закрыто вместе с периодом":"";
   if(it.state==="missed")return it.hint?"возможно, уже оплачено":"платежа не было";
   if(it.state==="doubt")return "пока не считаю";
-  // A debt carried over from a month paid in part: what the studio owes is in the line though it has no date.
+  // A debt carried over from a month paid in part without a date, as a plan from before holds it: what the studio
+  // owes is in the line all the same. (With the day the founder named, the row says nothing: its name does.)
   if(it.state==="carry")return `без даты · в расчёте с ${dRuF(it.ym+"-01")}`;
   if(it.state==="undated")return it.carry?"без даты · в расчёт не идёт, пока не поставите дату":"без даты";
   if(it.part)return it.wd?`взято ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}`:`частично ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}`;
@@ -4146,7 +4179,8 @@ const Ed=(()=>{
  const lastOf=(list,name)=>{const n=norm(alias(name)),hit=n&&list!=="taxes"&&list!=="div"?names(list).find(x=>x.n===n):null;
   return hit?S.tx.filter(r=>r.c===hit.c&&real(r)&&norm(alias(r.l))===n).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0)[0]||null:null;};
  // The later months that already hold a one-off row of this name: where «каждый месяц» must not repeat it (R1).
- const twins=(list,name,ym)=>{const k=norm(alias(name)),seen={};return !k||!M?[]:M.items.filter(x=>x.src==="row"&&x.list===list&&x.date&&x.on&&x.ym>ym&&x.key===k&&!seen[x.ym]&&(seen[x.ym]=1)).map(x=>({ym:x.ym,id:x.id,amt:x.amt,cur:x.cur}));};
+ // Never what is left of a line paid in part (carry): that is a debt beside a month's own row, as in the engine.
+ const twins=(list,name,ym)=>{const k=norm(alias(name)),seen={};return !k||!M?[]:M.items.filter(x=>x.src==="row"&&x.list===list&&x.date&&!x.carry&&x.on&&x.ym>ym&&x.key===k&&!seen[x.ym]&&(seen[x.ym]=1)).map(x=>({ym:x.ym,id:x.id,amt:x.amt,cur:x.cur}));};
  // What the tick has just switched off, in words: «в ноябре стоит ваша строка £6,300 — повтор там выключен».
  const twinWords=l=>l.map(t=>`в ${monP(t.ym)} стоит ваша строка ${nat(t.amt,t.cur)} — повтор там выключен`).join("; ");
 
@@ -4213,10 +4247,14 @@ const Ed=(()=>{
   if(what==="skip-only")return done(`${it.name}: в ${monP(ym)} не жду`,P=>{W.off(P,it);});
   if(what==="del-only")return done(`${it.name}: ${mon(ym)} убран`,P=>{W.off(P,it);});
   if(what==="skip-onward"||what==="del-onward")return done(`${it.name}: с ${monG(ym)} больше не повторяю`,P=>{W.end(P,it);});
-  if(what==="part"){const f=q(card,"[data-ed-part]"),full=round2(it.amt*(it.factor||1)),v=f.value===""?NaN:+f.value;
+  if(what==="part"){const f=q(card,"[data-ed-part]"),e=q(card,"[data-ed-partdate]"),inn=it.dir>0,full=round2(it.amt*(it.factor||1)),v=f.value===""?NaN:+f.value,d=e.value,T=Live.today();
    if(!(v>=0)||v>=full){f.focus();return toast(v>=full?"Если оплачено всё — это «Оплачено», а не «Частично»":"Впишите, сколько уже прошло");}
-   const to=ymNext(ymOf(it));
-   return done(`${it.name}: ${it.dir>0?"получено":"оплачено"} ${nat(v,it.cur)} из ${nat(full,it.cur)}, остаток — в ${monP(to)} без даты`,(P,now,by)=>{W.partial(P,it,v,uid(),now,by,Live.today());});}
+   // The day of the rest is the founder's to name, as with «Перенести на…» — but not a day gone by: what is still
+   // owed has not been paid, and on a past day it would be read as a payment the statements do not show. Each
+   // refusal is said in words, and nothing is written — neither the mark nor the row.
+   const no=!d?`Укажите день, когда ${inn?"придёт остаток":"заплатите остаток"}`:d<T?"Остаток — не раньше сегодняшнего дня":okDate(d)?"":FARMSG;
+   if(no){e.focus();return toast(no);}
+   return done(`${it.name}: ${inn?"получено":"оплачено"} ${nat(v,it.cur)} из ${nat(full,it.cur)}, остаток — на ${dRuW(d)}`,(P,now,by)=>{W.partial(P,it,v,uid(),now,by,T,d);});}
   if(what==="pay-none")return done(`Оплачено: ${it.name}`,(P,now,by)=>{W.mark(P,it,Live.today(),now,by);});
  }
  const payRow=(it,id,whole)=>{const say=whole?`Оплачено: ${it.name}`:`${it.name}: платёж записан как часть`;cur=null;if(Plan.edit(say,(P,now,by)=>{W.pay(P,it.tax.key,id,whole,now,by);}))toast(say,back);};
@@ -4258,7 +4296,7 @@ const Ed=(()=>{
   return `<div class="ed-why">${esc(out.join(" "))}${hint}${payer}</div>`;
  }
  // By what the row is and where it stands. «Получено» / «Оплачено» comes first on every open row, and «Частично»
- // beside it: paid means paid, and a debt remains only where a founder says so.
+ // beside it: paid means paid, and a debt remains only where a founder says so — and stands on the day he names.
  function actions(it){
   const inn=it.dir>0,late=it.state==="late",d=it.done,tax=it.src==="tax",b=(v,l,c)=>btn(v,l,it,c),pay=b("paid",inn?"Получено":"Оплачено"),part=tax?"":b("part","Частично…");
   // A row that is paid can still be made to repeat: a first invoice marked received is often the first of many.
@@ -4274,10 +4312,15 @@ const Ed=(()=>{
  // The questions a press may ask, inside the card, under the fields.
  function askBox(it){
   const a=cur&&cur.ask,inn=it.dir>0,x='<button class="sm ghost" data-ed-ask="">Отмена</button>';
-  if(a==="part"&&it.src!=="tax"){const full=round2(it.amt*(it.factor||1)),got=it.done&&it.done.got?it.done.got:it.part?it.part.got:"",to=ymNext(ymOf(it));
+  // «Частично» asks two things: how much has been paid, and on what day the rest will be. The day is a field of
+  // the question's own — not the card's «Дата», which is the row's (and which the card of a line already closed
+  // does not have) — and it starts empty: the founder names the day, the page proposes none.
+  if(a==="part"&&it.src!=="tax"){const got=it.done&&it.done.got?it.done.got:it.part?it.part.got:"",T=Live.today();
    return `<div class="ed-ask" data-ed-askbox="part"><label class="fld" for="ed-part"><span>Сколько уже ${inn?"получено":"оплачено"}, ${esc((SYM[it.cur]||it.cur).trim())}</span><input id="ed-part" data-ed-part type="number" min="0" step="any" inputmode="decimal" value="${esc(got)}"></label>
-    <span class="note" data-ed-partnote>${partNote(it,got)}</span><div class="row"><button class="sm primary" data-ed-go="part">Готово</button>${x}</div>
-    <span class="note">Строка закроется за ${mon(ymOf(it))} на том, что ${inn?"пришло":"оплачено"}. Остаток станет строкой ${monG(to)} без даты: ${inn?"в расчёт она пойдёт, когда поставите дату":"в расчёт она идёт с первого дня месяца, пока даты нет"}.</span></div>`;}
+    <span class="note" data-ed-partnote>${partNote(it,got)}</span>
+    <label class="fld" for="ed-partdate"><span>${inn?"Когда придёт остаток":"Когда заплатите остаток"}</span><input id="ed-partdate" data-ed-partdate type="date" min="${T}" max="${dAdd(T,731)}"></label>
+    <div class="row"><button class="sm primary" data-ed-go="part">Готово</button>${x}</div>
+    <span class="note">Строка закроется за ${mon(ymOf(it))} на том, что ${inn?"получено":"оплачено"}. Остаток встанет отдельной строкой на выбранный день.</span></div>`;}
   if((a==="skip"||a==="del")&&it.src==="occ"){const ym=it.occ.ym;
    return `<div class="ed-ask" data-ed-askbox="${a}"><span>${a==="del"?"Убрать":inn?"Не придёт":"Не платим"}:</span><div class="row"><button class="sm primary" data-ed-go="${a}-only">только ${mon(ym)}</button><button class="sm" data-ed-go="${a}-onward">${mon(ym)} и дальше</button>${x}</div></div>`;}
   // «Оплачено» on a tax first shows the payments to the tax authority that nothing has claimed: one of them may be it.
@@ -4286,7 +4329,7 @@ const Ed=(()=>{
    <div class="row"><button class="sm" data-ed-go="pay-none">В выписках нет — оплачено сегодня</button>${x}</div></div>`;
   return "";
  }
- const partNote=(it,got)=>{const full=round2(it.amt*(it.factor||1)),v=got===""?NaN:+got;return v>=0&&v<full?`остаток ${nat(round2(full-v),it.cur)} перейдёт в ${mon(ymNext(ymOf(it)))}`:`из ${nat(full,it.cur)}`;};
+ const partNote=(it,got)=>{const full=round2(it.amt*(it.factor||1)),v=got===""?NaN:+got;return v>=0&&v<full?`остаток ${nat(round2(full-v),it.cur)}`:`из ${nat(full,it.cur)}`;};
  // «+ VAT»: what will come with the tax on top, said under the tick while it is on.
  const vatNote=(amt,cur,on)=>{const r=M?M.taxes.rate:20,a=+amt||0;return !on?"":!r?"ставка VAT — 0%: к счёту ничего не добавляется":a>0?`придёт ${nat(round2(a*(1+r/100)),cur)}, из них VAT ${nat(round2(a*r/100),cur)}`:"";};
  // A repeat a founder ended says so beside the tick for good: on its last month the tick is off — «повтор
@@ -4651,7 +4694,9 @@ const Ed=(()=>{
  document.addEventListener("keydown",ev=>{
   const t=ev.target;if(!t.matches)return;
   if((ev.key==="Enter"||ev.key===" ")&&t.matches("[data-ed-open]:not(button),[data-ed-bal]:not(button)")){ev.preventDefault();return t.click();}
-  if(ev.key==="Enter"&&t.matches("[data-ed-part]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
+  // Enter in either field of «Частично» answers that question; left to the line below it would press the card's
+  // own «Сохранить», and the answer would be lost.
+  if(ev.key==="Enter"&&t.matches("[data-ed-part],[data-ed-partdate]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
   if(ev.key==="Enter"&&t.matches("[data-ed-card] input:not([type=checkbox]):not([list])")){const b=t.closest("[data-ed-card]").querySelector("[data-ed-save]");if(b){ev.preventDefault();b.click();}}
   if(ev.key==="Enter"&&t.matches("[data-ed-rv]"))t.blur();
   if(ev.key==="Escape"&&cur&&t.closest("[data-ed-card]")){cur=null;Plan.redraw();}
@@ -4871,8 +4916,8 @@ const Today=(()=>{
    return op(`${esc(c.name)} · ${fmt(c.gbp)}`,text,(h?act("tx",c.item,`Это оно: ${natv(h.amt,h.cur)} · ${dRu(h.d)}`):"")+act("paid",c.item,inn?"Получено":"Оплачено")+open(c.item,"Частично…","","part")+open(c.item,"Перенести на…","date")+act("skip",c.item,inn?"Не придёт":"Не платим"),Ed.under(c.item,"need"));}
   if(c.n===9)return op(`Без даты и не в расчёте: ${count(c.count,"строка","строки","строк")} на ${fmt(c.gbp)}`,"",`<button class="sm" data-td-flip="undated" aria-expanded="${st.undated}">${st.undated?"Свернуть":"Поставить даты"}</button>`,
    st.undated?c.items.map(id=>by[id]).filter(Boolean).map(it=>`<div class="td-sub"><div class="td-row" data-ed-open="${esc(it.id)}" data-ed-at="need" data-ed-focus="date" role="button" tabindex="0"><span><span class="td-nm">${esc(it.name||"(без названия)")}</span><span class="td-meta">${esc(it.bank)}</span></span><span class="td-am">${Ed.sum(it)}</span></div>${Ed.under(it.id,"need")}</div>`).join(""):"");
-  // A month of a «каждый месяц» payout that nobody paid: paid after all, still owed — the debt then moves on to the
-  // next month — or the row has ended.
+  // A month of a «каждый месяц» payout that nobody paid: paid after all, still owed — «Частично…» then asks how
+  // much of it went and on what day the rest will — or the row has ended.
   if(c.n===10)return op(`${esc(c.name)}: в ${MONP[+c.ym.slice(5)-1]} платежа не было`,`Строка «каждый месяц», ${fmt(c.gbp)}. За ${mon(c.ym)} больше не жду; следующие месяцы стоят в плане.`,(c.hint?act("tx",c.item,`Это оно: ${natv(c.hint.amt,c.hint.cur)} · ${dRu(c.hint.d)}`):"")+act("paid",c.item,"Оплачено")+open(c.item,"Частично…","","part")+act("stop",c.item,"Больше не повторять"),Ed.under(c.item,"need"));
   if(c.n===11)return op(`${esc(c.name)} · ${tx(c.gbp)}`,`Срок был ${dRu(c.due)}; в выписках ${esc(c.account)} по ${dRu(c.cov)} такого платежа нет. Считаю, что ещё уйдёт.${c.more?` И ещё за ${count(c.more,"период","периода","периодов")}.`:""}${c.noPay?" Платежей по этому налогу в выписках ещё не было.":""}`,
    act("paid",c.item,"Оплачено")+open(c.item,"Перенести на…","date")+act("skip",c.item,"Не платим")+(c.noPay?ans("away","Платим не со счетов студии"):""),Ed.under(c.item,"need"));
