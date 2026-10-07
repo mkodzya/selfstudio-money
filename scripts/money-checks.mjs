@@ -3106,15 +3106,17 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   same(await text(pg, ASK + ' > .note:last-child'), 'Строка закроется за октябрь на том, что оплачено. Остаток встанет отдельной строкой на выбранный день.', '… and says what the answer will do');
   await calm(pg, 'with the question «Частично…» open');
   // No day, a day gone by, a day too far: each is refused in words, the box stays open with the cursor on the day,
-  // and nothing is written — neither the mark nor the row.
+  // and nothing is written — neither the mark nor the row. The first of the three is asked by Enter in the SUM:
+  // Enter in either field of the question answers the question.
   const refused = [];
   for (const d of ['', '2026-10-21', '2028-10-23']) {
     await pg.fill(REST, d);
-    await pg.click(K('row') + '[data-ed-go="part"]');
+    if (d) await pg.click(K('row') + '[data-ed-go="part"]');
+    else await pg.press(PART, 'Enter');
     refused.push([await toastText(pg), !!(await pg.$(ASK)), await pg.evaluate(() => document.activeElement.id), (await rowIds(pg)).length, await pg.evaluate(() => 'x' in window.__cash.state().team[0].rec)]);
   }
   same(refused, [['Укажите день, когда заплатите остаток', true, 'ed-partdate', 5, false], ['Остаток — не раньше сегодняшнего дня', true, 'ed-partdate', 5, false], ['Слишком далёкая дата: прогноз смотрит не дальше двух лет', true, 'ed-partdate', 5, false]],
-    '«Готово» without a day, with yesterday, with a day more than two years off: «Укажите день, когда заплатите остаток», «Остаток — не раньше сегодняшнего дня», «Слишком далёкая дата…» — the question stays open on the day, and nothing is written');
+    'answered without a day (Enter in the sum), with yesterday, with a day more than two years off: «Укажите день, когда заплатите остаток», «Остаток — не раньше сегодняшнего дня», «Слишком далёкая дата…» — the question stays open on the day, and nothing is written');
   // Answered: the rest on 12 Nov.
   await answer(pg, undefined, '2026-11-12');
   S = await holds(pg, '«Частично»: 5,400 of 6,000, the rest on 12 Nov');
@@ -3858,9 +3860,10 @@ await run('earlier months', 'a row nobody closed stays in the month of its date;
 // ledger loaded and nothing typed («looks», at the end). The review's checks, which come first, save a picture of
 // each thing they changed («rv-…»). Without SHOTS the same pages are still opened and held to the model.
 const SHOTS = process.env.SHOTS || '';
-const shot = async (pg, name) => { if (SHOTS) { await pg.evaluate(() => window.scrollTo(0, 0)); await pg.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true }); console.log(`      saved ${name}.png`); } };
-// … and of one thing on a page, close up: a card is a small part of a long page.
-const shotOf = async (pg, sel, name) => { if (SHOTS) { await pg.locator(sel).first().screenshot({ path: `${SHOTS}/${name}.png` }); console.log(`      saved ${name}.png`); } };
+const shot = async (pg, name, clip) => { if (SHOTS) { await pg.evaluate(() => window.scrollTo(0, 0)); await pg.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true, ...(clip ? { clip } : {}) }); console.log(`      saved ${name}.png`); } };
+// … and of one thing on a page, close up: a card is a small part of a long page. It is cut out of the picture of
+// the whole page — taken where it stands on a phone, the bar that sticks to the top lies over a card as tall as the screen.
+const shotOf = async (pg, sel, name) => { if (SHOTS) { await pg.evaluate(() => window.scrollTo(0, 0)); await shot(pg, name, await pg.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return { x: Math.floor(r.left), y: Math.floor(r.top), width: Math.ceil(r.width) + 1, height: Math.ceil(r.height) + 1 }; })); } };
 // =====================================================================================================================
 // THE REVIEW OF THE SECOND ITERATION, ON SCREEN. Each of these failed on the build that was reviewed (the model's
 // side of the same review is «rv-thin», «rv-inbox», «rv-rows» above, and the cases added to «marks», «p8», «p12»).
@@ -4172,6 +4175,7 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
       await pg.fill(PART, '1500');
       await pg.fill(REST, '2026-10-20');
       same([await text(pg, K('row') + '[data-ed-partnote]'), await pg.inputValue(REST)], ['остаток £1,200', '2026-10-20'], `${w}px: the question on a row of the studio — £1,500 of Lena's £2,700 paid, the rest on 20 Oct`);
+      same(await pg.$$eval(K('row') + '#ed-amt, ' + K('row') + '#ed-date, ' + PART + ', ' + REST, (l) => [l.length, [...new Set(l.map((e) => { const cs = getComputedStyle(e); return [cs.fontFamily, cs.fontSize, Math.round(e.getBoundingClientRect().height)].join(' · '); }))].length]), [4, 1], `${w}px: … and its two fields are set as the card's own sum and date above them are — one face, one size, one height`);
       await shot(pg, `live-${tag}-row`);
       await shotOf(pg, K('row'), `live-${tag}-row-card`);
       await pg.click(K('row') + '[data-ed-x]');
