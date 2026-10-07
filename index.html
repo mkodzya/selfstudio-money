@@ -299,17 +299,19 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .cs-rows table{min-width:1060px}
 .cs-rows th{padding:5px 6px}
 .cs-rows td{padding:3px 6px;vertical-align:top}
-.cs-rows td input:not(.cs-chk),.cs-rows td select,.cs-mv input{height:28px;padding:4px 7px;line-height:18px}
-.cs-rows td input:not(.cs-chk),.cs-rows td select{width:100%;border-color:var(--border)}
-.cs-rows td input:not(.cs-chk):hover,.cs-rows td select:hover{border-color:var(--border-strong)}
-.cs-rows td input:not(.cs-chk):focus,.cs-rows td select:focus{border-color:var(--text-primary)}
-.cs-rows td select{padding-right:22px;background-position:right 7px center}
-.cs-rows td input[type=date],.cs-mv input{font-family:var(--mono);font-size:12px}
+/* The table's compact boxes are for its own cells. A row's card opened under a row (tr.cs-edrow) keeps the card's sizes:
+   without the :not() its tick boxes were drawn as wide as fields and its fields lower than the arrows beside the date. */
+.cs-rows tr:not(.cs-edrow) td input:not(.cs-chk),.cs-rows tr:not(.cs-edrow) td select,.cs-mv input{height:28px;padding:4px 7px;line-height:18px}
+.cs-rows tr:not(.cs-edrow) td input:not(.cs-chk),.cs-rows tr:not(.cs-edrow) td select{width:100%;border-color:var(--border)}
+.cs-rows tr:not(.cs-edrow) td input:not(.cs-chk):hover,.cs-rows tr:not(.cs-edrow) td select:hover{border-color:var(--border-strong)}
+.cs-rows tr:not(.cs-edrow) td input:not(.cs-chk):focus,.cs-rows tr:not(.cs-edrow) td select:focus{border-color:var(--text-primary)}
+.cs-rows tr:not(.cs-edrow) td select{padding-right:22px;background-position:right 7px center}
+.cs-rows tr:not(.cs-edrow) td input[type=date],.cs-mv input{font-family:var(--mono);font-size:12px}
 .cs-am2{display:flex;align-items:center;justify-content:flex-end;gap:3px}
 .cs-amt{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;min-width:78px;-moz-appearance:textfield;appearance:textfield}
 .cs-amt::-webkit-inner-spin-button,.cs-amt::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 /* A row with no date is in its month and not in the days: its date box says so before anyone reads the remark. */
-.cs-rows td input.cs-nodate,.cs-mv input.cs-nodate{border-style:dashed;border-color:var(--warn);color:var(--text-muted)}
+.cs-rows tr:not(.cs-edrow) td input.cs-nodate,.cs-mv input.cs-nodate{border-style:dashed;border-color:var(--warn);color:var(--text-muted)}
 .cs-nm{min-width:200px;max-width:460px}
 .cs-c{width:34px}.cs-amc{width:140px}.cs-cur{width:82px}.cs-bk{width:116px}.cs-dt{width:146px}.cs-pd{width:196px}.cs-mo{width:58px}
 /* «каждый месяц»: a plain tick in a column of its own. On a phone, where the column has no heading, it says so itself. */
