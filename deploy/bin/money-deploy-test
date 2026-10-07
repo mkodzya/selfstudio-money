@@ -1,0 +1,139 @@
+#!/bin/sh
+# Deploy Money's TEST stand: what `develop` holds now.
+#
+#   money-deploy-test             deploy; seed only if the stand is empty
+#   money-deploy-test --reseed    deploy, then return the stand to the fabricated studio now
+#
+# From the laptop, after a push to develop:
+#   ssh root@<server> money-deploy-test
+#
+# What it does, in this order:
+#   1. takes the lock: one Money deploy at a time, whichever stand;
+#   2. refuses a MONEY_CSP or MONEY_CSP_OVERRIDE_UNTIL the service would not
+#      start on, and refuses when memory is short or another image build is
+#      running - before anything has been touched;
+#   3. pulls, fast-forward only. A deploy that has to merge is a deploy nobody
+#      reviewed. A checkout that is on another branch than develop is deployed
+#      as it is, with a WARNING line;
+#   4. hands over to deploy/stand.sh: build, start, self-check, smoke. If the
+#      new container does not come up healthy or fails its self-check, the
+#      previous image is started again;
+#   5. seeds - only when the stand is empty (`ctl empty`), or when --reseed was
+#      asked for. A plain deploy does not throw away what somebody is looking
+#      at; the night does (money-test-reseed.timer);
+#   6. says so in a WARNING line when the last nightly reseed failed, or when
+#      its timer is not switched on: the night is what bounds how long a real
+#      statement put on test by mistake stays there, and nobody reads a
+#      journal they have no reason to open;
+#   7. prints one verdict line, the last line of its output:
+#        money-test: OK - ...        or        money-test: FAILED - ...
+#
+# The fabricated studio comes from scripts/money-demo.mjs. While that file is
+# not in the checkout the deploy still succeeds: it prints a warning and skips
+# the seeding.
+set -eu
+
+CHECKOUT=/opt/money-dev
+LOCK=/run/lock/money-deploy.lock
+NIGHT=money-test-reseed
+
+# Whatever stops a deploy before it starts ends in the same words a deploy
+# ends in, on standard output: one line, the last one.
+die() {
+  echo "money-test: FAILED - $*"
+  exit 1
+}
+
+usage() {
+  echo "usage: money-deploy-test [--reseed]" >&2
+  exit 2
+}
+
+# What the night did, said above the verdict. Nothing on a machine without
+# systemd, and nothing when the night is in order.
+about_the_night() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if systemctl is-failed --quiet "$NIGHT.service" 2>/dev/null; then
+    echo "WARNING: the last nightly reseed of the test stand FAILED: journalctl -u $NIGHT -n 30 --no-pager"
+  elif ! systemctl is-enabled --quiet "$NIGHT.timer" 2>/dev/null; then
+    echo "WARNING: $NIGHT.timer is not switched on, so no night returns this stand to the fabricated studio (docs/deploy.md, the test stand's setup)"
+  fi
+}
+
+if [ $# -gt 1 ]; then
+  usage
+fi
+RESEED=0
+case "${1:-}" in
+  "") ;;
+  --reseed) RESEED=1 ;;
+  *) usage ;;
+esac
+
+cd "$CHECKOUT" || die "there is no checkout at $CHECKOUT. Nothing was deployed."
+
+if ! command -v flock >/dev/null 2>&1; then
+  die "flock is not installed. Nothing was changed."
+fi
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  die "another Money deploy holds $LOCK. Nothing was changed."
+fi
+MONEY_DEPLOY_LOCK_HELD=1
+export MONEY_DEPLOY_LOCK_HELD
+
+"$CHECKOUT/deploy/stand.sh" test preflight
+
+if ! git pull --ff-only -q; then
+  die "the checkout did not fast-forward. Nothing was deployed."
+fi
+git log --oneline -1
+BRANCH=$(git symbolic-ref -q --short HEAD) || BRANCH=""
+if [ "$BRANCH" != develop ]; then
+  echo "WARNING: $CHECKOUT is on '${BRANCH:-a detached commit}', not on develop"
+fi
+
+# The stand's own verdict is the last word when it fails. When it succeeds
+# there is the seeding still to do, so the last word is kept for the end.
+MONEY_VERDICT=deferred
+export MONEY_VERDICT
+"$CHECKOUT/deploy/stand.sh" test up
+
+# `ctl empty`: 0 when both documents are at revision 0, 1 when the stand holds
+# something. Only a plain "empty" seeds; anything unclear leaves the data alone.
+if [ "$RESEED" -eq 0 ]; then
+  EMPTY=0
+  "$CHECKOUT/deploy/stand.sh" test ctl empty || EMPTY=$?
+  case "$EMPTY" in
+    0)
+      echo "money-test: the stand is empty"
+      ;;
+    1)
+      about_the_night
+      echo "money-test: OK - deployed. The stand holds data and was not reseeded (--reseed does that on purpose)."
+      exit 0
+      ;;
+    *)
+      about_the_night
+      echo "money-test: FAILED - the new version is up, but asking it whether it is empty ended with status $EMPTY. Nothing was seeded."
+      exit 1
+      ;;
+  esac
+fi
+
+if [ ! -f "$CHECKOUT/scripts/money-demo.mjs" ]; then
+  echo "WARNING: scripts/money-demo.mjs is not in the checkout yet"
+  about_the_night
+  echo "money-test: OK - deployed, but NOT seeded: the generator of the fabricated studio is absent."
+  exit 0
+fi
+
+if ! "$CHECKOUT/deploy/bin/money-seed-test"; then
+  about_the_night
+  echo "money-test: FAILED - the new version is up, but seeding failed (the lines above say where)."
+  exit 1
+fi
+about_the_night
+echo "money-test: OK - deployed and seeded with the fabricated studio."

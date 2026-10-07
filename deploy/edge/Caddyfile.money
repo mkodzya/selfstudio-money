@@ -1,0 +1,64 @@
+# Money's two names at the edge: a reference copy.
+#
+# One Caddy owns ports 80 and 443 on the studio's server, and it belongs to the
+# platform: compose project selfops-edge, reading /opt/selfops/Caddyfile.edge
+# from the platform's prod checkout. So the blocks below do not run from here.
+# They live in the platform's Caddyfile.edge and reach it as two hotfixes of
+# the platform (docs/deploy.md, "The edge"); this file is where Money keeps
+# their text, and CI runs `caddy validate` on it. If the two ever differ, the
+# platform's file is what the proxy reads.
+#
+# Two rules for a block, because a mistake in that file takes every name of
+# both products away: a name goes in only once it exists in DNS, and a block
+# points only at a port where something already answers.
+#
+# What each line is for:
+#   request_body   the edge stops a body before Python sees a byte of it. 17 MB
+#                  sits just above Money's own limit of 16 MiB, so the refusal
+#                  a founder can meet is Money's own, as JSON.
+#   reverse_proxy  the stand's loopback port. Nothing else: Money serves its
+#                  page at the root itself, so the old rewrite is gone.
+#   encode         Money has no web container of its own to compress a 400 KB
+#                  page and a ledger of megabytes for a phone.
+#   HSTS           a year, this host only. Not includeSubDomains and not
+#                  preload: those are the parts that are hard to take back.
+#   X-Robots-Tag   not a page for a search index, whatever it says when nobody
+#                  is signed in.
+#
+# Not here on purpose: request buffering. It is added only after
+# `caddy validate` has accepted the option on the server's own Caddy version.
+
+# Money, the founders' ledger: a product of its own with a stack of its own
+# (repository mkodzya/selfstudio-money, compose project money-prod). The
+# platform neither contains nor serves it; the block is in the platform's file
+# only because one Caddy owns 80 and 443. DNS for selfstudio.se is at
+# Cloudflare, and the record has to be "DNS only".
+finance.selfstudio.se {
+	request_body {
+		max_size 17MB
+	}
+	reverse_proxy 127.0.0.1:5191
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	header X-Robots-Tag "noindex, nofollow"
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Money's own test stand (compose project money-test): a fabricated studio,
+# reseeded every night. Not the platform's test stack.
+finance.test.selfstudio.se {
+	request_body {
+		max_size 17MB
+	}
+	reverse_proxy 127.0.0.1:5192
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	header X-Robots-Tag "noindex, nofollow"
+	log {
+		output stdout
+		format console
+	}
+}

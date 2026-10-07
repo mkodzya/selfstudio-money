@@ -1,0 +1,17 @@
+# Ten past midnight, UTC, every night.
+#
+# In UTC on purpose, unlike the backup: the page's own "today" is the date in
+# London, and at 00:10 UTC London's date is the new day in winter and in
+# summer alike. So the studio the founders see in the morning was made for the
+# day they see it on.
+
+[Unit]
+Description=Money — nightly reseed of the test stand, 00:10 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:10:00 UTC
+# If the machine was off at ten past midnight, reseed once it is back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

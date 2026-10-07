@@ -1,0 +1,11 @@
+# An allow-list: everything is left out of a build, then three things are let in.
+#
+# The laptop tool keeps the studio's real ledger in data/, beside the code. A
+# list of things to leave out would have to be right every time a file is
+# added; a list of things to let in cannot leak what nobody named. So the
+# first line below shuts everything out, and each line after it starts with "!".
+# Keep it that way: tests/test_repo_hygiene.py and the image job in CI hold it.
+*
+!moneyd/
+!index.html
+!vendor/

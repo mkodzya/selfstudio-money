@@ -1,0 +1,612 @@
+#!/bin/sh
+# Put a backup of Money's PROD stand back - or prove that one could be.
+#
+#   money-restore --rehearse <tarball>     prove it; nothing of prod is touched
+#   money-restore <tarball>                do it; asks for the stand's name first
+#
+# A backup nobody has restored is a guess. So the rehearsal comes first, on the
+# day prod is set up, again once the real ledger is in, and whenever somebody
+# wants to know:
+#
+#   --rehearse unpacks the tarball into a scratch directory, starts a throwaway
+#   container on it - the stand's own image, no network, no published port, its
+#   own name - runs `ctl verify` (counts, never contents) and `ctl selfcheck`
+#   inside, then the two preparations of a real restore (below) on the copy,
+#   and removes the container and the directory - also when it is interrupted.
+#   It is a gate before the real ledger is loaded (docs/security.md, "Before
+#   prod").
+#
+# The real thing REPLACES the stand's data directory. Only on the owner's word.
+#   1. the tarball is read whole and must carry prod's own STAND marker;
+#   2. the stand's name has to be typed;
+#   3. the container is stopped;
+#   4. the directory as it stands is moved aside, never deleted:
+#        /var/lib/money/prod.before-restore-<utc>
+#   5. the tarball is unpacked into a new, empty directory owned by 10001;
+#   6. THE ACCOUNTS do not go back in time when that can be helped. If the
+#      accounts file in the directory that was moved aside reads (`ctl verify`
+#      on that directory says so), it is kept in place of the backup's: a
+#      restore is about the documents, not about undoing passwords, disabled
+#      logins and used one-time links. If it does not read, the backup's
+#      accounts are what there is - and then every pending one-time link in
+#      them is retired (`ctl user retire-links`): a link that was pending when
+#      the backup was taken and has been used since would otherwise work
+#      again, for whoever still has the message it was sent in. Either way
+#      the list of accounts is printed (`ctl user list`);
+#   7. THE REVISIONS cannot return to a number a browser may hold. The backup's
+#      documents are at the backup's revisions; a page left open from before
+#      the restore holds a later one, and would be let in again as soon as the
+#      count reached it - saving its old copy over everything saved since. So
+#      for both documents `ctl floor <ledger|plan> <N>` forbids every revision
+#      up to N: the highest the directory that was moved aside knows of (the
+#      number in its EVER_SAVED, the first bytes of its current.json, the names
+#      of its snapshots - counts, never contents). When that directory cannot
+#      say - it is gone, or it does not read - N is 1,000,000 above the highest
+#      revision the backup itself holds. The next save is written above N, and
+#      the page from before is told to reload (409);
+#   8. the container is started and has to pass `ctl selfcheck`;
+#   9. if any of 5 to 8 does not hold - or the run is interrupted: Ctrl-C, a
+#      dropped connection - the directory that was moved aside is put back,
+#      the container is started on it again if it was running, and what the
+#      attempt left is kept beside it for looking at:
+#        /var/lib/money/prod.failed-restore-<utc>
+# A backup holds no sessions, so afterwards every founder signs in again.
+# Steps 6 and 7 leave their lines in the stand's security log (floor-raised,
+# link-retired), which a founder sees on /data.
+#
+# One document back from a snapshot is a different, smaller thing:
+# `deploy/stand.sh prod ctl restore <ledger|plan> <snapshot>`.
+#
+# A prod tarball is never restored into the test stand; this cannot do it.
+set -eu
+umask 077
+
+STAND=prod
+LOCK=/run/lock/money-deploy.lock
+SCRATCH_PARENT=/var/tmp
+CONTAINER_USER=10001
+WAIT_SECONDS=60
+# How far above the backup's own revisions a floor is put when the directory
+# that was moved aside cannot say what the lost days had reached.
+UNKNOWN_MARGIN=1000000
+# A revision the service counts has fifteen digits at most.
+MOST_DIGITS=15
+
+die() {
+  echo "money-restore: $*" >&2
+  exit 1
+}
+
+usage() {
+  echo "usage: money-restore [--rehearse] <tarball>" >&2
+  exit 2
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+STAND_SH=$ROOT/deploy/stand.sh
+
+REHEARSE=0
+if [ "${1:-}" = --rehearse ]; then
+  REHEARSE=1
+  shift
+fi
+if [ $# -ne 1 ]; then
+  usage
+fi
+TARBALL=$1
+case "$TARBALL" in
+  -*) usage ;;
+  /*) ;;
+  *) TARBALL=$(pwd)/$TARBALL ;;
+esac
+
+if [ ! -f "$TARBALL" ]; then
+  die "no such file: $TARBALL"
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  die "docker is not installed"
+fi
+if [ "$(id -u)" -ne 0 ]; then
+  die "run this as root: the data belongs to the container's user and is closed to everybody else"
+fi
+
+# The archive has to read whole before anything is done with it, and it has to
+# be a backup of this stand and no other.
+if ! gzip -t "$TARBALL"; then
+  die "$TARBALL does not read as gzip"
+fi
+if ! tar -tzf "$TARBALL" >/dev/null; then
+  die "$TARBALL does not list as tar"
+fi
+MARKER=$(tar -xzOf "$TARBALL" ./STAND 2>/dev/null | tr -d '[:space:]') || MARKER=""
+if [ "$MARKER" != "$STAND" ]; then
+  die "$TARBALL is not a backup of the $STAND stand (its STAND marker says '${MARKER:-nothing}')"
+fi
+
+DATA=$("$STAND_SH" "$STAND" get MONEY_DATA_HOST_DIR)
+PUBLIC_URL=$("$STAND_SH" "$STAND" get MONEY_PUBLIC_URL)
+FOUNDERS=$("$STAND_SH" "$STAND" get MONEY_FOUNDERS)
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+# The container the stand runs now, if there is one - found by the labels
+# compose gives it, so that this works from whichever checkout it is run.
+running_container() {
+  docker ps -a -q \
+    --filter "label=com.docker.compose.project=money-$STAND" \
+    --filter "label=com.docker.compose.service=app" | head -n 1
+}
+
+# Ask a container until it answers, or give up. $1 is its name or id.
+wait_for() {
+  WAITED=0
+  while [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
+    if docker exec "$1" python -m moneyd.ctl ping >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+  done
+  return 1
+}
+
+# The image the stand runs; failing that, the newest one built for it.
+NOW=$(running_container)
+IMAGE=""
+if [ -n "$NOW" ]; then
+  IMAGE=$(docker inspect -f '{{.Image}}' "$NOW" 2>/dev/null) || IMAGE=""
+fi
+if [ -z "$IMAGE" ]; then
+  IMAGE=$(docker image ls -q "money-$STAND" | head -n 1)
+fi
+
+# ---------------------------------------------------------------------------
+# The rehearsal
+# ---------------------------------------------------------------------------
+if [ "$REHEARSE" -eq 1 ]; then
+  if [ -z "$IMAGE" ]; then
+    die "there is no Money image on this machine to rehearse with: run money-deploy first"
+  fi
+
+  SCRATCH=$(mktemp -d "$SCRATCH_PARENT/money-rehearse.XXXXXX")
+  NAME=money-rehearse-$STAMP
+  # The scratch directory is a whole, plain copy of prod's ledger and accounts,
+  # and the container serves it: neither may outlive this run. dash, which is
+  # /bin/sh on the server, runs an EXIT trap only when the script ends by
+  # itself, so a Ctrl-C and a dropped connection are turned into endings.
+  trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$SCRATCH"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+
+  mkdir "$SCRATCH/data"
+  if ! tar -xzf "$TARBALL" -C "$SCRATCH/data" --numeric-owner; then
+    die "the tarball did not unpack"
+  fi
+  chown "$CONTAINER_USER:$CONTAINER_USER" "$SCRATCH/data"
+  chmod 700 "$SCRATCH/data"
+
+  echo "money-restore: starting a throwaway container on a copy of $TARBALL"
+  # As deploy/compose.yml starts the stand, with three differences: it has no
+  # network at all, no port is published, and /data is the scratch copy.
+  if ! docker run -d --name "$NAME" --network none \
+    --init --read-only --tmpfs /tmp:size=16m \
+    --user "$CONTAINER_USER:$CONTAINER_USER" --cap-drop ALL --security-opt no-new-privileges:true \
+    --pids-limit 64 --memory 256m --cpus 1.0 \
+    -e "MONEY_STAND=$STAND" \
+    -e "MONEY_PUBLIC_URL=$PUBLIC_URL" \
+    -e "MONEY_FOUNDERS=$FOUNDERS" \
+    -e MONEY_DATA_DIR=/data \
+    -e MONEY_BIND=0.0.0.0:8080 \
+    -e MONEY_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 \
+    -e TZ=UTC \
+    -v "$SCRATCH/data:/data" \
+    "$IMAGE" >/dev/null; then
+    die "the throwaway container did not start"
+  fi
+
+  if ! wait_for "$NAME"; then
+    docker logs --tail 40 "$NAME" >&2 || true
+    echo "money-restore --rehearse: FAILED - the service did not start on the restored data ($TARBALL)"
+    exit 1
+  fi
+  if ! docker exec "$NAME" python -m moneyd.ctl verify /data; then
+    echo "money-restore --rehearse: FAILED - ctl verify refused the restored data ($TARBALL)"
+    exit 1
+  fi
+  if ! docker exec "$NAME" python -m moneyd.ctl selfcheck; then
+    docker logs --tail 40 "$NAME" >&2 || true
+    echo "money-restore --rehearse: FAILED - the self-check failed on the restored data ($TARBALL)"
+    exit 1
+  fi
+  # What a real restore does to the data before the stand starts on it, done
+  # here to the copy: it proves that this image knows the two commands and
+  # that they work on this data.
+  for KIND in ledger plan; do
+    if ! docker exec "$NAME" python -m moneyd.ctl floor "$KIND" 0; then
+      echo "money-restore --rehearse: FAILED - this image could not set a floor under the $KIND, which a real restore must do ($TARBALL)"
+      exit 1
+    fi
+  done
+  if ! docker exec "$NAME" python -m moneyd.ctl user retire-links; then
+    echo "money-restore --rehearse: FAILED - this image could not retire the pending one-time links, which a real restore may have to do ($TARBALL)"
+    exit 1
+  fi
+  echo "money-restore --rehearse: OK - $TARBALL unpacks, starts, passes the self-check and takes a restore's preparations. Prod was not touched."
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# The real thing
+# ---------------------------------------------------------------------------
+ASIDE=$DATA.before-restore-$STAMP
+FAILED_COPY=$DATA.failed-restore-$STAMP
+CTL_NAME=money-restore-ctl-$STAMP
+
+# One command of ctl on a data directory that nobody serves: a throwaway
+# container of the stand's own image, with no network and its own name. $1 is
+# the directory on the host that becomes /data; the rest are ctl's own words.
+ctl_on() {
+  CTL_DATA=$1
+  shift
+  docker run --rm --name "$CTL_NAME" --network none \
+    --init --read-only --tmpfs /tmp:size=16m \
+    --user "$CONTAINER_USER:$CONTAINER_USER" --cap-drop ALL --security-opt no-new-privileges:true \
+    --pids-limit 64 --memory 256m --cpus 1.0 \
+    -e "MONEY_STAND=$STAND" \
+    -e "MONEY_PUBLIC_URL=$PUBLIC_URL" \
+    -e "MONEY_FOUNDERS=$FOUNDERS" \
+    -e MONEY_DATA_DIR=/data \
+    -e MONEY_BIND=0.0.0.0:8080 \
+    -e MONEY_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 \
+    -e TZ=UTC \
+    -v "$CTL_DATA:/data" \
+    "$IMAGE" python -m moneyd.ctl "$@"
+}
+
+# `ctl verify` on a directory that must not be changed: it is mounted
+# read-only, and verify takes no lock and writes nothing.
+ctl_look() {
+  docker run --rm --name "$CTL_NAME" --network none \
+    --init --read-only --tmpfs /tmp:size=16m \
+    --user "$CONTAINER_USER:$CONTAINER_USER" --cap-drop ALL --security-opt no-new-privileges:true \
+    --pids-limit 64 --memory 256m --cpus 1.0 \
+    -e TZ=UTC \
+    -v "$1:/look:ro" \
+    "$IMAGE" python -m moneyd.ctl verify /look
+}
+
+# Whether the stand's image knows a word of ctl: its own help for that word.
+ctl_knows() {
+  docker run --rm --name "$CTL_NAME" --network none \
+    --init --read-only --tmpfs /tmp:size=16m \
+    --user "$CONTAINER_USER:$CONTAINER_USER" --cap-drop ALL --security-opt no-new-privileges:true \
+    --pids-limit 64 --memory 256m --cpus 1.0 \
+    "$IMAGE" python -m moneyd.ctl "$@" --help >/dev/null 2>&1
+}
+
+# A count as plain digits, fifteen at most, with no zero in front of it: a
+# snapshot's name says rev000010, and the shell would read that as octal.
+# Prints nothing for anything that is not such a number.
+plain_number() {
+  case "$1" in
+    "" | *[!0-9]*) return 0 ;;
+  esac
+  PLAIN=$1
+  while [ "${#PLAIN}" -gt 1 ] && [ "${PLAIN#0}" != "$PLAIN" ]; do
+    PLAIN=${PLAIN#0}
+  done
+  if [ "${#PLAIN}" -gt "$MOST_DIGITS" ]; then
+    return 0
+  fi
+  printf '%s' "$PLAIN"
+}
+
+# The highest revision one document's directory ($1) knows of, from counts
+# alone: the number in EVER_SAVED (and in NEVER_SAVED, which stands beside it
+# under a document that only carries a floor), the revision in the first bytes
+# of current.json, and the numbers in the names of its snapshots. No document
+# is read beyond its first 24 bytes, and nothing of one is ever printed.
+#
+# Leaves the number in HIGHEST and returns 0. Returns 1 when the directory
+# cannot be relied on to say - HIGHEST then holds what it could say all the
+# same:
+#   - it is not there;
+#   - a marker, or the head of current.json, is there and is not a number;
+#   - the document or copies of it are there, and EVER_SAVED is not.
+highest_revision() {
+  HIGHEST=0
+  if [ ! -d "$1" ]; then
+    return 1
+  fi
+  SURE=1
+  for MARK in EVER_SAVED NEVER_SAVED; do
+    if [ -e "$1/$MARK" ]; then
+      LINE=""
+      IFS= read -r LINE < "$1/$MARK" || true
+      FOUND=$(plain_number "$LINE")
+      if [ -z "$FOUND" ]; then
+        SURE=0
+      elif [ "$FOUND" -gt "$HIGHEST" ]; then
+        HIGHEST=$FOUND
+      fi
+    fi
+  done
+  HELD=0
+  if [ -e "$1/current.json" ]; then
+    HELD=1
+    HEAD=$(head -c 24 "$1/current.json" 2>/dev/null | LC_ALL=C sed -n '1s/^{"rev":\([0-9][0-9]*\),.*$/\1/p')
+    FOUND=$(plain_number "$HEAD")
+    if [ -z "$FOUND" ]; then
+      SURE=0
+    elif [ "$FOUND" -gt "$HIGHEST" ]; then
+      HIGHEST=$FOUND
+    fi
+  fi
+  for COPY in "$1"/snapshots/day-*-rev*.json.gz "$1"/snapshots/shrink-*-rev*.json.gz "$1"/snapshots/restore-*-rev*.json.gz; do
+    if [ ! -e "$COPY" ]; then
+      continue
+    fi
+    HELD=1
+    NUMBER=${COPY##*-rev}
+    NUMBER=${NUMBER%.json.gz}
+    FOUND=$(plain_number "$NUMBER")
+    if [ -n "$FOUND" ] && [ "$FOUND" -gt "$HIGHEST" ]; then
+      HIGHEST=$FOUND
+    fi
+  done
+  if [ "$HELD" -eq 1 ] && [ ! -e "$1/EVER_SAVED" ]; then
+    SURE=0
+  fi
+  if [ "$SURE" -ne 1 ]; then
+    return 1
+  fi
+  return 0
+}
+
+if [ -z "$IMAGE" ]; then
+  die "there is no Money image on this machine, and the restored data has to be prepared with the stand's own image before it is served. Run money-deploy first. Nothing was changed."
+fi
+# Before anything is moved: the image has to know the two commands of steps 6
+# and 7. An image from before they existed would unpack the backup and then
+# have no way to make it safe to serve.
+if ! ctl_knows floor || ! ctl_knows user retire-links; then
+  die "the stand's image does not know \`ctl floor\` and \`ctl user retire-links\`, so it cannot make a restored stand safe to serve. Deploy a current release first (money-deploy). Nothing was changed."
+fi
+if [ -e "$ASIDE" ] || [ -e "$FAILED_COPY" ]; then
+  die "$ASIDE or $FAILED_COPY is there already. Nothing was changed: run this again in a second."
+fi
+
+echo "About to REPLACE the data of Money's PROD stand with $TARBALL."
+echo "The directory as it stands is moved to $ASIDE and kept."
+echo "The accounts stay as they are now if their file reads; if it does not, they come from"
+echo "the backup and every pending one-time link is retired. Every founder will have to sign"
+echo "in again, and every Money page that is open now will be told to reload at its next save."
+echo "Type the stand's name to go on:"
+read -r CONFIRM || CONFIRM=""
+if [ "$CONFIRM" != "$STAND" ]; then
+  die "not confirmed - nothing done"
+fi
+
+# Not while a deploy is replacing the container, and no deploy while this runs.
+if [ "${MONEY_DEPLOY_LOCK_HELD:-}" != 1 ]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    die "flock is not installed"
+  fi
+  exec 9>"$LOCK"
+  if ! flock -n 9; then
+    die "a Money deploy holds $LOCK. Nothing was changed."
+  fi
+  MONEY_DEPLOY_LOCK_HELD=1
+  export MONEY_DEPLOY_LOCK_HELD
+fi
+
+HAD_DATA=0
+if [ -e "$DATA" ]; then
+  HAD_DATA=1
+fi
+WAS_RUNNING=0
+if [ -n "$NOW" ]; then
+  if [ "$(docker inspect -f '{{.State.Running}}' "$NOW" 2>/dev/null)" = true ]; then
+    WAS_RUNNING=1
+  fi
+fi
+
+# What is undone when the new data cannot be put in place or does not hold up.
+# It goes by what is on the disk, not by how far the script believes it got:
+# the attempt is set aside for looking at, the directory as it was comes back,
+# and the container is started on it again if it was running before. When
+# there was no data directory before, none is made up: a stand started on an
+# empty directory would hand every founder an empty ledger to save into.
+put_back() {
+  BACK=1
+  if [ "$HAD_DATA" -eq 1 ]; then
+    if [ -e "$ASIDE" ]; then
+      if [ -e "$DATA" ]; then
+        if ! mv "$DATA" "$FAILED_COPY"; then
+          BACK=0
+        fi
+      fi
+      if [ "$BACK" -eq 1 ]; then
+        if ! mv "$ASIDE" "$DATA"; then
+          BACK=0
+        fi
+      fi
+    fi
+  elif [ -e "$DATA" ]; then
+    if ! mv "$DATA" "$FAILED_COPY"; then
+      BACK=0
+    fi
+  fi
+  if [ "$BACK" -ne 1 ]; then
+    echo "money-restore: THE DIRECTORIES COULD NOT BE PUT BACK. Look at $DATA, $ASIDE and $FAILED_COPY by hand; the container is left stopped." >&2
+    return 0
+  fi
+  if [ "$HAD_DATA" -eq 1 ] && [ "$WAS_RUNNING" -eq 1 ]; then
+    if ! docker start "$NOW" >/dev/null 2>&1; then
+      echo "money-restore: the directory is back as it was, but the container did not start: docker start $NOW" >&2
+    fi
+  fi
+}
+
+# The end of an attempt that did not succeed: everything goes back, and the
+# last line says so. $1 is what went wrong. It is called for a failure this
+# script sees, and by the trap below for one it does not - a signal, a command
+# that ended it; when nothing has been touched yet, or all is done, it does
+# nothing.
+STAGE=untouched
+undo() {
+  if [ "$STAGE" != changing ]; then
+    return 0
+  fi
+  STAGE=undone
+  docker rm -f "$CTL_NAME" >/dev/null 2>&1 || true
+  echo "money-restore: $1; putting the directory back as it was" >&2
+  put_back
+  if [ "$HAD_DATA" -eq 1 ]; then
+    WORDS="The data is as it was before."
+  else
+    WORDS="There was no data directory before, and there is none now; the container is left stopped."
+  fi
+  if [ -e "$FAILED_COPY" ]; then
+    WORDS="$WORDS What the attempt left is in $FAILED_COPY."
+  fi
+  echo "money-restore: FAILED - $1. $WORDS"
+}
+trap 'undo "the restore was interrupted or a step of it ended unexpectedly"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+STAGE=changing
+if [ -n "$NOW" ]; then
+  if ! docker stop "$NOW" >/dev/null; then
+    undo "the stand's container could not be stopped"
+    exit 1
+  fi
+fi
+
+if [ "$HAD_DATA" -eq 1 ]; then
+  mv "$DATA" "$ASIDE"
+fi
+UNPACKED=0
+if install -d -o "$CONTAINER_USER" -g "$CONTAINER_USER" -m 700 "$DATA"; then
+  if tar -xzf "$TARBALL" -C "$DATA" --numeric-owner; then
+    UNPACKED=1
+  fi
+fi
+if [ "$UNPACKED" -ne 1 ]; then
+  undo "$TARBALL did not unpack"
+  exit 1
+fi
+chown "$CONTAINER_USER:$CONTAINER_USER" "$DATA"
+chmod 700 "$DATA"
+
+# --- 6. the accounts ---------------------------------------------------------
+ACCOUNTS=backup
+if [ "$HAD_DATA" -eq 1 ] && [ -f "$ASIDE/auth/users.json" ] && [ -d "$DATA/auth" ]; then
+  echo "money-restore: what the directory that was moved aside holds (ctl verify: counts, never contents):"
+  LOOK=$(ctl_look "$ASIDE" 2>&1) || true
+  printf '%s\n' "$LOOK" | sed 's/^/    /'
+  # verify ends "not OK" for a damaged document as well, so its exit status
+  # says nothing about the accounts. Its line about them does: a count means
+  # the file reads.
+  if printf '%s\n' "$LOOK" | grep -Eq '^[[:space:]]*accounts: [0-9]+ \('; then
+    if cp -p "$ASIDE/auth/users.json" "$DATA/auth/users.json.kept-by-restore" &&
+      mv -f "$DATA/auth/users.json.kept-by-restore" "$DATA/auth/users.json"; then
+      ACCOUNTS=kept
+    else
+      undo "the accounts file of the directory that was moved aside could not be copied into the restored one"
+      exit 1
+    fi
+  fi
+fi
+if [ "$ACCOUNTS" = kept ]; then
+  echo "money-restore: the accounts are kept as they were before the restore, not taken from the backup:"
+  if ! ctl_on "$DATA" user list; then
+    undo "the accounts that were kept do not read in the restored directory"
+    exit 1
+  fi
+else
+  echo "money-restore: the accounts file that was in place does not read (or is gone), so the accounts are the backup's."
+  echo "money-restore: retiring every one-time link that was pending when the backup was taken:"
+  if ! ctl_on "$DATA" user retire-links; then
+    undo "the pending one-time links of the backup's accounts could not be retired"
+    exit 1
+  fi
+fi
+
+# --- 7. the revisions --------------------------------------------------------
+for KIND in ledger plan; do
+  FLOOR=""
+  if [ "$HAD_DATA" -eq 1 ]; then
+    if highest_revision "$ASIDE/$KIND"; then
+      FLOOR=$HIGHEST
+      echo "money-restore: the $KIND had reached revision $FLOOR before the restore"
+    fi
+    SAID=$HIGHEST
+  else
+    SAID=0
+  fi
+  if [ -z "$FLOOR" ]; then
+    # What the lost days had reached is not known. The backup's own numbers,
+    # and whatever the directory that was moved aside could still say, are
+    # the least it can have been; the margin is for the rest.
+    highest_revision "$DATA/$KIND" || true
+    if [ "$SAID" -gt "$HIGHEST" ]; then
+      HIGHEST=$SAID
+    fi
+    FLOOR=$((HIGHEST + UNKNOWN_MARGIN))
+    echo "money-restore: what revision the $KIND had reached before the restore cannot be read, so its floor is put $UNKNOWN_MARGIN above the $HIGHEST that is known"
+  fi
+  if ! ctl_on "$DATA" floor "$KIND" "$FLOOR"; then
+    undo "the floor of the $KIND could not be raised to $FLOOR"
+    exit 1
+  fi
+done
+
+if [ -z "$NOW" ]; then
+  STAGE="done"
+  echo "money-restore: OK - the data of $TARBALL is in $DATA, with its accounts and revisions prepared. No container exists for the stand: start it with money-deploy."
+  if [ "$HAD_DATA" -eq 1 ]; then
+    echo "The directory as it was: $ASIDE (remove it by hand once you have looked)."
+  fi
+  exit 0
+fi
+
+HEALTHY=0
+if docker start "$NOW" >/dev/null && wait_for "$NOW" && docker exec "$NOW" python -m moneyd.ctl selfcheck; then
+  HEALTHY=1
+fi
+
+if [ "$HEALTHY" -ne 1 ]; then
+  docker logs --tail 40 "$NOW" >&2 || true
+  docker stop "$NOW" >/dev/null 2>&1 || true
+  undo "the stand did not come up on $TARBALL and pass its self-check"
+  exit 1
+fi
+
+STAGE="done"
+echo "money-restore: OK - the stand runs on the data of $TARBALL and passes its self-check."
+if [ "$ACCOUNTS" = kept ]; then
+  echo "Accounts: as they were before the restore (the list is above). Nothing of them went back in time."
+else
+  echo "Accounts: the backup's (the list is above). A password set after the backup is gone - that founder"
+  echo "needs a new link (money-user prod invite <login>); a login disabled after it is enabled again -"
+  echo "disable it again if it should be; every link that was pending in the backup is retired."
+fi
+echo "Revisions: both documents are back at the backup's, and no later save can land on a number a page"
+echo "from before the restore holds - such a page is told to reload. Every founder signs in again."
+if [ "$HAD_DATA" -eq 1 ]; then
+  echo "The directory as it was: $ASIDE - it also holds the security log of the days since the backup."
+  echo "Remove it by hand once you have looked."
+fi
