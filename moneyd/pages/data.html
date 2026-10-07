@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru" data-stand="{{stand}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Данные — Self Studio Money</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/assets/auth.css">
+<script src="/assets/auth.js" defer></script>
+</head>
+<body data-page="data">
+<!--only:test-->
+<div class="band" role="note">Тестовый стенд — выдуманная студия. Настоящие выписки сюда не загружать</div>
+<!--/only-->
+<main class="sheet wide">
+  <div class="wordmark"><span class="name">Self Studio</span><span class="pill">money</span></div>
+  <h1>Данные</h1>
+  <p class="actions">
+    <span class="who">Вы вошли как {{firstName}}</span>
+    <a class="button" href="/">Открыть Money</a>
+    <button type="button" id="logout">Выйти</button>
+  </p>
+  <p class="error" id="logout-error" role="alert" hidden></p>
+  <p>Money хранит два документа: выписки и план кассы. Здесь каждый можно скачать файлом<!--except:test--> и загрузить из файла<!--/except-->.</p>
+
+  <section class="doc" data-doc="ledger">
+    <h2>Выписки</h2>
+    <p class="state" data-status="ledger">Читаю с сервера…</p>
+    <p class="actions">
+      <a class="button" href="/api/founder/money" download="money-ledger.json" data-download="ledger">Скачать выписки</a>
+    </p>
+<!--except:test-->
+    <p class="upload">
+      <label for="upload-ledger">Загрузить выписки из файла</label>
+      <input id="upload-ledger" type="file" accept=".json,application/json" data-upload="ledger">
+    </p>
+<!--/except-->
+  </section>
+
+  <section class="doc" data-doc="plan">
+    <h2>План кассы</h2>
+    <p class="state" data-status="plan">Читаю с сервера…</p>
+    <p class="actions">
+      <a class="button" href="/api/founder/money/cash" download="money-plan.json" data-download="plan">Скачать план</a>
+    </p>
+<!--except:test-->
+    <p class="upload">
+      <label for="upload-plan">Загрузить план из файла</label>
+      <input id="upload-plan" type="file" accept=".json,application/json" data-upload="plan">
+    </p>
+<!--/except-->
+  </section>
+
+<!--only:test-->
+  <p class="note">На тестовом стенде загрузка из файла отключена: здесь живёт только выдуманная студия, и каждую ночь она создаётся заново.</p>
+<!--/only-->
+<!--except:test-->
+  <section class="confirm" id="confirm" hidden>
+    <h2 id="confirm-title">Заменить документ на сервере?</h2>
+    <p id="confirm-file"></p>
+    <p id="confirm-server"></p>
+    <p class="warn">Замена перезапишет документ целиком. Открытые вкладки Money попросят обновить страницу. Если текущая версия ещё нужна — сначала скачайте её.</p>
+    <p class="actions">
+      <button type="button" class="primary" id="confirm-yes" data-upload-confirm>Заменить</button>
+      <button type="button" id="confirm-no">Отмена</button>
+    </p>
+  </section>
+<!--/except-->
+  <p class="error" id="data-error" role="alert" hidden></p>
+  <p class="ok" id="data-done" role="status" hidden></p>
+
+  <section>
+    <h2>Журнал безопасности</h2>
+    <p class="note">Последние 50 записей: входы и отказы, одноразовые ссылки, смена паролей и всё, что делали с сервера. Время — ваше местное.</p>
+    <div class="scroll">
+      <table id="journal" data-entries="{{entries}}">
+        <thead><tr><th>Когда</th><th>Что</th><th>Кто</th><th>Откуда</th><th>Подробности</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="note" id="journal-empty" hidden>Записей пока нет.</p>
+  </section>
+  <noscript><p class="error">Страница работает только с включённым JavaScript.</p></noscript>
+</main>
+</body>
+</html>

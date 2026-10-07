@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru" data-stand="{{stand}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Вход — Self Studio Money</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/assets/auth.css">
+<script src="/assets/auth.js" defer></script>
+</head>
+<body data-page="login" data-state="{{state}}">
+<!--only:test-->
+<div class="band" role="note">Тестовый стенд — выдуманная студия. Настоящие выписки сюда не загружать</div>
+<!--/only-->
+<main class="sheet">
+  <div class="wordmark"><span class="name">Self Studio</span><span class="pill">money</span></div>
+
+  <section data-when="signed-in">
+    <h1>Вы вошли как {{firstName}}</h1>
+    <p class="actions">
+      <a class="button primary" href="/">Открыть Money</a>
+      <button type="button" id="logout">Выйти</button>
+    </p>
+    <p class="error" id="logout-error" role="alert" hidden></p>
+    <p class="note"><a href="/data">Данные и журнал</a> — скачать выписки и план файлом, посмотреть последние входы.</p>
+  </section>
+
+  <section data-when="form ending">
+    <h1>Вход</h1>
+    <p class="warn" data-when="ending">Вход скоро закончится — войдите заново</p>
+    <form id="login-form" method="post" action="/api/auth/login" novalidate>
+      <label for="login">Логин</label>
+      <input id="login" name="login" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" required>
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+      <p class="error" id="login-error" role="alert" hidden></p>
+      <button type="submit" id="login-submit" class="primary">Войти</button>
+    </form>
+    <p class="note">Пароль у Money свой — не тот, что на платформе.</p>
+    <p class="note">Забыли пароль? Попросите новую одноразовую ссылку.</p>
+    <noscript><p class="error">Вход работает только с включённым JavaScript.</p></noscript>
+  </section>
+</main>
+</body>
+</html>
