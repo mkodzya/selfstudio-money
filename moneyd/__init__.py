@@ -15,21 +15,25 @@ The modules below the HTTP layer, each with its own section like this one::
 
     config   Settings.from_env: a stand's settings, and every refusal to start they decide;
              the clock and the time formats; Refusal, the base of every door's error
-    store    DocStore: the two documents as files - revisions, snapshots, restore;
-             prepare_data_dir; doctor / verify; parse_json for request bodies
-    auth     Auth: sign-in, one-time links, sessions, the limiter; the request checks
-             (client address, Host, Origin, Sec-Fetch-Site) and the cookie strings
+    store    DocStore: the two documents as files - revisions, snapshots, restore, and the
+             floor under the revisions (raise_floor); prepare_data_dir; doctor / verify;
+             parse_json for request bodies
+    auth     Auth: sign-in, one-time links (retire_links ends every pending one), sessions,
+             the limiter; the request checks (client address, Host, Origin, Sec-Fetch-Site)
+             and the cookie strings
     log      RequestLog (stdout) and SecurityLog (a file in the data directory)
 
 How a process starts (``__main__`` and ``ctl`` both)::
 
     settings = config.Settings.from_env(os.environ)             # ConfigError
-    store.prepare_data_dir(settings.data_dir, settings.stand)   # DataDirError
+    store.prepare_data_dir(settings.data_dir, settings.stand)   # DataDirError. The first start lays out
+                                                                # ledger/, plan/, auth/ and writes STAND last;
+                                                                # a later one makes nothing anew that has gone
     seclog = log.SecurityLog(settings.data_dir, clock, max_bytes=settings.security_log_bytes,
                              keep=settings.security_log_files)
-    auth_ = auth.Auth(settings, clock, seclog); auth_.boot()    # AuthDamaged
-    stores = store.open_stores(settings, clock, seclog)         # a damaged document does not stop the boot:
-                                                                # its doors answer 503 storage_damaged
+    auth_ = auth.Auth(settings, clock, seclog); auth_.boot()    # AuthDamaged: users.json unreadable, or lost
+    stores = store.open_stores(settings, clock, seclog)         # a damaged or lost document does not stop the
+                                                                # boot: its doors answer 503 storage_damaged
 
 ``ConfigError`` and ``DataDirError`` are both ``config.BootRefusal``.
 """

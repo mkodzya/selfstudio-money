@@ -21,7 +21,11 @@
 //   - the stand is seeded with the fabricated studio (scripts/money-demo.mjs)
 //     through `ctl seed`, the way the test stand is;
 //   - a one-time link sets a password, signs its holder in, and works once;
-//   - /login knows a signed-in founder and its «Выйти» signs out;
+//     the login it was for is named once the link has worked - by the door,
+//     in the page's own username field and in words - and to no link that
+//     does not work;
+//   - /login knows a signed-in founder by name and by login, its «Выйти»
+//     signs out, and its form says what a login is;
 //   - a wrong password is refused, the right one opens the page;
 //   - the page is the file byte for byte, loads both documents and knows the
 //     founder's name;
@@ -29,7 +33,10 @@
 //   - a PDF and an Excel file are read by the page's own readers;
 //   - a session closed from `ctl` shuts the page: its save is refused, it says
 //     so, and nothing of it is stored;
-//   - /data hands a document over as a file and takes it back.
+//   - /data hands a document over as a file - the bare document, named for
+//     the day - and takes it back; before it replaces what the server holds
+//     it downloads that by itself; and it saves no file when the door does
+//     not answer.
 // And throughout: no console error, no page error, no policy violation, no
 // request to any host but the stand's own.
 //
@@ -45,14 +52,20 @@
 // What it asks of Money's own pages - the only markup it leans on:
 //   /login         input[autocomplete="username"], input[autocomplete="current-password"],
 //                  a submit control in the same form; signed in: a button «Выйти»
-//   /set-password  one or two input[autocomplete="new-password"], a submit control
+//                  and the login in words
+//   /set-password  one or two input[autocomplete="new-password"], a submit control;
+//                  once the password is saved: the login in a read-only
+//                  input[autocomplete="username"], the words «Пароль сохранён»
+//                  and «Логин: …», and a control to go on (#setup-go, or a
+//                  link or button that says «Открыть Money»)
 //   /data          the ledger's download control ([data-download="ledger"], or a
 //                  link or button that says «Скачать выписки»); an input[type="file"]
 //                  ([data-upload="ledger"], or the first one); and, if the page
 //                  wants a second press, [data-upload-confirm] or a button that
 //                  says «Загрузить» or «Заменить»
 // and of the CLI: `python -m moneyd.ctl user invite <login> --print`, which on
-// a dev stand prints the link although its output is not a terminal.
+// a dev stand prints the link although its output is not a terminal, and the
+// login on a line of its own.
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -487,6 +500,12 @@ const meOf = async (context) => {
   const cookie = await cookieOf(context);
   return cookie ? door('GET', '/api/me', { cookie }) : { status: 401, json: null };
 };
+// Which of the founder's two names a page shows - in its words or in a field that is not a
+// password's. A page that has not been given a working link must show neither.
+const namesShown = (page) => page.evaluate((names) => {
+  const shown = (document.body ? document.body.innerText : '') + '\n' + [...document.querySelectorAll('input:not([type="password"])')].map((field) => field.value).join('\n');
+  return names.filter((name) => shown.includes(name));
+}, [LOGIN, FIRST_NAME]);
 
 // The sign-in form, filled and sent.
 async function signIn(page, login, password) {
@@ -625,13 +644,20 @@ try {
   const link = (invited.out.match(/https?:\/\/\S+\/set-password#\S+/) || [])[0];
   must(link, 'it prints the link', tail(invited.out));
   must(link.startsWith(BASE + '/set-password#'), 'the link is built from the public URL, with the token after the #', hush(link));
+  // The sign-in page asks for a login and nothing else says what it is, so it travels with the link.
+  ok(invited.out.split('\n').some((line) => !line.includes('://') && new RegExp(`(^|[\\s:])${LOGIN}$`).test(line.trim())), '`invite` prints the login on a line of its own, to be passed on with the link');
   await go(page, link);
   await passwordField(page);
   const fresh = page.locator('input[autocomplete="new-password"]');
   const fields = (await fresh.count()) ? fresh : page.locator('input[type="password"]');
   must((await fields.count()) >= 1, '/set-password shows a field for the new password', await screen(page));
   ok(!page.url().includes('#t='), 'the token is gone from the address bar', hush(page.url()));
+  ok((await namesShown(page)).length === 0, 'before the link has worked the page names nobody', await namesShown(page));
   for (let i = 0; i < (await fields.count()); i++) await fields.nth(i).fill(PASSWORD);
+  // What the door answers the link with. Only its members' names are ever shown.
+  const answered = page.waitForResponse((answer) => answer.request().method() === 'POST' && new URL(answer.url()).pathname === '/api/auth/setup', { timeout: 20000 })
+    .then((answer) => answer.json())
+    .catch(() => null);
   await submit(page, fields.first());
   const me = await until(async () => {
     const answer = await meOf(context);
@@ -642,6 +668,28 @@ try {
   ok(me.json && me.json.firstName === FIRST_NAME && me.json.stand === 'dev', `/api/me says who: ${FIRST_NAME}, on the dev stand`, me.json);
   const jar = await context.cookies(BASE);
   ok(jar.length === 1 && jar[0].name === 'money-dev' && jar[0].httpOnly && jar[0].sameSite === 'Lax', 'the session is one cookie, money-dev: HttpOnly, SameSite=Lax', jar.map((c) => ({ name: c.name, httpOnly: c.httpOnly, sameSite: c.sameSite, secure: c.secure })));
+
+  // The login, said now that the link has worked: by the door, and by the page before it lets go.
+  const setup = await answered;
+  ok(setup && setup.ok === true && setup.login === LOGIN && setup.firstName === FIRST_NAME, `the door answers the link with the login it was for: ${LOGIN}`, setup && typeof setup === 'object' ? Object.keys(setup) : setup);
+  const whose = page.locator('input[autocomplete="username"]');
+  const named = await until(async () => ((await whose.count()) && (await whose.first().inputValue()) === LOGIN ? true : null), 10000);
+  if (!named) await picture(page, 'set-password-login');
+  ok(named && (await whose.first().isVisible()) && !(await whose.first().isEditable()), 'the page shows the login in a username field of its own, which cannot be typed in', await screen(page));
+  const afterwards = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+  ok(/Пароль сохранён/.test(afterwards) && afterwards.includes(`Логин: ${LOGIN}`), `and says so in words: «Пароль сохранён. Логин: ${LOGIN}»`, afterwards.slice(0, 240));
+  const onward = (await found(page, ['#setup-go']))
+    || (await found(page, ['a:visible:has-text("Открыть Money")', 'button:visible:has-text("Открыть Money")']));
+  must(onward, 'with a control to go on to the page', await screen(page));
+  await onward.click();
+  try {
+    await page.waitForURL((url) => url.pathname === '/', { timeout: 20000 });
+  } catch (e) {
+    await picture(page, 'set-password-onward');
+    must(false, 'which opens the page', { path: pathOf(page), screen: await screen(page) });
+  }
+  await pageIsUp(page, 'after choosing a password');
+  ok(true, 'which opens the page, signed in');
 
   // The same link again, by somebody who is not signed in.
   const second = await openContext(browser);
@@ -656,6 +704,7 @@ try {
       await submit(again, boxes.first());
       await sleep(1500);
     }
+    ok((await namesShown(again)).length === 0, 'a link that does not work is told no login and no name', await namesShown(again));
   });
   ok((await second.cookies(BASE)).length === 0 && (await meOf(second)).status === 401, 'the link works once: a second use signs nobody in', { cookies: (await second.cookies(BASE)).length });
   await second.close();
@@ -666,13 +715,18 @@ try {
   must(pathOf(page) === '/login', '/logout leads to /login', pathOf(page));
   const out = page.getByRole('button', { name: 'Выйти' });
   await out.first().waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-  ok((await page.locator('body').innerText()).includes(FIRST_NAME), `/login knows a signed-in founder by name (${FIRST_NAME})`, await screen(page));
+  const greeting = await page.locator('body').innerText();
+  ok(greeting.includes(FIRST_NAME), `/login knows a signed-in founder by name (${FIRST_NAME})`, await screen(page));
+  ok(greeting.includes(LOGIN), `and says the login beside the name (${LOGIN}): it is what the form asks for`, greeting.replace(/\s+/g, ' ').slice(0, 240));
   must((await out.count()) >= 1, '/login has a button «Выйти» for a signed-in founder', await screen(page));
   await out.first().click();
   const gone = await until(async () => (await meOf(context)).status === 401, 15000);
   must(gone, '«Выйти» ends the session', { me: (await meOf(context)).status });
 
   await go(page, BASE + '/login');
+  await passwordField(page);
+  const asked = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+  ok(/имя из ссылки.приглашения, не e.mail/.test(asked), 'the sign-in form says what a login is: the name from the invitation, not an e-mail', asked.slice(0, 240));
   await expecting([/401/], async () => {
     await signIn(page, LOGIN, PASSWORD + 'x');
     await sleep(2500);
@@ -833,15 +887,23 @@ try {
   }
   const file = path.join(WORK, 'downloaded.json');
   await download.saveAs(file);
+  const fileText = fs.readFileSync(file, 'utf8');
   let taken = null;
-  try { taken = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { /* said below */ }
+  try { taken = JSON.parse(fileText); } catch (e) { /* said below */ }
   must(taken && typeof taken === 'object', `the file (${download.suggestedFilename()}) is JSON`, fs.readFileSync(file).subarray(0, 80).toString('utf8'));
-  const inside = taken && 'doc' in taken && 'rev' in taken ? taken.doc : taken;
+  // The file is the document and nothing around it: the page's own import, the laptop tool and
+  // the way back to the platform all read a bare document, and none of them reads the door's answer.
+  const wrapped = 'doc' in taken && 'rev' in taken && !('tx' in taken) && !('banks' in taken);
+  ok(!wrapped, 'it is the bare document, without the rev and updatedAt of the door around it', Object.keys(taken).slice(0, 8));
+  const inside = wrapped ? taken.doc : taken;
   const kind = Array.isArray(inside.tx) ? 'ledger' : Array.isArray(inside.banks) ? 'plan' : null;
   must(kind, 'and it is one of the two documents: a ledger or a plan', Object.keys(inside).slice(0, 12));
+  ok(new RegExp(`^money-${kind}-\\d{4}-\\d{2}-\\d{2}\\.json$`).test(download.suggestedFilename()), `it is named for the document and the day: money-${kind}-YYYY-MM-DD.json`, download.suggestedFilename());
   const at = kind === 'ledger' ? '/api/founder/money' : '/api/founder/money/cash';
-  const stored = (await door('GET', at, { cookie: await cookieOf(context) })).json;
+  const atDoor = await door('GET', at, { cookie: await cookieOf(context) });
+  const stored = atDoor.json;
   ok(stored && canon(stored.doc) === canon(inside), `the downloaded ${kind} is the one at the door`, { rev: stored && stored.rev });
+  ok(!wrapped && atDoor.bytes.toString('utf8').includes(fileText.trim()), 'character for character: the file is the document as the door sends it');
   if (kind === 'ledger') ok(JSON.stringify(inside).includes(csvMark), 'with the rows this run added in it');
 
   const chooser = await found(page, [`input[type="file"][data-upload="${kind}"]`, 'input[type="file"]']);
@@ -850,22 +912,47 @@ try {
     const answer = (await door('GET', at, { cookie: await cookieOf(context) })).json;
     return answer && answer.rev === stored.rev + 1 ? answer : null;
   };
+  // Whatever the page hands over as a file while it replaces the document is collected: before a
+  // replace it is to download what the server holds, by itself.
+  const copies = [];
+  const collect = (handed) => copies.push(handed);
+  page.on('download', collect);
   mark = responses.length;
   await chooser.setInputFiles(file);
-  let back = await until(raised, 4000);
-  if (!back) {
-    // The page may want a second press before it replaces a document.
-    const press = (await found(page, ['[data-upload-confirm]']))
-      || (await found(page, ['button:visible:has-text("Заменить")', 'button:visible:has-text("Загрузить")', 'button:visible:has-text("Подтвердить")']));
-    if (press) {
-      note(`/data wanted a second press: «${(await press.innerText()).trim().slice(0, 40)}»`);
-      await press.click();
-      back = await until(raised, 20000);
-    }
+  // The page may want a second press before it replaces a document.
+  const press = await until(async () => (await found(page, ['[data-upload-confirm]:visible']))
+    || (await found(page, ['button:visible:has-text("Заменить")', 'button:visible:has-text("Загрузить")', 'button:visible:has-text("Подтвердить")'])), 5000);
+  if (press) {
+    note(`/data wanted a second press: «${(await press.innerText()).trim().slice(0, 40)}»`);
+    await press.click();
   }
+  const back = await until(raised, 20000);
   if (!back) await picture(page, 'data-upload');
   must(back, `the file goes back in through /data: the ${kind} is one revision on`, { before: stored.rev, now: ((await door('GET', at, { cookie: await cookieOf(context) })).json || {}).rev, requests: responses.slice(mark).map((r) => `${r.method} ${r.path} ${r.status}`), screen: await screen(page) });
   ok(canon(back.doc) === canon(inside), 'and it is the same document that came out');
+  const copy = await until(() => copies[0] || null, 5000);
+  page.off('download', collect);
+  let replaced = null;
+  if (copy) {
+    const keptFile = path.join(WORK, 'kept.json');
+    await copy.saveAs(keptFile);
+    try { replaced = JSON.parse(fs.readFileSync(keptFile, 'utf8')); } catch (e) { /* said below */ }
+  }
+  ok(copy && replaced && canon(replaced) === canon(stored.doc), 'before it replaced the document, the page downloaded what the server held, by itself', copy ? copy.suggestedFilename() : 'no file was handed over');
+  if (copy) note(`the copy of what was replaced is named ${copy.suggestedFilename()}`);
+
+  // -- no file without an answer --
+  const shut = ctl(['sessions', 'logout', LOGIN]);
+  must(shut.status === 0, 'the session is closed from the server once more', { status: shut.status, said: tail(shut.out + shut.err) });
+  await expecting([/401/], async () => {
+    let stray = null;
+    try {
+      [stray] = await Promise.all([page.waitForEvent('download', { timeout: 4000 }), control.click()]);
+    } catch (e) { /* nothing was handed over, which is what is wanted */ }
+    ok(!stray, 'when the door does not answer, «Скачать» saves no file', stray ? stray.suggestedFilename() : undefined);
+    const refusal = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+    ok(/не скачан|Вход закончился/.test(refusal), 'and the page says that nothing was downloaded', refusal.slice(-240));
+  });
 
   await context.close();
 } catch (e) {

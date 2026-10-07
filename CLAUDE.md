@@ -13,6 +13,10 @@ cash plan for the weeks ahead. One page, `index.html`, with two ways to run it:
   (`mkodzya/selfops`): its own repository, checkouts, data, sign-in, deploy
   commands and test stand.
 
+The page itself lives here too. Until 7 October 2026 it was written in the
+platform's repository and handed over whole; since that day it is edited in
+this one.
+
 What the tool is — `README.md`. What the hosted doors promise — `docs/api.md`.
 How the server is put together — `docs/deploy.md`. What protects the data —
 `docs/security.md`. Where the work stands today — `docs/handoff.md`. This file
@@ -36,7 +40,10 @@ and so is every text a person sees on Money's pages.
    sign-in link. A person runs it, in their own Terminal.
 5. **Secrets never pass through a chat**: no password, no one-time link, no
    session cookie, no private key.
-6. **Never edit the frozen files.** See "Frozen files".
+6. **The laptop tool changes only on the owner's word.** `server.py`, the
+   launcher and `vendor/` are pinned by tests, and no work on the hosted
+   service or on the page edits them in passing. See "The page, and the files
+   that are pinned".
 
 ## The laptop folder
 
@@ -47,7 +54,8 @@ itself and has no setting to keep it anywhere else, so in that folder the code
 and the studio's money share a directory.
 
 - It follows `main`. It is updated only by `git pull --ff-only`, and only on
-  the owner's word.
+  the owner's word. That is also the only way a new page reaches the laptop
+  tool.
 - It is never a work checkout: no branch switch, no edit, no commit, no
   worktree made from it.
 - Nobody runs `git clean`, a Docker build, a mount of the folder, or the tests
@@ -68,6 +76,8 @@ stops the run when `<checkout>/data` exists.
   real statement is uploaded to it, by a person or by a session.
 - Design notes that quote figures taken from real statements stay out of git
   (`design/` is ignored). A note is committed only after the figures are gone.
+  The same holds for a document: no sum, no total and no row count of the real
+  ledger is written into this repository.
 - The hosted work never reads the laptop's `data/`. Tests use documents they
   build themselves or the fabricated studio.
 - On a server, `ctl verify` and `ctl doctor` print counts, revisions and sizes,
@@ -138,30 +148,103 @@ The Page's Checks and Its Made-Up Studio Come Over From the Platform, Byte for B
 The subject says what is now true, not what was done to the files. The body
 says why, and what a reader cannot see in the diff.
 
-## Frozen files
+## The page, and the files that are pinned
 
-Three files are being rewritten by another session and arrive here whole:
+**The page lives here.** `index.html`, its checks `scripts/money-checks.mjs`
+and the fabricated studio `scripts/money-demo.mjs` were written in the
+platform's repository until 7 October 2026 and arrived whole that day (commit
+`b529a46`: the files of the platform's commit `f1b184d`, byte for byte). The
+freeze on them ended with that commit. They are edited in this repository now,
+and the platform's copy stays as it is until it is removed. No test pins
+their sha256 — a pin of a file that changes with every page change guards
+nothing — but one holds that all three exist: CI's `page-checks` job is
+skipped silently when one of them is missing.
 
-| File | State |
-|---|---|
-| `index.html` | the page; frozen until the hand-over |
-| `scripts/money-checks.mjs` | the page's browser checks; frozen until the hand-over |
-| `scripts/money-demo.mjs` | the fabricated studio; frozen until the hand-over |
+What the page is and the rules it works by — `docs/handoff.md`, «Страница:
+устройство и правила».
 
-The session that is finishing iteration 2 of the page on the platform branch
-`feature/money-live2` hands all three over in one commit. Until then they are
-read, run and served exactly as they are; a change to any of them here would be
-overwritten. After the hand-over the page is edited in this repository.
+**How a page change is checked.** By CI, on every push to `develop`, `main`,
+`feature/*` and `hotfix/*`; never on the Mac, which has no node and no browser
+and gets neither:
 
-Three more things are not edited by the hosted work at all:
+| CI job | What it runs | What it proves |
+|---|---|---|
+| `page-checks` | `scripts/money-checks.mjs`, on a copy of the page, with a stand-in for the server | the page: its calculation and its screens |
+| `stand-smoke` | `checks/stand-smoke.mjs`: the page on a real `python -m moneyd`, in Chromium | that the page and the hosted service fit, under the enforced policy |
+
+Node 22 and Playwright at the one version `package.json` names. `ONLY=<key>`
+narrows the page checks to one scenario; `SHOTS=<folder>` saves pictures of
+the screens. A change to the page is not finished until both jobs are green.
+
+**What the hosted service assumes about the page.** The service serves
+`index.html` as it is, byte for byte, and injects nothing. A page change that
+breaks one of these breaks the stand, and only some of them are caught before
+a deploy:
+
+- **No inline event handler and no `javascript:` address.** The page's policy
+  does not run them. `ctl selfcheck` fails a deploy for one in the page's own
+  markup. One inside a template that the script draws is not seen by the
+  server and is blocked by the browser all the same.
+- **No code made from strings** (`eval`, `new Function`, a string given to
+  `setTimeout`): the policy has no `unsafe-eval`. The PDF reader is called with
+  `isEvalSupported: false` for that reason.
+- **Inline scripts are allowed by their hash**, computed from the file at
+  start. Scripts from files: only from the stand itself.
+- **Three library files and no fourth**: `/money/vendor/pdf.min.js`,
+  `pdf.worker.min.js`, `xlsx.full.min.js`, by their absolute paths. Another
+  file under `/money/vendor/` is not served.
+- **No other host** but Google Fonts (`fonts.googleapis.com` for the
+  stylesheet, `fonts.gstatic.com` for the fonts): `connect-src 'self'`,
+  `img-src 'self' data: blob:`.
+- **A save is `PUT {"base": N, "doc": "<the document as a string of JSON>"}`**
+  and nothing nested beside those two. The ledger needs a `tx` array, the plan
+  a `banks` array; nothing else in a document is read.
+- **Rows are counted** for the before-shrink copy and the `doc-shrunk` alarm:
+  `tx` in the ledger; `banks`, `inflows`, `team`, `taxes` and `other` in the
+  plan. The plan's `div` list is not counted, so rows moved out of a counted
+  list look like rows lost.
+- **Limits are on the body**: 16 MiB for the ledger, 4 MiB for the plan. The
+  document travels in it as a string, with its quotes escaped, so the document
+  itself has to be somewhat smaller. The plan's last save while a tab closes
+  uses `fetch` with `keepalive`, and browsers cap such a body at 64 KiB.
+- **Every save raises the revision**, and every other open page then gets
+  `409` and stops saving until it is reloaded. So a save that nobody asked
+  for — on open, on a timer — shuts the other founders' pages. The page makes
+  exactly one: an older plan rewritten as version 3, once. A request on a
+  timer would also keep a session from ever going idle.
+- **`/api/me` is short**: `id` (the login), `name`, `firstName`,
+  `isFounderTier`, `stand`, `version`. Nothing else of the platform's is there.
+- **Four methods**: `GET`, `HEAD`, `POST`, `PUT`. A `POST` to a document door
+  is `405`, so `sendBeacon` cannot save on a stand.
+- **Addresses**: the page is at `/` on a host that begins with `finance.`. Of
+  the platform's old addresses only `/login`, `/tracker/board`, `/dashboard`,
+  `/money/` and `/money/index.html` lead anywhere.
+- **Refusals the platform never sent**: `storage_busy`, `storage_damaged`,
+  `storage_failed`, `body_too_large`, `bad_origin`, `busy`,
+  `too_many_connections`, `auth_damaged`; and `updatedAt` is `null` before the
+  first save. The page words `409` as "reload", `401` and `403` as "sign in
+  again", and everything else as "check the connection".
+
+If a page has to ship before it fits the policy, the policy can be sent as
+report-only for a dated while (`docs/deploy.md`, "If a page breaks under the
+policy"). On prod that needs the owner's word.
+
+**What is pinned and not edited in passing:**
 
 - `server.py` and `Запустить Money.command` — the laptop tool.
   `tests/test_laptop_frozen.py` pins the sha256 of both, so a change to either
-  is a deliberate commit that also changes the pin. `moneyd` never imports
-  `server.py`.
-- `vendor/` — the Excel and PDF readers the page loads. Replacing the vendored
-  SheetJS is on the "Next" list of `docs/security.md` and waits for the
-  hand-over.
+  is a deliberate commit that also changes the pin — and it is made only on
+  the owner's word. `moneyd` never imports `server.py`. The verification of
+  7 October 2026 found two gaps in `server.py`; they are not fixed, their two
+  tests in `tests/test_laptop_server.py` are marked `expectedFailure`, and the
+  findings wait in `docs/handoff.md`.
+- `vendor/` — the Excel and PDF readers the page loads, pinned in
+  `tests/test_repo_hygiene.py`. Replacing the vendored SheetJS is on the
+  "Next" list of `docs/security.md`.
+
+One page serves both homes: a change to `index.html` reaches the founders on a
+stand with the next deploy, and the laptop tool when the laptop folder is
+pulled.
 
 ## Stands
 
@@ -172,29 +255,44 @@ Three more things are not edited by the hosted work at all:
 | dev | `http://finance.localhost:<port>` | the working tree | a clone without `data/`, a temporary data directory, a plain process | `python3 -m moneyd` with `MONEY_STAND=dev` |
 | laptop tool | `http://127.0.0.1:5190` | `main` | the laptop folder, data in `data/` beside the code | `git pull --ff-only`, on the owner's word |
 
-Which of these exist today is in `docs/handoff.md`. On 7 October 2026 only the
-laptop tool did; the name `finance.selfstudio.se` was still answered by the
-platform.
+Which of these exist today is in `docs/handoff.md`. On the evening of
+7 October 2026 the laptop tool was in use, the test stand was being brought up
+on the server — from the work branch, because `develop` did not hold the
+service yet — and there was no prod stand: the name `finance.selfstudio.se`
+was still answered by the platform.
 
 The two server stands share a host and nothing else: separate checkout, compose
 project, data directory, loopback port and accounts. A password set on test is
 not a password on prod.
 
 The test stand forgets. It is seeded with the fabricated studio when it is
-empty, and every night at 00:10 UTC it is reseeded and its snapshots older than
-two days are purged. Whatever was typed there lives a day at most.
+empty, and every night at 00:10 UTC it is reseeded and every snapshot it holds
+is purged. Whatever was typed there is gone within a day — out of the document
+and out of every copy — as long as the nights succeed; a night that fails is
+said at the next deploy and at login on the server.
 
 ## Before a change lands
 
 ```sh
-python3 -m unittest discover -s tests -t .
+python3 -B -m unittest discover -s tests -t .
 ```
 
 Run it from the root of a clone that has no `data/` folder. It needs nothing
 but the Mac's own `/usr/bin/python3`: temporary directories, free loopback
 ports, no Docker, no node, no network, and no process left behind
-(`pgrep -fl moneyd` prints nothing afterwards). The whole suite is meant to
-finish in under a minute.
+(`pgrep -fl moneyd` prints nothing afterwards). `-B` keeps `__pycache__` out
+of the checkout. The whole suite is meant to finish in under a minute.
+
+A change to `deploy/` has a second set of checks:
+
+```sh
+python3 -B checks/test_deploy.py RestoreTests      # one class; the whole file takes about five minutes
+```
+
+They run the real scripts under `dash` against stand-ins for `docker`, `git`
+and `flock`, with the real `ctl` behind them. No Docker is needed. CI runs the
+whole file, and then the same scripts against a real Docker in its `image`
+job; a change to `deploy/` is not finished until that job is green.
 
 What the code has to respect:
 
@@ -210,15 +308,29 @@ What the code has to respect:
   cannot be added by accident.
 - A stand file (`deploy/stands/*.env`) holds no secret, and
   `tests/test_repo_hygiene.py` fails when one gains a key it does not know.
+- No deploy script creates or deletes `ledger/`, `plan/` or `auth/` inside a
+  stand's data directory: on a stand that has run, a missing one is a lost
+  one, and the service says so instead of making it anew.
 - Every closed finding gets a test that would have failed before the fix.
+- The script of Money's own pages (`moneyd/assets/auth.js`) has tests that run
+  only where the macOS JavaScript shell `jsc` exists — on the Mac. In CI they
+  are skipped, and the browser smoke drives those pages in Chromium instead.
+- A document that the change makes untrue is corrected in the same change.
 
 ## Heavy jobs
 
 The Mac has 8 GB of memory and other sessions running on it (handbook
 ADR-0010). Nothing with Docker, node, npm or Chromium is run on it for this
 repository. That work belongs to CI (`.github/workflows/ci.yml`): the image
-build, the page's browser checks, and the browser smoke of the unchanged page
-against the real backend. The Python tests above are not a heavy job.
+build and the rehearsals of the deploy commands, the page's browser checks,
+and the browser smoke of the page against the real backend. The Python tests
+above are not a heavy job. `checks/test_deploy.py` as a whole is five minutes
+of a busy core: on the Mac run the class you need, and leave the rest to CI.
+
+A step of the workflow is never pasted into a terminal. The rehearsal steps
+link the checkout into `/opt`, write under `/var/lib/money` and `/var/log/money`
+and replace "prod's" data. They are written to stop at once anywhere but on a
+GitHub runner; that guard is a last line, not a permission.
 
 ## Prod, invites and secrets
 
@@ -230,13 +342,15 @@ against the real backend. The Python tests above are not a heavy job.
   `money-user <stand> invite <login>`, not `python -m moneyd.ctl user invite`
   in the stand's container, not with `ssh -t`. The link it prints signs its
   holder in as a founder. Mika runs the line in a Terminal and passes each
-  link to its founder; a session may write the line out for Mika to copy.
+  link to its founder, together with the login the command prints above it; a
+  session may write the line out for Mika to copy.
   (The tests issue links on throwaway dev stands in temporary directories;
   that is not this.)
 - **Secrets never pass through a chat.** A founder types a password only into
   Money's own page. If a link or a password does end up in a conversation or a
   log, Mika issues a new link for that login: it retires the old link, and
-  using it replaces the password and closes that login's sessions.
+  using it replaces the password and closes that login's sessions. A login is
+  not a secret.
 - There is no secret to keep in this repository, and none may be added. The
   stand files are committed because they hold none.
 

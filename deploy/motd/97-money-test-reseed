@@ -1,0 +1,42 @@
+#!/bin/sh
+# Say something at login only when the nightly reseed of Money's TEST stand
+# has stopped happening.
+#
+# The reseed is what bounds how long a real statement, put on the test stand
+# by mistake, stays there: a day at most - while the nights succeed. When one
+# fails (the generator gone from the checkout, Docker Hub out of reach, the
+# container down) or the run is ended by its timeout, systemd writes that
+# into its journal, and nobody reads a journal they have no reason to open.
+# This is the cheapest thing that closes that gap, the twin of
+# 98-money-backup: whoever signs in to this machine is told, and nothing is
+# said on a good day.
+#
+# Test only, and nothing is said on a machine where the test stand was never
+# set up.
+#
+# Installed by linking, as /etc/update-motd.d/97-money-test-reseed:
+#   ln -sf /opt/money-dev/deploy/motd/97-money-test-reseed /etc/update-motd.d/
+set -eu
+
+DATA=/var/lib/money/test
+UNIT=money-test-reseed
+
+if [ ! -d "$DATA" ]; then
+  exit 0
+fi
+if ! command -v systemctl >/dev/null 2>&1; then
+  exit 0
+fi
+
+if systemctl is-failed --quiet "$UNIT.service" 2>/dev/null; then
+  printf '\n  \033[1;33mThe last nightly reseed of Money (test) FAILED.\033[0m\n'
+  printf '  What was put on the test stand since is still there.\n'
+  printf '  journalctl -u %s -n 30 --no-pager\n\n' "$UNIT"
+  exit 0
+fi
+
+if ! systemctl is-enabled --quiet "$UNIT.timer" 2>/dev/null; then
+  printf '\n  \033[1;33mThe nightly reseed of Money (test) is not switched on.\033[0m\n'
+  printf '  systemctl enable --now %s.timer\n\n' "$UNIT"
+fi
+exit 0

@@ -25,7 +25,11 @@ What is here
     ``FakeClock``                 a clock that stands still until the test moves it (``tick``, ``set``)
     ``free_port()``               a loopback port nobody listens on
     ``dev_environ(dir, port)``    the ``MONEY_*`` settings of a dev stand; ``Stand(env={...})`` changes them
-    ``Stand(clock=, env=, tune=)``  ``tune`` replaces fields of the settings (``{"signed_out_slots": 1}``)
+    ``Stand(clock=, env=, tune=)``  ``tune`` replaces fields of the settings (``{"signed_out_slots": 1}``).
+                                  Without a trusted proxy every request of a test comes from one address,
+                                  127.0.0.1, which may hold two signed-out slots: a test that stalls more
+                                  sign-ins at once names an address for each (``MONEY_TRUSTED_PROXIES`` set to
+                                  ``127.0.0.0/8`` and an ``X-Forwarded-For``), or tunes ``signed_out_body_slots_per_address``
     ``ProcessStand(env=)``
     ``stand_changes(name)``       what turns the dev settings into those of ``prod`` or ``test``
     ``scrypt_stand_in()``         ``hashlib.scrypt`` replaced by a cheap digest, for as long as the ``with`` lasts
@@ -384,7 +388,9 @@ class Stand(_Doors):
             raise
 
     def start(self) -> None:
-        self.server.serve_in_thread(poll_interval=0.02)
+        # The accept loop looks every 5 ms whether it has been told to stop: stopping a stand is
+        # then a matter of milliseconds, and a suite stops several hundred of them.
+        self.server.serve_in_thread(poll_interval=0.005)
 
     def stop(self) -> None:
         """End the server and remove the directory. Safe to call twice."""

@@ -17,7 +17,9 @@ and ``ctl`` (another process) may work on the same directory at the same time::
     store.save(base, doc, who) -> SaveResult(rev, rows, bytes, updated_at, snapshot)
         ``base`` and ``doc`` are the two members of the PUT body exactly as the
         JSON parser returned them (``fields_of(body)`` picks them out of
-        whatever the body was). What it raises, in the order it is checked -
+        whatever the body was). ``rev`` is ``base + 1`` - or one above the
+        floor, when ``raise_floor`` lifted that over the stored revision.
+        What it raises, in the order it is checked -
         the body first, as in the platform's route file, then the stored state:
           BadDoc      400 bad_money_doc     base not a whole number >= 0; doc not a string;
                                             doc not JSON / NaN / too deep / not UTF-8;
@@ -27,17 +29,25 @@ and ``ctl`` (another process) may work on the same directory at the same time::
           Damaged     503 storage_damaged   the stored file cannot be trusted; nothing is written
           Stale       409 money_stale       ``.rev`` is the stored revision; nothing is written
           NoSpace     507 storage_failed    free space is not above 3 x the document + 64 MB
-          StorageFailed 507 storage_failed  the disk refused the write (NoSpace is one of these)
+          StorageFailed 507 storage_failed  the disk refused the write (NoSpace is one of these);
+                                            what was stored is untouched
 
     store.revision() -> int                 # 0 when never saved; raises Damaged (``ctl empty``)
     store.check_space(content_length)       # raises NoSpace; lets the door refuse before reading a body
-    store.snapshots() -> [Snapshot(name, kind, rev, taken, bytes)]      newest first
+    store.snapshots() -> [Snapshot(name, kind, rev, taken, bytes)]      newest first: by revision
     store.check_snapshot(name) -> (rev, rows)                           unpacks and reads it back
     store.restore(name, who) -> RestoreResult(rev, from_rev, replaced_rev, snapshot, kept)
         The snapshot becomes revision "highest ever + 1", so every open page
         gets 409. Raises ``NoSuchSnapshot``, ``BadSnapshot``.
+    store.raise_floor(n, who="ctl") -> FloorResult(floor, was, rev)
+        Lifts the number in ``EVER_SAVED`` to at least ``n``; never lowers it,
+        never touches the document. Every later save and restore is a
+        revision above it. For a stand put back from a backup and for the
+        cut-over: the stored revision is then behind what open pages hold.
+        ``Refused`` (403) for a number below 0 or longer than 15 digits.
+    store.floor() -> int          the number no later revision goes at or below; 0 when there is none
     store.purge(older_than_days, stand, who="ctl") -> int      test and dev only, else ``Refused``
-    store.status() -> dict        state, rev, rows, sizes, snapshot counts, the newest snapshot. Never contents.
+    store.status() -> dict        state, rev, rows, sizes, floor, snapshot counts, the newest snapshot. Never contents.
 
 Every ``StoreError`` is a ``config.Refusal``: ``status``, ``code``, ``message``
 (a fixed English sentence - for the two documents the platform's own),
@@ -45,9 +55,11 @@ Every ``StoreError`` is a ``config.Refusal``: ``status``, ``code``, ``message``
 
 For ``ctl``::
 
-    doctor(data_dir, stand=None, clock=utcnow) -> dict      what is wrong, and which snapshot is newest
+    doctor(data_dir, stand=None, clock=utcnow) -> dict      what is wrong, and which snapshot brings a
+                                                            damaged document back: the newest that reads back
     verify(data_dir, deep=True) -> dict                     the same for any directory, read-only; counts only
     read_stand_marker(data_dir) -> str | None               what <data>/STAND says
+    has_run(data_dir) -> bool                               the stand has been through its first start here
 
 For the HTTP layer's own bodies::
 
@@ -55,15 +67,24 @@ For the HTTP layer's own bodies::
                                                 JSON within the depth (never RecursionError)
     json_depth_ok(data, max_depth) -> bool      the check parse_json runs first; bytes or str
 
-Shared with ``auth``: ``atomic_write``, ``FileLock`` (raises ``LockTimeout``).
+Shared with ``auth``: ``atomic_write`` (raises ``OSError``; ``Unsynced`` when the
+file is in place and only the directory's sync failed), ``FileLock`` (raises
+``LockTimeout``), ``has_run``.
 
 On disk
 -------
 ::
 
-    <data>/STAND                                  the stand's name; another name stops the boot
+    <data>/STAND                                  the stand's name; another name stops the boot.
+                                                  Written last by the first start: with it there,
+                                                  a directory below that is missing was lost
     <data>/<kind>/current.json                    the GET answer
-    <data>/<kind>/EVER_SAVED                      written at the first save: "missing" then means "lost"
+    <data>/<kind>/EVER_SAVED                      ASCII digits and a newline. Written with the first save:
+                                                  "missing" then means "lost". The number is the highest
+                                                  revision given out - or a higher one put there by
+                                                  ``raise_floor``; no later revision is at or below it
+    <data>/<kind>/NEVER_SAVED                     only between ``raise_floor`` on a document never saved
+                                                  and its first save: the marker is a bare floor
     <data>/<kind>/.lock                           flock: the server and ctl are two processes
     <data>/<kind>/snapshots/day-YYYY-MM-DD-revNNNNNN.json.gz       the document as the day found it
     <data>/<kind>/snapshots/shrink-<utc>-revNNNNNN.json.gz         before a save that dropped most rows
@@ -73,6 +94,12 @@ A file is never changed in place: temporary file, fsync, rename, fsync of the
 directory. ``current.json`` has one exact layout, the one ``save`` writes;
 anything else - cut short, reformatted by hand, the laptop's bare document - is
 ``Damaged`` and is never read as revision 0.
+
+Lost is not "never saved". A ``current.json`` that is not there is ``Damaged``
+when the marker says the document was saved, when copies of it lie in
+``snapshots/``, when its whole directory has gone on a stand that has run
+before, or when the data directory itself has gone. Only a document with none
+of these answers ``{"rev":0,"doc":{},"updatedAt":null}``.
 
 Time comes from the injected ``clock`` (a callable returning a UTC datetime).
 Waiting for a lock is the one thing measured on the real clock.
@@ -95,10 +122,10 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, NamedTuple, Op
 from .config import BootRefusal, Clock, Refusal, STANDS, as_utc, iso_ms, parse_iso, parse_stamp, stamp, utcnow
 
 __all__ = [
-    "KINDS", "DocStore", "Envelope", "SaveResult", "RestoreResult", "Snapshot",
+    "KINDS", "DocStore", "Envelope", "SaveResult", "RestoreResult", "FloorResult", "Snapshot",
     "StoreError", "BadDoc", "Stale", "TooLarge", "Damaged", "StorageFailed", "NoSpace", "Busy",
-    "NoSuchSnapshot", "BadSnapshot", "Refused", "DataDirError", "LockTimeout",
-    "prepare_data_dir", "read_stand_marker", "open_stores", "doctor", "verify", "fields_of",
+    "NoSuchSnapshot", "BadSnapshot", "Refused", "DataDirError", "LockTimeout", "Unsynced",
+    "prepare_data_dir", "read_stand_marker", "has_run", "open_stores", "doctor", "verify", "fields_of",
     "parse_json", "json_depth_ok", "atomic_write", "FileLock",
 ]
 
@@ -112,6 +139,9 @@ SMALL = 20
 MAX_DEPTH = 64
 #: Free space a save needs beyond three times the document.
 SPACE_MARGIN = 64 * MIB
+#: The highest number a floor may be: fifteen digits. The revision after it still has sixteen,
+#: which is what a stored file's head may carry and what a browser counts exactly (below 2**53).
+FLOOR_MAX = 10 ** 15 - 1
 
 STAND_FILE = "STAND"
 LAPTOP_LAYOUT = ("db.json", "cash.json", "backups")
@@ -201,6 +231,15 @@ class LockTimeout(Exception):
     """``FileLock`` waited as long as it was allowed to."""
 
 
+class Unsynced(OSError):
+    """``atomic_write`` put the new file in place, but its directory could not be synced.
+
+    Every reader already sees the new file, so the write has happened; what is
+    not confirmed is that it survives a power cut. It is an ``OSError``: a
+    caller that does not tell the two apart treats it as a write that failed.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Files: whole or not at all
 # ---------------------------------------------------------------------------
@@ -227,6 +266,10 @@ def atomic_write(path: str, chunks: Iterable[bytes], mode: int = 0o600, sync: bo
     ``fsync``, rename over, ``fsync`` of the directory. ``sync=False`` skips the
     two fsyncs for a file whose loss a crash may cost. Raises ``OSError`` and
     leaves no temporary file behind.
+
+    One ``OSError`` is not "nothing was written": ``Unsynced`` is raised when
+    the rename has happened and only the sync of the directory failed. The new
+    file is then what every reader gets.
     """
     directory = os.path.dirname(path) or "."
     temporary = "%s.tmp-%d-%s" % (path, os.getpid(), secrets.token_hex(4))
@@ -250,7 +293,10 @@ def atomic_write(path: str, chunks: Iterable[bytes], mode: int = 0o600, sync: bo
             pass
         raise
     if sync:
-        _fsync_dir(directory)
+        try:
+            _fsync_dir(directory)
+        except OSError as error:
+            raise Unsynced(error.errno, "the file is in place, but its directory could not be synced") from error
 
 
 class FileLock:
@@ -521,6 +567,12 @@ class RestoreResult(NamedTuple):
     kept: Optional[str]            # where the replaced state went (a restore- snapshot or a .damaged- file)
 
 
+class FloorResult(NamedTuple):
+    floor: int                     # the number now in EVER_SAVED: no revision at or below it is given out again
+    was: int                       # that number before the call; 0 when there was none
+    rev: Optional[int]             # the stored revision (0: never saved); None when the stored file is damaged
+
+
 class Snapshot(NamedTuple):
     name: str
     kind: str                      # "day" | "shrink" | "restore"
@@ -549,6 +601,11 @@ def _snapshot_of(name: str) -> Optional[Tuple[str, int, datetime.datetime]]:
         return None
 
 
+def _newness(snap: Snapshot) -> Tuple[int, datetime.datetime, str]:
+    """What snapshots are ordered by: the revision first - revisions only grow - then the time, then the name."""
+    return (snap.rev, snap.taken, snap.name)
+
+
 def _signature(status: os.stat_result) -> Tuple[int, int, int]:
     return (status.st_ino, status.st_mtime_ns, status.st_size)
 
@@ -569,7 +626,8 @@ class DocStore:
 
     Making one touches nothing on disk; directories appear with the first write.
     ``security_log`` (anything with ``write(event, **fields)``) gets ``restore``,
-    ``snapshots-purged`` and ``doc-shrunk``. ``free_bytes`` (``path -> int``) is for tests.
+    ``snapshots-purged``, ``doc-shrunk``, ``floor-raised`` and ``storage-unsynced``.
+    ``free_bytes`` (``path -> int``) is for tests.
     """
 
     def __init__(self, data_dir: str, kind: str, clock: Clock = utcnow, *, max_bytes: Optional[int] = None,
@@ -583,6 +641,7 @@ class DocStore:
         self.directory = os.path.join(data_dir, kind)
         self.path = os.path.join(self.directory, "current.json")
         self._marker = os.path.join(self.directory, "EVER_SAVED")
+        self._never = os.path.join(self.directory, "NEVER_SAVED")
         self._snapshots = os.path.join(self.directory, "snapshots")
         self._lockfile = os.path.join(self.directory, ".lock")
         self._clock = clock
@@ -607,8 +666,9 @@ class DocStore:
                     raise Damaged(self._damaged("it is larger than %s can be" % self._spec.name))
                 body = handle.read()
         except FileNotFoundError:
-            if os.path.lexists(self._marker):
-                raise Damaged(self._damaged("it is missing, although this document has been saved before"))
+            lost = self._lost()
+            if lost is not None:
+                raise Damaged(self._damaged(lost))
             return Envelope(0, None, EMPTY_BODY, 0)
         except OSError as error:
             raise Damaged(self._damaged("it cannot be read (%s)" % (errno.errorcode.get(error.errno, "error"),)))
@@ -630,10 +690,82 @@ class DocStore:
         return "The stored copy of %s cannot be trusted: %s. Nothing is read from it or written over it." % (
             self._spec.name, reason)
 
+    # -- lost, or never saved? -------------------------------------------------
+
+    def _lost(self) -> Optional[str]:
+        """Why a ``current.json`` that is not there is a loss; None when the document was simply never saved.
+
+        A loss is never answered as revision 0: the next page to open would save an empty
+        document where the real one was. What tells the two apart, in this order:
+
+        * the ``EVER_SAVED`` marker, written with the first accepted save;
+        * the data directory itself having gone (a volume that is no longer mounted);
+        * the document's own directory having gone on a stand that has run before - the
+          marker went with it, but ``STAND`` is written only after both directories are made;
+        * snapshots: there is no copy of a document that was never saved.
+        """
+        if self._ever_saved():
+            return "it is missing, although this document has been saved before"
+        if not os.path.isdir(self._data_dir):
+            return "the data directory is missing"
+        if not os.path.isdir(self.directory):
+            if has_run(self._data_dir):
+                return "its directory is missing, although this stand has run before"
+            return None
+        try:
+            names = os.listdir(self._snapshots)
+        except OSError:
+            names = []
+        if any(_snapshot_of(name) is not None for name in names):
+            return "it is missing, although copies of it are there"
+        return None
+
+    def _number_in(self, path: str) -> int:
+        """The number a marker file holds; 0 when there is no file or it holds no number of 1 to 15 digits.
+
+        A longer number is not believed: the revision after it could not be stored or counted.
+        """
+        try:
+            with open(path, "rb") as handle:
+                text = handle.read(32).strip()
+        except OSError:
+            return 0
+        return int(text) if text.isdigit() and len(text) <= len(str(FLOOR_MAX)) else 0
+
+    def _ever_saved(self) -> bool:
+        """Whether a save was ever accepted here.
+
+        That is what ``EVER_SAVED`` says by being there - unless ``NEVER_SAVED`` stands beside
+        it and holds a number no smaller: then the marker was made by ``raise_floor`` for a
+        document nobody has saved yet, and holds a floor and nothing else.
+        """
+        if not os.path.lexists(self._marker):
+            return False
+        if os.path.lexists(self._never):
+            vouched = self._number_in(self._never)
+            return not (vouched >= 1 and vouched >= self._number_in(self._marker))
+        return True
+
+    def floor(self) -> int:
+        """No save and no restore gives out a revision at or below this number; 0 when there is none.
+
+        It is the number in ``EVER_SAVED``: the highest revision this document has given
+        out, or a higher one that ``raise_floor`` put there. Reads; takes no lock.
+        """
+        return max(self._number_in(self._marker), self._number_in(self._never))
+
     # -- saving --------------------------------------------------------------
 
     def save(self, base: Any, doc: Any, who: str) -> SaveResult:
-        """Store ``doc`` as revision ``base + 1``, if ``base`` is still the stored revision.
+        """Store ``doc`` as the next revision, if ``base`` is still the stored revision.
+
+        The next revision is ``base + 1`` - or, when the number in ``EVER_SAVED`` is
+        higher than the stored revision, one above that number. It is higher after
+        a whole stand was put back from an older backup and ``raise_floor`` was
+        told what the lost days had reached: a page left open from before must
+        never find the counter standing on the number it holds, or its save would
+        replace everything saved since without a 409. A ``base`` that is not the
+        stored revision is ``Stale`` as ever, with the stored revision.
 
         ``doc`` is the document as a string of JSON; it is stored as it was sent
         (without the white space around it), so members this service has never
@@ -644,7 +776,13 @@ class DocStore:
         Before a document that has been saved before is overwritten, the stored
         one is copied aside when no copy was made yet on this UTC day (a
         ``day-`` snapshot), or else when it has more than 20 rows and the new
-        one fewer than half as many (a ``shrink-`` snapshot).
+        one fewer than half as many (a ``shrink-`` snapshot). A save that drops
+        more than half of more than 20 rows is written into the security log
+        whichever of the two copies kept what it replaced.
+
+        A save whose file is in place but whose directory could not be synced is
+        a save: it is answered with its revision, because that is what every
+        reader now gets, and the security log says ``storage-unsynced``.
         """
         spec = self._spec
         if not isinstance(who, str) or not who:
@@ -678,27 +816,32 @@ class DocStore:
                 raise Stale("%s was saved from somewhere else since this copy was read."
                             % (spec.name[0].upper() + spec.name[1:]), state.rev)
             self.check_space(len(raw))
+            # Above the stored revision, and above every number this document has given out or was
+            # told to stay clear of: the counter never comes back to a number a browser may hold.
+            rev = max(state.rev, self.floor()) + 1
+            # Somebody's page dropped most of the document: worth a line of its own, whichever
+            # copy keeps what it replaced.
+            shrinks = state.exists and state.rows > SMALL and rows < state.rows / 2
             try:
                 names = self._sweep()
                 snapshot = None
-                shrunk = False
                 if state.exists and state.rev > 0:
                     today = "day-%s-" % now.strftime("%Y-%m-%d")
                     if not any(name.startswith(today) and _snapshot_of(name) for name in names):
                         snapshot = self._copy_aside("day", state.rev, now)
-                    elif state.rows > SMALL and rows < state.rows / 2:
+                    elif shrinks:
                         snapshot = self._copy_aside("shrink", state.rev, now)
-                        shrunk = True
-                updated_at = self._write(state.rev + 1, raw, rows, now)
+                updated_at, synced = self._write(rev, raw, rows, now)
             except OSError as error:
                 raise StorageFailed("%s could not be written (%s); what was stored is untouched."
                                     % (spec.name[0].upper() + spec.name[1:],
                                        errno.errorcode.get(error.errno, "error")))
-        if shrunk:
-            # The one save worth a line of its own: somebody's page dropped most of the document.
-            self._note("doc-shrunk", doc=self.kind, by=who, rev=state.rev + 1, rows=rows, fromRows=state.rows,
+        if shrinks:
+            self._note("doc-shrunk", doc=self.kind, by=who, rev=rev, rows=rows, fromRows=state.rows,
                        snapshot=snapshot)
-        return SaveResult(state.rev + 1, rows, len(raw), updated_at, snapshot)
+        if not synced:
+            self._note("storage-unsynced", file=self.kind, rev=rev, by=who)
+        return SaveResult(rev, rows, len(raw), updated_at, snapshot)
 
     def _base(self, base: Any) -> int:
         refusal = "base is the revision %s was read at — a whole number, 0 or more." % self._spec.name
@@ -730,6 +873,11 @@ class DocStore:
             raise Busy("%s is being written; try again." % (self._spec.name[0].upper() + self._spec.name[1:]))
         try:
             try:
+                # A document's directory that has gone on a stand that has run before is a lost
+                # document. Making it anew here would turn "lost" into "never saved" - and the
+                # next save from revision 0 into a new, empty ledger.
+                if not os.path.isdir(self.directory) and has_run(self._data_dir):
+                    raise Damaged(self._damaged("its directory is missing, although this stand has run before"))
                 # mkdir, not makedirs: a data directory that has gone is not quietly made anew.
                 for directory in (self.directory, self._snapshots):
                     try:
@@ -756,8 +904,9 @@ class DocStore:
         try:
             handle = open(self.path, "rb")
         except FileNotFoundError:
-            if os.path.lexists(self._marker):
-                raise Damaged(self._damaged("it is missing, although this document has been saved before"))
+            lost = self._lost()
+            if lost is not None:
+                raise Damaged(self._damaged(lost))
             return _State(0, 0, None, False)
         except OSError as error:
             raise Damaged(self._damaged("it cannot be read (%s)" % (errno.errorcode.get(error.errno, "error"),)))
@@ -798,22 +947,37 @@ class DocStore:
                         pass
         return os.listdir(self._snapshots)
 
-    def _write(self, rev: int, raw: bytes, rows: int, now: datetime.datetime) -> str:
-        """Put revision ``rev`` in place. Call under the lock. Raises ``OSError``."""
+    def _write(self, rev: int, raw: bytes, rows: int, now: datetime.datetime) -> Tuple[str, bool]:
+        """Put revision ``rev`` in place. Call under the lock. Returns ``(updatedAt, synced)``.
+
+        Raises ``OSError`` only when the stored file is as it was. Once the rename has
+        happened the save is what every reader gets, so it is a save: when no more than
+        the sync of the directory failed, ``synced`` is False and nothing is raised.
+        """
         updated_at = iso_ms(now)
-        atomic_write(self.path, (
-            b'{"rev":%d,"doc":' % rev, raw, b',"updatedAt":"%s"}' % updated_at.encode("ascii")))
+        synced = True
+        try:
+            atomic_write(self.path, (
+                b'{"rev":%d,"doc":' % rev, raw, b',"updatedAt":"%s"}' % updated_at.encode("ascii")))
+        except Unsynced:
+            synced = False
         try:
             self._meta = (_signature(os.stat(self.path)), rev, rows, updated_at)
         except OSError:
             self._meta = None       # the save is done; the next reader looks for itself
-        # The marker says "this document has been saved", and remembers the highest revision
-        # given out, so a restore over a lost file can still pick a revision no page holds.
+        # The marker says "this document has been saved", and holds the highest revision given
+        # out: the floor under every later save and restore, and what a whole-stand restore
+        # reads to learn how far the lost days had counted. So it is synced like the document.
         try:
-            atomic_write(self._marker, (b"%d\n" % rev,), sync=not os.path.lexists(self._marker))
+            if os.path.lexists(self._never):
+                os.unlink(self._never)      # saved now: the marker stops being a bare floor
+        except OSError:
+            pass
+        try:
+            atomic_write(self._marker, (b"%d\n" % rev,))
         except OSError:
             pass        # the save itself is done; the next one writes the marker again
-        return updated_at
+        return updated_at, synced
 
     def _copy_aside(self, prefix: str, rev: int, now: datetime.datetime) -> str:
         """Gzip the current file into a snapshot, then prune. Call under the lock. Raises ``OSError``."""
@@ -833,7 +997,7 @@ class DocStore:
 
     def _prune(self) -> None:
         """Keep the newest 90 day copies and the newest 50 before-shrink copies. Restore copies stay."""
-        kept = sorted(self.snapshots(), key=lambda snap: (snap.taken, snap.rev, snap.name))
+        kept = sorted(self.snapshots(), key=_newness)
         for prefix, keep in (("day", self._keep_day), ("shrink", self._keep_shrink)):
             mine = [snap for snap in kept if snap.kind == prefix]
             for snap in (mine[:-keep] if keep > 0 else mine):
@@ -845,7 +1009,12 @@ class DocStore:
     # -- snapshots -----------------------------------------------------------
 
     def snapshots(self) -> List[Snapshot]:
-        """Every snapshot of this document, newest first. Reads names and sizes only."""
+        """Every snapshot of this document, newest first. Reads names and sizes only.
+
+        Newest is the highest revision: revisions only grow, whereas a day copy is dated
+        at the start of its day and so would sort below a restore copy made earlier that
+        same day, although it was taken later and holds a later state.
+        """
         found = []
         try:
             names = os.listdir(self._snapshots)
@@ -860,7 +1029,7 @@ class DocStore:
             except OSError:
                 continue
             found.append(Snapshot(name, parts[0], parts[1], parts[2], size))
-        found.sort(key=lambda snap: (snap.taken, snap.rev, snap.name), reverse=True)
+        found.sort(key=_newness, reverse=True)
         return found
 
     def _read_snapshot(self, name: str) -> _Parsed:
@@ -908,8 +1077,12 @@ class DocStore:
                 state = self._state()  # type: Optional[_State]
             except Damaged:
                 state = None
-            known = [parsed.rev, self._marker_rev()] + [snap.rev for snap in self.snapshots()]
-            known.append(state.rev if state is not None else self._salvaged_rev())
+            # Every number a page may hold: the floor, the names of the copies, what a damaged
+            # file still says of itself. A number of sixteen digits is nobody's revision.
+            heard = [self.floor(), self._salvaged_rev()] + [snap.rev for snap in self.snapshots()]
+            known = [parsed.rev] + [number for number in heard if number <= FLOOR_MAX]
+            if state is not None:
+                known.append(state.rev)
             rev = max(known) + 1
             self.check_space(len(raw))
             try:
@@ -919,22 +1092,72 @@ class DocStore:
                     kept = self._move_damaged_aside(now)
                 elif state.exists and state.rev > 0:
                     kept = self._copy_aside("restore", state.rev, now)
-                self._write(rev, raw, parsed.rows, now)
+                _updated_at, synced = self._write(rev, raw, parsed.rows, now)
             except OSError as error:
                 raise StorageFailed("%s could not be restored (%s); what was stored is untouched."
                                     % (spec.name[0].upper() + spec.name[1:],
                                        errno.errorcode.get(error.errno, "error")))
         result = RestoreResult(rev, parsed.rev, state.rev if state is not None else None, name, kept)
         self._note("restore", doc=self.kind, snapshot=name, rev=rev, fromRev=parsed.rev, kept=kept, by=who)
+        if not synced:
+            self._note("storage-unsynced", file=self.kind, rev=rev, by=who)
         return result
 
-    def _marker_rev(self) -> int:
-        try:
-            with open(self._marker, "rb") as handle:
-                text = handle.read(32).strip()
-            return int(text) if text.isdigit() else 0
-        except (OSError, ValueError):
-            return 0
+    def raise_floor(self, floor: int, who: str = "ctl") -> FloorResult:
+        """Lift the number in ``EVER_SAVED`` to at least ``floor``: no save and no restore gives out
+        a revision at or below it again. It never lowers the number and it never touches the document.
+
+        For the two moments when the stored revision is behind what browsers hold:
+
+        * a whole stand was put back from a backup - the documents are at the backup's revisions,
+          while pages opened before the restore hold the later ones of the lost days;
+        * the cut-over - Money's documents start at revision 0, while pages opened on the
+          platform hold the platform's revision.
+
+        The stored revision stays what it is, so a page that reloads saves from it; that save
+        is written as ``floor + 1``, and from then on a page from before can only get 409.
+
+        The marker is made when there is none. For a document that was never saved it is made
+        together with ``NEVER_SAVED``, which keeps the document reading as revision 0 and not as
+        lost; the first accepted save removes that file again.
+
+        ``floor`` is a whole number; ``Refused`` (403 ``refused``) when it is below 0 or longer
+        than 15 digits, ``ValueError`` when it is not a whole number at all. Also raises ``Busy``,
+        ``StorageFailed`` (the disk refused, or could not be made to keep it) and ``Damaged``
+        (the document's directory is lost). Returns ``FloorResult(floor, was, rev)`` and writes
+        ``floor-raised`` (doc, floor, was, by) into the security log - also when the number was
+        high enough already, so that a whole-stand restore always leaves its line.
+        """
+        if isinstance(floor, bool) or not isinstance(floor, int):
+            raise ValueError("a floor is a revision: a whole number")
+        if not isinstance(who, str) or not who:
+            raise ValueError("who raises the floor must be named")
+        if not 0 <= floor <= FLOOR_MAX:
+            raise Refused("A floor is a revision: a whole number from 0 to %d - fifteen digits at most. "
+                          "Nothing was changed." % FLOOR_MAX)
+        spec = self._spec
+        with self._locked():
+            try:
+                state = self._state()  # type: Optional[_State]
+            except Damaged:
+                state = None
+            was = self.floor()
+            # The marker never says less than what is stored: it is the highest revision given out.
+            stored = state.rev if state is not None else self._salvaged_rev()
+            wanted = max(floor, was, stored if stored <= FLOOR_MAX else 0)
+            never_saved = state is not None and not state.exists
+            try:
+                if wanted > self._number_in(self._marker):
+                    if never_saved and self._number_in(self._never) < wanted:
+                        # First the file that says "a floor, not a save": were the marker alone
+                        # there for a moment, the document would read as lost.
+                        atomic_write(self._never, (b"%d\n" % wanted,))
+                    atomic_write(self._marker, (b"%d\n" % wanted,))
+            except OSError as error:
+                raise StorageFailed("The floor of %s could not be written and kept (%s). Run it again."
+                                    % (spec.name, errno.errorcode.get(error.errno, "error")))
+        self._note("floor-raised", doc=self.kind, floor=wanted, was=was, by=who)
+        return FloorResult(wanted, was, state.rev if state is not None else None)
 
     def _salvaged_rev(self) -> int:
         """The revision a damaged file still names in its first bytes, if it does."""
@@ -963,6 +1186,8 @@ class DocStore:
         Only for the stands whose data is made up: ``stand`` must be ``test`` or
         ``dev`` **and** be what the directory's own ``STAND`` marker says, else
         ``Refused``. Returns how many files went. ``current.json`` is never touched.
+        A number of days that reaches further back than the calendar does purges
+        nothing: no copy is that old.
         """
         if isinstance(older_than_days, bool) or not isinstance(older_than_days, int) or older_than_days < 0:
             raise ValueError("older_than_days is a whole number of days, 0 or more")
@@ -975,13 +1200,16 @@ class DocStore:
         if marker != stand:
             raise Refused("This data directory is marked %r, not %r; nothing was purged." % (marker, stand))
         now = as_utc(self._clock())
-        cutoff = now - datetime.timedelta(days=older_than_days)
+        try:
+            cutoff = now - datetime.timedelta(days=older_than_days)  # type: Optional[datetime.datetime]
+        except OverflowError:
+            cutoff = None       # further back than the calendar reaches: nothing is that old
         gone = 0
         if not os.path.isdir(self.directory):
             return 0
         with self._locked():
             for snap in self.snapshots():
-                if older_than_days == 0 or snap.taken < cutoff:
+                if older_than_days == 0 or (cutoff is not None and snap.taken < cutoff):
                     try:
                         os.unlink(os.path.join(self._snapshots, snap.name))
                         gone += 1
@@ -992,7 +1220,7 @@ class DocStore:
                 if match is None:
                     continue
                 try:
-                    if older_than_days == 0 or parse_stamp(match.group(1)) < cutoff:
+                    if older_than_days == 0 or (cutoff is not None and parse_stamp(match.group(1)) < cutoff):
                         os.unlink(os.path.join(self.directory, name))
                         gone += 1
                 except (OSError, ValueError):
@@ -1010,11 +1238,15 @@ class DocStore:
         """Counts and sizes for ``ctl doctor`` and ``ctl verify``. Reads; never writes; never raises.
 
         ``state`` is ``"empty"`` (never saved), ``"ok"`` or ``"damaged"`` (then
-        ``problem`` says why). No member of the document is ever in here.
+        ``problem`` says why). ``floor`` is the number no later revision goes at or
+        below, ``directory`` whether the document's directory is there at all,
+        ``snapshots.newest`` the copy of the highest revision. No member of the
+        document is ever in here.
         """
         status = {
             "kind": self.kind, "state": "empty", "rev": 0, "rows": 0, "bytes": 0, "updatedAt": None,
-            "problem": None, "everSaved": os.path.lexists(self._marker),
+            "problem": None, "everSaved": self._ever_saved(), "floor": self.floor(),
+            "directory": os.path.isdir(self.directory),
         }  # type: Dict[str, Any]
         try:
             envelope = self.read()
@@ -1070,8 +1302,56 @@ def read_stand_marker(data_dir: str) -> Optional[str]:
     return "".join(ch if ch.isascii() and ch.isalnum() else "?" for ch in text[:16]) or "?"
 
 
+def has_run(data_dir: str) -> bool:
+    """Whether a stand has been through its first start in ``data_dir``: the ``STAND`` marker is there.
+
+    The first start makes ``ledger/``, ``plan/`` and ``auth/`` and writes the marker last. So
+    with the marker there, one of the three that is missing was lost - it is not a part of
+    the stand that has yet to begin, and nothing makes it anew.
+    """
+    return os.path.lexists(os.path.join(data_dir, STAND_FILE))
+
+
+def _bare(path: str) -> bool:
+    """Whether ``path`` is a directory of the layout with nothing in it yet (a document's may hold an empty ``snapshots``)."""
+    try:
+        if not os.path.isdir(path) or os.path.islink(path):
+            return False
+        for name in os.listdir(path):
+            inner = os.path.join(path, name)
+            if name != "snapshots" or os.path.islink(inner) or not os.path.isdir(inner) or os.listdir(inner):
+                return False
+        return True
+    except OSError:
+        return False
+
+
+def _lay_out(data_dir: str, stand: str) -> None:
+    """The first start: the three directories, then the marker. Raises ``OSError``, leaving what it made behind only
+    together with the marker."""
+    marker = os.path.join(data_dir, STAND_FILE)
+    made = []
+    try:
+        for parts in (("ledger",), ("ledger", "snapshots"), ("plan",), ("plan", "snapshots"), ("auth",)):
+            path = os.path.join(data_dir, *parts)
+            try:
+                os.mkdir(path, 0o700)
+                made.append(path)
+            except FileExistsError:
+                pass
+        atomic_write(marker, (stand.encode("ascii") + b"\n",))
+    except OSError:
+        if not os.path.lexists(marker):
+            for path in reversed(made):
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    pass
+        raise
+
+
 def prepare_data_dir(data_dir: str, stand: str) -> None:
-    """Make sure ``data_dir`` is this stand's own, then lay out its directories.
+    """Make sure ``data_dir`` is this stand's own; on its first start, lay out its directories.
 
     Raises ``DataDirError`` - on every stand, dev included - when:
 
@@ -1081,7 +1361,16 @@ def prepare_data_dir(data_dir: str, stand: str) -> None:
     * it has no marker but already holds a stand's files (whose they are is then
       a person's call: write the stand's name into ``STAND`` by hand).
 
-    On an empty directory it writes the marker: that is the first start.
+    On a directory with no marker and none of a stand's files it makes
+    ``ledger/``, ``plan/`` and ``auth/`` and then writes the marker: that is
+    the first start, and the marker is its last step.
+
+    On every later start nothing that is missing is made anew. A document's
+    directory that has gone is a lost document (its doors answer
+    ``503 storage_damaged``, ``doctor`` says so), and ``auth/`` that has gone
+    is the accounts lost (``auth.AuthDamaged``: the boot stops) - neither is a
+    part of the stand that may quietly begin again from nothing. To begin one
+    anew on purpose, a person makes the empty directory by hand.
     """
     if stand not in STANDS:
         raise ValueError("no such stand: %r" % (stand,))
@@ -1096,12 +1385,17 @@ def prepare_data_dir(data_dir: str, stand: str) -> None:
     try:
         if marker is None:
             owned = [name for name in _STAND_OWNED if os.path.lexists(os.path.join(data_dir, name))]
+            if owned and all(_bare(os.path.join(data_dir, name)) for name in owned):
+                raise DataDirError(
+                    "The data directory %s holds empty directories of a stand (%s) and no STAND marker: most "
+                    "likely a first start that did not finish. Remove them, and the stand starts fresh."
+                    % (data_dir, ", ".join(owned)))
             if owned:
                 raise DataDirError(
                     "The data directory %s holds a stand's files (%s) but no STAND marker, so it cannot be "
                     "told whose they are. If they belong to the %s stand, write that name into %s."
                     % (data_dir, ", ".join(owned), stand, os.path.join(data_dir, STAND_FILE)))
-            atomic_write(os.path.join(data_dir, STAND_FILE), (stand.encode("ascii") + b"\n",))
+            _lay_out(data_dir, stand)
         elif marker not in STANDS:
             raise DataDirError(
                 "The STAND marker in %s names no stand ('%s'). It must hold one word - prod, test or dev - "
@@ -1110,10 +1404,11 @@ def prepare_data_dir(data_dir: str, stand: str) -> None:
             raise DataDirError(
                 "The data directory %s belongs to the '%s' stand, and this process is '%s'. "
                 "Nothing was read or written." % (data_dir, marker, stand))
-        for kind in KINDS:
-            os.makedirs(os.path.join(data_dir, kind), 0o700, exist_ok=True)
-            os.makedirs(os.path.join(data_dir, kind, "snapshots"), 0o700, exist_ok=True)
-        os.makedirs(os.path.join(data_dir, "auth"), 0o700, exist_ok=True)
+        else:
+            for kind in KINDS:
+                # Only the place for its copies is made again, beside a document that is there.
+                if os.path.isdir(os.path.join(data_dir, kind)):
+                    os.makedirs(os.path.join(data_dir, kind, "snapshots"), 0o700, exist_ok=True)
         if not os.access(data_dir, os.W_OK | os.X_OK):
             raise DataDirError("The data directory %s cannot be written by this process." % data_dir)
     except OSError as error:
@@ -1132,11 +1427,52 @@ def open_stores(settings: Any, clock: Clock = utcnow, security_log: Any = None) 
     }
 
 
+def _way_back(document: "DocStore", status: Dict[str, Any]) -> str:
+    """For a damaged document: the sentence that says what brings it back.
+
+    Names the newest snapshot **that reads back** - one that does not is passed over and
+    named as such, because ``restore`` would refuse it and the operator would be left with
+    a command that changes nothing. Fills ``status["restore"]`` (that snapshot's name, or
+    None) and ``status["passedOver"]`` (the names passed over). Unpacks; shows nothing.
+    """
+    status["restore"] = None
+    status["passedOver"] = []
+    if not status["directory"]:
+        return ("Its directory %s is not there, and its copies went with it: put the directory back from a "
+                "backup. To begin this document anew instead, make that directory, empty, by hand."
+                % document.directory)
+    passed = status["passedOver"]
+    for snap in document.snapshots():
+        try:
+            document.check_snapshot(snap.name)
+        except StoreError:
+            passed.append(snap.name)
+            continue
+        status["restore"] = snap.name
+        if not passed:
+            return "The newest snapshot is %s; bring it back with: ctl restore %s %s" % (
+                snap.name, document.kind, snap.name)
+        return ("The newest snapshot that reads back is %s; bring it back with: ctl restore %s %s "
+                "(passed over, because %s not read back: %s)" % (
+                    snap.name, document.kind, snap.name, "it does" if len(passed) == 1 else "they do",
+                    _some(passed)))
+    if passed:
+        return "None of its %d snapshot(s) reads back (%s): there is nothing here to restore from." % (
+            len(passed), _some(passed))
+    return "There is no snapshot to restore from."
+
+
+def _some(names: List[str], most: int = 5) -> str:
+    return ", ".join(names[:most]) + (" and %d more" % (len(names) - most) if len(names) > most else "")
+
+
 def doctor(data_dir: str, stand: Optional[str] = None, clock: Clock = utcnow) -> Dict[str, Any]:
-    """What is wrong with a data directory, in words, and which snapshot is the newest.
+    """What is wrong with a data directory, in words, and which snapshot brings a damaged document back.
 
     ``problems`` is a list of English sentences, empty when nothing is wrong.
-    Read-only. No member of a document is ever in the answer.
+    For a damaged document the sentence names the newest snapshot that reads
+    back (the copy of the highest revision; one that does not unpack is passed
+    over, and said to be). Read-only. No member of a document is ever in the answer.
     """
     report = {
         "dataDir": data_dir, "exists": os.path.isdir(data_dir), "stand": None, "expectedStand": stand,
@@ -1162,15 +1498,15 @@ def doctor(data_dir: str, stand: Optional[str] = None, clock: Clock = utcnow) ->
     except OSError:
         problems.append("Free space could not be measured.")
     for kind in KINDS:
-        status = DocStore(data_dir, kind, clock).status()
+        document = DocStore(data_dir, kind, clock)
+        status = document.status()
         report["documents"][kind] = status
         if status["state"] == "damaged":
-            newest = status["snapshots"]["newest"]
-            problems.append("%s: %s %s" % (kind, status["problem"], (
-                "The newest snapshot is %s; bring it back with: ctl restore %s %s" % (newest, kind, newest)
-                if newest else "There is no snapshot to restore from.")))
+            problems.append("%s: %s %s" % (kind, status["problem"], _way_back(document, status)))
         elif status["state"] == "ok" and not status["everSaved"]:
-            problems.append("%s: the EVER_SAVED marker is missing; the next save writes it again." % kind)
+            problems.append("%s: the EVER_SAVED marker %s; the next save writes it again." % (
+                kind, "still stands for a bare floor (NEVER_SAVED lies beside it)"
+                if os.path.lexists(os.path.join(document.directory, "EVER_SAVED")) else "is missing"))
         if status["temporaryFiles"]:
             problems.append("%s: %d temporary file(s) left by an interrupted write; the next save removes them."
                             % (kind, status["temporaryFiles"]))

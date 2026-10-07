@@ -8,29 +8,46 @@ The service and this are two processes; every file they share is written whole u
     selfcheck                             the doors, end to end, through the service's own port
     doctor                                what is wrong with the data, and which snapshot is newest
     user list
-    user invite <login> [--print]         a one-time link to choose a password
+    user invite <login> [--print]         a one-time link to choose a password, and the login it is for
     user disable <login>
     user enable <login>
+    user retire-links                     every pending one-time link stops working (after a whole-stand restore)
     sessions list
     sessions logout <login>
     sessions logout --all
     snapshots <ledger|plan>
     restore <ledger|plan> <snapshot>      asks to type the stand's name
+    floor <ledger|plan> <N>               no later revision of that document is N or lower
     verify <dir>                          counts of any data directory - an unpacked backup, say
     seed <ledger|plan> [--fresh]          test and dev only: the document on standard input
-    purge-snapshots --older-than-days N   test and dev only
+    purge-snapshots --older-than-days N   test and dev only; N is 0 to 36500
     empty                                 exit 0 when both documents are at revision 0, else 1
 
 Exit status: 0 done, or "yes"; 1 failed, or "no" (``ping``, ``selfcheck``, ``doctor``,
 ``verify``, ``empty``); 2 refused before anything was changed - a command this stand does
-not take (``seed`` on prod), a setting that stops the service too, a wrong command line.
+not take (``seed`` on prod), a setting that stops the service too, a wrong command line,
+a number no command takes (a floor below 0 or longer than fifteen digits).
+
+``user retire-links`` and ``floor`` are for the two moments when a stand's files are older
+than what browsers and messengers hold: a stand put back from a backup, and the cut-over.
+In a backup a one-time link that has been used since is pending again - ``retire-links``
+ends every pending link, and whoever needs one is issued a new one. And the documents are
+back at revisions that pages opened before still hold, so such a page could save over what
+came after: ``floor <kind> <N>`` makes every later save and restore a revision above ``N``,
+which those pages can only meet with "reload". It loses nothing and lowers nothing, the
+stored revision stays what it is, and it is allowed on every stand.
+
+``seed`` without ``--fresh`` fills a document that is at revision 0 and nothing else (exit 1,
+nothing written, when the document holds something); with ``--fresh`` it replaces what is
+there, as an ordinary save. It never deletes a snapshot - that is ``purge-snapshots``.
 
 Three things hold for every command:
 
 * nothing ever prints what a document holds - revisions, row counts, sizes and file names only;
 * ``user invite`` shows its link to a terminal and to nothing else. Without one it refuses
   before a link is issued, because issuing retires the link before it. ``--print`` lifts that
-  on a dev stand only, for the checks that drive a browser;
+  on a dev stand only, for the checks that drive a browser. The login stands on a line of its
+  own above the link: both are passed on, because the sign-in page asks for the login;
 * ``selfcheck`` and ``seed`` go through the running service's own doors over loopback HTTP,
   under the public host name, with a session of five minutes that is made in the store and
   deleted afterwards. No password and no robot login exist anywhere.
@@ -59,6 +76,8 @@ EXIT_REFUSED = 2
 
 #: Stands whose data is made up, so that a command may replace it.
 _FABRICATED = ("test", "dev")
+#: The most days ``purge-snapshots`` takes: a hundred years. Beyond it the number is a slip of the hand.
+_PURGE_DAYS_MAX = 36500
 #: A base no document will ever reach: a save from it must be refused with 409, having written nothing.
 _FAR_FUTURE = 2 ** 53 - 1
 _EMPTY_DOC = {"ledger": '{"tx":[]}', "plan": '{"banks":[]}'}
@@ -320,9 +339,26 @@ def _selfcheck(ctl: _Ctl, args: Any) -> int:
                     False, _why(error))
         ctl.say("self-check: FAILED - what this stand serves cannot be read")
         return EXIT_NO
-    if facts.inline_handlers:
-        ctl.say("  WARNING: the page has %d inline event handler(s); the policy does not run them"
-                % facts.inline_handlers)
+    if settings.csp_report_only(now):
+        # The documented way to carry such a page for a dated while: it is said, and the check goes on.
+        if facts.inline_handlers:
+            ctl.say("  WARNING: the page has %d inline event handler(s); the policy will not run them once "
+                    "it is enforced" % facts.inline_handlers)
+    else:
+        # The one thing known for certain about the page and its policy. A deploy that passes this
+        # check with such a page puts controls in front of founders that do nothing.
+        checks.hold("the page's markup has no inline event handler and no javascript: address "
+                    "(the enforced policy does not run them)",
+                    facts.inline_handlers == 0,
+                    "%d found: what they belong to does nothing in a browser. Move them into the page's "
+                    "script, or deploy with MONEY_CSP=report-only for a dated while" % facts.inline_handlers)
+    if facts.scripted_handlers:
+        ctl.say("  WARNING: %d place(s) in the page's inline script look like markup with an inline event "
+                "handler; the policy does not run such a handler either - have a look at them"
+                % facts.scripted_handlers)
+    if facts.unknown_vendor:
+        ctl.say("  WARNING: the page names %s under /money/vendor/, and only %s are served there"
+                % (", ".join(facts.unknown_vendor[:5]), ", ".join(httpd.VENDOR_FILES)))
 
     try:
         answer = _ask(settings, "GET", "/healthz")
@@ -441,6 +477,10 @@ def _show_directory(ctl: _Ctl, report: Dict[str, Any], accounts: Dict[str, Any])
             words = "never saved (revision 0)"
         else:
             words = "DAMAGED"
+        floor = status.get("floor") or 0
+        if status["state"] != "damaged" and floor > status["rev"]:
+            # Raised by `ctl floor`: the stored revision is behind what pages may hold.
+            words += "; floor %d (the next save becomes revision %d)" % (floor, floor + 1)
         snapshots = status["snapshots"]
         words += "; snapshots: %d" % snapshots["count"]
         if snapshots["count"]:
@@ -536,10 +576,23 @@ def _user_invite(ctl: _Ctl, args: Any) -> int:
         return EXIT_REFUSED
     stand = ctl.stand()
     link, expires = stand.auth.issue_invite(args.login, by="ctl")
-    ctl.say("One-time link for %s on the %s stand. It works once, until %s, and replaces any earlier link:"
+    ctl.say("One-time link for %s on the %s stand. It works once, until %s, and replaces any earlier link."
             % (args.login, settings.stand, config.iso(expires)))
+    ctl.say("Pass on both lines below. The login is what the sign-in page asks for - it is not an e-mail:")
+    ctl.say("login: %s" % args.login)
     ctl.say(link)
     return EXIT_OK
+
+
+def _user_retire_links(ctl: _Ctl, args: Any) -> int:
+    """Every pending one-time link stops working: one line per login that had one, then who may sign in."""
+    stand = ctl.stand()
+    retired = stand.auth.retire_links(by="ctl")
+    for login in retired:
+        ctl.say("%s: its pending one-time link is retired; issue a new one with: user invite %s" % (login, login))
+    if not retired:
+        ctl.say("no one-time link was pending; nothing was changed")
+    return _user_list(ctl, args)
 
 
 def _user_switch(ctl: _Ctl, args: Any) -> int:
@@ -617,6 +670,26 @@ def _restore(ctl: _Ctl, args: Any) -> int:
     return EXIT_OK
 
 
+def _floor(ctl: _Ctl, args: Any) -> int:
+    """No later revision of a document is ``N`` or lower. Counts only; the document is not touched."""
+    stand = ctl.stand()
+    result = stand.stores[args.kind].raise_floor(args.floor, "ctl")
+    if result.rev is None:
+        stored = "its stored file is damaged or lost, so its revision is not known (run: ctl doctor)"
+    elif result.rev == 0:
+        stored = "never saved (revision 0)"
+    else:
+        stored = "revision %d" % result.rev
+    if result.floor > result.was:
+        floor = "floor %d (was %d)" % (result.floor, result.was)
+    else:
+        floor = "floor %d (it was that already; nothing was changed)" % result.floor
+    ctl.say("%s: %s; %s. The next save or restore becomes revision %d%s." % (
+        args.kind, stored, floor, max(result.floor, result.rev or 0) + 1,
+        "" if result.rev is not None else " or higher"))
+    return EXIT_OK
+
+
 def _fabricated_only(ctl: _Ctl, command: str, why: str) -> bool:
     settings = ctl.settings()
     if settings.stand in _FABRICATED:
@@ -686,8 +759,9 @@ def _seed(ctl: _Ctl, args: Any) -> int:
 def _purge(ctl: _Ctl, args: Any) -> int:
     if not _fabricated_only(ctl, "purge-snapshots", "deletes the copies a stand keeps of its documents"):
         return EXIT_REFUSED
-    if args.days < 0:
-        ctl.warn("moneyd.ctl: --older-than-days takes a whole number of days, 0 or more")
+    if not 0 <= args.days <= _PURGE_DAYS_MAX:
+        ctl.warn("moneyd.ctl: refused: --older-than-days takes a whole number of days from 0 to %d. "
+                 "Nothing was deleted." % _PURGE_DAYS_MAX)
         return EXIT_REFUSED
     stand = ctl.stand()
     for kind in store.KINDS:
@@ -717,6 +791,20 @@ def _empty(ctl: _Ctl, args: Any) -> int:
 # ---------------------------------------------------------------------------
 # The command line
 # ---------------------------------------------------------------------------
+
+def _whole(text: str) -> int:
+    """A whole number as it is typed on the command line: digits, with or without a minus.
+
+    Nothing else is a number here - no ``1_000``, no ``+5``, no ``1e3`` - and a number of more
+    digits than any command takes comes back as one that is refused for its size, uncounted.
+    """
+    if not re.fullmatch(r"-?[0-9]+", text, re.ASCII):
+        raise argparse.ArgumentTypeError("%r is not a whole number" % (text[:24],))
+    digits = text.lstrip("-").lstrip("0") or "0"
+    if len(digits) > 30:
+        return -1 if text.startswith("-") else 10 ** 30
+    return -int(digits) if text.startswith("-") else int(digits)
+
 
 def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
     class Parser(argparse.ArgumentParser):
@@ -749,8 +837,9 @@ def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
     command("selfcheck", _selfcheck, "the doors, end to end, through the service's own port")
     command("doctor", _doctor, "what is wrong with the data, and which snapshot is newest")
 
-    user = commands.add_parser("user", help="accounts: list | invite <login> | disable <login> | enable <login>")
-    actions = user.add_subparsers(dest="action", metavar="list|invite|disable|enable")
+    user = commands.add_parser(
+        "user", help="accounts: list | invite <login> | disable <login> | enable <login> | retire-links")
+    actions = user.add_subparsers(dest="action", metavar="list|invite|disable|enable|retire-links")
     actions.required = True
     command("list", _user_list, "who may sign in, and who has a password", actions)
     invite = command("invite", _user_invite, "a one-time link to choose a password; shown to a terminal only", actions)
@@ -759,6 +848,9 @@ def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
                         help="print the link although standard output is not a terminal (dev stand only)")
     for name in ("disable", "enable"):
         command(name, _user_switch, "%s a login" % name, actions).add_argument("login")
+    command("retire-links", _user_retire_links,
+            "every pending one-time link stops working - for a stand put back from a backup, where a link "
+            "used since is pending again", actions)
 
     sessions = commands.add_parser("sessions", help="sessions: list | logout <login> | logout --all")
     actions = sessions.add_subparsers(dest="action", metavar="list|logout")
@@ -773,6 +865,11 @@ def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
     restore = command("restore", _restore, "make a snapshot the current document, as a new revision")
     restore.add_argument("kind", choices=store.KINDS)
     restore.add_argument("snapshot")
+    floor = command("floor", _floor,
+                    "no later revision of a document is N or lower - for a stand put back from a backup and for "
+                    "the cut-over, when pages hold revisions above the stored one. Nothing is lost or lowered")
+    floor.add_argument("kind", choices=store.KINDS)
+    floor.add_argument("floor", type=_whole, metavar="N", help="a revision: a whole number, fifteen digits at most")
     command("verify", _verify, "counts of any data directory; never contents").add_argument("dir")
     seed = command("seed", _seed,
                    "test and dev only: write the document on standard input through the stand's own door")
@@ -780,7 +877,8 @@ def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
     seed.add_argument("--fresh", action="store_true",
                       help="replace what the stand holds; without it only an empty document is filled")
     purge = command("purge-snapshots", _purge, "test and dev only: delete snapshots older than N days")
-    purge.add_argument("--older-than-days", dest="days", type=int, required=True, metavar="N")
+    purge.add_argument("--older-than-days", dest="days", type=_whole, required=True, metavar="N",
+                       help="a whole number of days, 0 to %d" % _PURGE_DAYS_MAX)
     command("empty", _empty, "exit 0 when both documents are at revision 0, else 1")
     return parser
 

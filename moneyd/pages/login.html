@@ -18,6 +18,7 @@
 
   <section data-when="signed-in">
     <h1>Вы вошли как {{firstName}}</h1>
+    <p class="whoami">Ваш логин: <b class="mono">{{login}}</b>. Он нужен при каждом входе.</p>
     <p class="actions">
       <a class="button primary" href="/">Открыть Money</a>
       <button type="button" id="logout">Выйти</button>
@@ -31,14 +32,15 @@
     <p class="warn" data-when="ending">Вход скоро закончится — войдите заново</p>
     <form id="login-form" method="post" action="/api/auth/login" novalidate>
       <label for="login">Логин</label>
-      <input id="login" name="login" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" required>
+      <input id="login" name="login" type="text" value="{{login}}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" aria-describedby="login-hint" required>
+      <p class="hint" id="login-hint">Логин — имя из ссылки-приглашения, не e-mail.</p>
       <label for="password">Пароль</label>
       <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
       <p class="error" id="login-error" role="alert" hidden></p>
       <button type="submit" id="login-submit" class="primary">Войти</button>
     </form>
     <p class="note">Пароль у Money свой — не тот, что на платформе.</p>
-    <p class="note">Забыли пароль? Попросите новую одноразовую ссылку.</p>
+    <p class="note">Забыли логин или пароль? Попросите новую одноразовую ссылку: она покажет логин и даст задать новый пароль.</p>
     <noscript><p class="error">Вход работает только с включённым JavaScript.</p></noscript>
   </section>
 </main>

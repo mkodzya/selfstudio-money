@@ -40,7 +40,8 @@ p { margin: 0 0 12px; }
 a { color: inherit; text-underline-offset: 3px; }
 section { margin: 0 0 26px; }
 
-/* What a page shows depends on who is asking: the server says so in data-state. */
+/* What a page shows depends on who is asking: the server says so in data-state, and marks
+   what belongs to another state `hidden` as well, for a page whose stylesheet never arrives. */
 [data-when] { display: none; }
 body[data-state="form"] [data-when~="form"],
 body[data-state="ending"] [data-when~="ending"],
@@ -52,6 +53,12 @@ input[type="text"], input[type="password"] {
   font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--border-strong); border-radius: 0;
 }
 input[type="file"] { display: block; max-width: 100%; font: inherit; color: var(--text); }
+/* A field that only shows: the login a new password belongs to. */
+input[readonly] { background: var(--panel); border-style: dashed; font-family: var(--mono); }
+.hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.mono { font-family: var(--mono); font-weight: 600; }
+.whoami { margin: -8px 0 18px; color: var(--muted); }
+.whoami .mono { color: var(--text); }
 input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 button, .button {
@@ -73,7 +80,8 @@ form button[type="submit"] { margin-top: 18px; }
 .error { color: var(--bad); background: var(--bad-dim); border-color: var(--bad); }
 .warn { color: var(--warn); background: var(--warn-dim); border-color: var(--warn); }
 .ok { color: var(--ok); background: var(--ok-dim); border-color: var(--ok); }
-form + .note, form + .error { margin-top: 18px; }
+form + .note, form + .error, form + .actions { margin-top: 18px; }
+.ok + form { margin-top: 14px; }
 
 .doc, .confirm { padding: 18px 20px; background: var(--panel); border: 1px solid var(--border); }
 .confirm { border-color: var(--text); }
@@ -88,7 +96,11 @@ td:first-child, td:nth-child(3), td:nth-child(4) { font-family: var(--mono); fon
 tr:last-child td { border-bottom: 0; }
 tr.alarm td { color: var(--bad); }
 
+/* A phone: fields and buttons a thumb can hit, and text in a field at 16px - below that
+   iOS zooms the whole page in as soon as a field is touched. */
 @media (max-width: 520px) {
+  :root { --control: 44px; }
   .sheet { padding: 28px 16px 60px; }
   .who { flex-basis: 100%; }
+  input[type="text"], input[type="password"] { font-size: 16px; }
 }

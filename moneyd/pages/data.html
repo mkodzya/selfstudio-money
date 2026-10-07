@@ -28,7 +28,7 @@
     <h2>Выписки</h2>
     <p class="state" data-status="ledger">Читаю с сервера…</p>
     <p class="actions">
-      <a class="button" href="/api/founder/money" download="money-ledger.json" data-download="ledger">Скачать выписки</a>
+      <button type="button" data-download="ledger">Скачать выписки</button>
     </p>
 <!--except:test-->
     <p class="upload">
@@ -42,7 +42,7 @@
     <h2>План кассы</h2>
     <p class="state" data-status="plan">Читаю с сервера…</p>
     <p class="actions">
-      <a class="button" href="/api/founder/money/cash" download="money-plan.json" data-download="plan">Скачать план</a>
+      <button type="button" data-download="plan">Скачать план</button>
     </p>
 <!--except:test-->
     <p class="upload">
@@ -60,7 +60,7 @@
     <h2 id="confirm-title">Заменить документ на сервере?</h2>
     <p id="confirm-file"></p>
     <p id="confirm-server"></p>
-    <p class="warn">Замена перезапишет документ целиком. Открытые вкладки Money попросят обновить страницу. Если текущая версия ещё нужна — сначала скачайте её.</p>
+    <p class="warn" id="confirm-keeps">Замена перезапишет документ целиком. Перед ней страница сама скачает то, что сейчас на сервере, — файл останется у вас в загрузках. Открытые вкладки Money попросят обновить страницу.</p>
     <p class="actions">
       <button type="button" class="primary" id="confirm-yes" data-upload-confirm>Заменить</button>
       <button type="button" id="confirm-no">Отмена</button>

@@ -23,7 +23,8 @@ import threading
 import unittest
 from unittest import mock
 
-from moneyd import auth, config, log, store
+from moneyd import auth, config, ctl, log, store
+from tests import _harness
 
 MIB = 1024 * 1024
 UTC = datetime.timezone.utc
@@ -100,9 +101,12 @@ class ConfigTests(CoreCase):
         self.assertEqual((s.cookie_name, s.cookie_secure, s.kdf), ("money-dev", False, "pbkdf2"))
         self.assertEqual((s.bind_host, s.bind_port, s.data_dir), ("127.0.0.1", 8123, self.dir))
         self.assertEqual((s.put_limit("ledger"), s.put_limit("plan"), s.auth_max_bytes), (16 * MIB, 4 * MIB, 4096))
-        self.assertEqual(s.put_deadline(1_000_000), 40.0)
+        self.assertEqual(s.put_deadline(1_000_000), 120.0)
         self.assertEqual((s.warn_limit("ledger"), s.warn_limit("plan")), (8 * MIB, 512 * 1024))
         self.assertEqual((s.max_connections, s.signed_out_slots, s.max_connections_per_address), (32, 8, 12))
+        # One address gets a share of the signed-out slots, not all of them.
+        self.assertEqual(s.signed_out_body_slots_per_address, 2)
+        self.assertLess(s.signed_out_body_slots_per_address, s.signed_out_slots)
         self.assertEqual((s.limiter_per_address, s.limiter_per_login, s.hash_slots, s.hash_wait), (10, 30, 2, 5.0))
         self.assertTrue(os.path.isfile(os.path.join(s.web_dir, "moneyd", "config.py")))
         self.assertEqual(s.describe()["founders"], ["mika", "misha", "vanya"])
@@ -143,8 +147,10 @@ class ConfigTests(CoreCase):
             (prod(MONEY_PUBLIC_URL="https://ops.selfstudio.dev"), True, "must start with 'finance.'"),
             (prod(MONEY_STAND="test", MONEY_PUBLIC_URL="https://money.test.selfstudio.se"), True, "'finance.'"),
             (prod(MONEY_CSP="report-only"), True, "refused on prod unless MONEY_CSP_OVERRIDE_UNTIL"),
-            (prod(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="2026-10-06"), True, "the override ended"),
             (prod(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="soon"), True, "YYYY-MM-DD"),
+            (prod(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="2026-13-45"), True, "YYYY-MM-DD"),
+            (prod(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="06.10.2026"), True, "YYYY-MM-DD"),
+            (prod(MONEY_CSP="enforce", MONEY_CSP_OVERRIDE_UNTIL="soon"), True, "YYYY-MM-DD"),
         ]
         for env, scrypt, sentence in cases:
             with self.subTest(sentence=sentence):
@@ -156,14 +162,75 @@ class ConfigTests(CoreCase):
         env = self.prod_env(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="2026-10-07")
         s = config.Settings.from_env(env, self.clock, scrypt_available=True)      # the day itself has not passed
         self.assertTrue(s.csp_report_only(self.clock()))
-        self.assertIn("report-only", " ".join(s.warnings))
+        self.assertEqual(s.warnings, ("the content security policy is report-only until 2026-10-07",))
         self.clock.tick(days=1)
         self.assertFalse(s.csp_report_only(self.clock()))                          # a running server enforces again
-        with self.assertRaises(config.ConfigError):
-            config.Settings.from_env(env, self.clock, scrypt_available=True)       # and a restart is refused
         test = self.prod_env(MONEY_STAND="test", MONEY_PUBLIC_URL="https://finance.test.selfstudio.se",
                              MONEY_CSP="report-only")
         self.assertTrue(config.Settings.from_env(test, self.clock, scrypt_available=True).csp_report_only())
+
+    def test_an_override_whose_day_has_passed_is_the_policy_enforced_again_and_not_a_stand_that_cannot_start(self):
+        # deploy/compose.yml bakes MONEY_CSP and its day into the container until the next deploy. Were a
+        # passed day a refusal, the health check (ctl ping) and every ctl command would stop the day after,
+        # and the next restart of the container would not come up - with the policy doing exactly what was
+        # asked of it. So the settings load, the policy is enforced, and a warning says what happened.
+        env = self.prod_env(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="2026-10-07")
+        for later in ({"days": 1}, {"days": 1}, {"days": 400}):
+            self.clock.tick(**later)
+            with self.subTest(today=self.clock().date().isoformat()):
+                s = config.Settings.from_env(env, self.clock, scrypt_available=True)
+                self.assertEqual((s.stand, s.csp_mode, s.csp_override_until),
+                                 ("prod", "report-only", datetime.date(2026, 10, 7)))
+                self.assertFalse(s.csp_report_only(self.clock()), "the policy is enforced")
+                (warning,) = s.warnings
+                self.assertIn("the override ended on 2026-10-07", warning)
+                self.assertIn("enforced", warning)
+        # What makes an override on prod is still refused: no day at all, or something that is not a day.
+        for until in (None, "", "tomorrow", "2026-02-30", "20261007"):
+            with self.subTest(until=until):
+                with self.assertRaises(config.ConfigError):
+                    config.Settings.from_env(self.prod_env(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL=until),
+                                             self.clock, scrypt_available=True)
+        # And the last day itself is still the override, to the end of that day (UTC).
+        self.clock.now = datetime.datetime(2026, 10, 7, 23, 59, 59, tzinfo=UTC)
+        s = config.Settings.from_env(env, self.clock, scrypt_available=True)
+        self.assertTrue(s.csp_report_only(self.clock()))
+        self.assertNotIn("ended", " ".join(s.warnings))
+
+    def test_the_command_line_of_a_stand_works_on_after_its_override_has_ended(self):
+        # The finding as it was met: on the 11th, `money-user prod invite misha` answered "refused: ... the
+        # override ended on 2026-11-10", and so did the container's own health check.
+        store.prepare_data_dir(self.dir, "prod")
+        env = self.prod_env(MONEY_CSP="report-only", MONEY_CSP_OVERRIDE_UNTIL="2026-10-06",
+                            MONEY_BIND="127.0.0.1:%d" % _harness.free_port())
+        with _harness.scrypt_stand_in():            # a prod stand does not read its settings without scrypt
+            for command, expected in ((["user", "list"], 0), (["doctor"], 0), (["snapshots", "ledger"], 0),
+                                      (["ping"], 1)):               # nothing listens: "no" - and not "refused"
+                with self.subTest(command=command):
+                    out, err = io.StringIO(), io.StringIO()
+                    status = ctl.main(command, environ=env, stdin=io.StringIO(""), stdout=out, stderr=err,
+                                      clock=self.clock)
+                    self.assertEqual(status, expected, out.getvalue() + err.getvalue())
+                    self.assertNotIn("the override ended", err.getvalue(), "the passed day refused the command")
+            out = io.StringIO()
+            ctl.main(["doctor"], environ=env, stdin=io.StringIO(""), stdout=out, stderr=io.StringIO(), clock=self.clock)
+            self.assertIn("the override ended on 2026-10-06", out.getvalue(), "and doctor says so, as a warning")
+
+    def test_a_document_body_has_a_second_for_every_10_000_bytes_and_ten_minutes_at_most(self):
+        s = self.settings()
+        self.assertEqual((s.put_deadline_base, s.put_deadline_bytes_per_second, s.put_deadline_max), (20.0, 10_000, 600.0))
+        self.assertEqual([s.put_deadline(length) for length in (0, 10_000, 50_000, 2_000_000)],
+                         [20.0, 21.0, 25.0, 220.0])
+        self.assertEqual(s.put_deadline(-5), 20.0)
+        self.assertAlmostEqual(s.put_deadline(1), 20.0001)
+        self.assertAlmostEqual(s.put_deadline(5_799_999), 599.9999)
+        for length in (5_800_000, 5_800_001, 16 * MIB, 17 * MIB, 10 ** 30, 10 ** 400):
+            self.assertEqual(s.put_deadline(length), 600.0, length)    # the cap; and never an overflow
+        # A founder on a slow link: today's ledger of about 2 MiB at 10 kB a second arrives within its deadline.
+        body = int(2 * MIB * 1.2)
+        self.assertGreater(s.put_deadline(body), body / 10_000.0)
+        quick = dataclasses.replace(s, put_deadline_base=0.3)           # what the tests of the door shorten
+        self.assertAlmostEqual(quick.put_deadline(400), 0.34)
 
     def test_unknown_settings_and_missing_proxies_are_said_out_loud(self):
         s = config.Settings.from_env(self.prod_env(MONEY_TRUSTED_PROXIES=None, MONEY_TURBO="1", MONEY_PORT="5191"),
@@ -413,6 +480,40 @@ class StoreTests(StoreCase):
         with self.assertRaises(store.BadSnapshot):
             doc_store.restore("day-2026-10-09-rev000009.json.gz", "ctl")
         self.assertEqual(self.ledger.read().rev, 7)
+
+    def test_the_counter_never_comes_back_to_a_number_a_page_may_hold(self):
+        for rev in range(3):
+            self.ledger.save(rev, ledger(3, "n%d" % rev), "mika")
+        stored = self.ledger.read().body
+        log_ = log.SecurityLog(self.dir, self.clock)
+        doc_store = store.DocStore(self.dir, "ledger", self.clock, security_log=log_)
+        # A whole stand came back from a backup at revision 3; the days that were lost had reached 8.
+        self.assertEqual(doc_store.raise_floor(8), store.FloorResult(floor=8, was=3, rev=3))
+        self.assertEqual((self.ledger.read().body, self.ledger.floor()), (stored, 8))      # the document is untouched
+        for held in (4, 5, 8):                                             # pages left open from before: 409
+            with self.assertRaises(store.Stale) as late:
+                self.ledger.save(held, ledger(1, "from before"), "vanya")
+            self.assertEqual(late.exception.rev, 3)                        # ... with the stored revision
+        self.assertEqual(self.ledger.save(3, ledger(4, "after"), "mika").rev, 9)           # a reloaded page: above it
+        with self.assertRaises(store.Stale):
+            self.ledger.save(8, ledger(1, "from before"), "vanya")
+        self.assertEqual(self.ledger.save(9, ledger(4, "on"), "mika").rev, 10)             # and one by one from there
+        self.assertEqual(doc_store.raise_floor(2), store.FloorResult(floor=10, was=10, rev=10))   # it never lowers
+        self.assertEqual(self.ledger.floor(), 10)
+        for wrong in (10 ** 15, -1):
+            with self.assertRaises(store.Refused) as refused:
+                doc_store.raise_floor(wrong)
+            self.assertEqual((refused.exception.status, refused.exception.code), (403, "refused"))
+        for wrong in ("9", 9.0, True, None):
+            with self.assertRaises(ValueError):
+                doc_store.raise_floor(wrong)
+        self.assertEqual([(entry["event"], entry["doc"], entry["floor"], entry["was"], entry["by"])
+                          for entry in reversed(log_.tail(10))],
+                         [("floor-raised", "ledger", 8, 3, "ctl"), ("floor-raised", "ledger", 10, 10, "ctl")])
+        # A document nobody has saved yet takes a floor too - and still reads as never saved, not as lost.
+        self.assertEqual(self.plan.raise_floor(40, "ctl"), store.FloorResult(floor=40, was=0, rev=0))
+        self.assertEqual((self.plan.read().body, self.plan.revision()), (b'{"rev":0,"doc":{},"updatedAt":null}', 0))
+        self.assertEqual(self.plan.save(0, plan(1), "misha").rev, 41)
 
     def test_purge_is_for_made_up_data_only(self):
         self.ledger.save(0, ledger(60), "mika")
@@ -727,6 +828,41 @@ class AuthTests(AuthCase):
                 self.auth.set_password(junk, PASSWORD, "198.51.100.2")
         with self.assertRaises(auth.UnknownLogin):
             self.auth.issue_invite("nobody")
+
+    def test_every_pending_link_can_be_retired_at_once(self):
+        # After a stand is put back from a backup, a link that was spent since is pending again.
+        self.give_password("mika")
+        vanya, _ = self.auth.issue_invite("vanya")
+        self.auth.issue_invite("misha")
+        self.assertEqual(self.auth.retire_links(), ["misha", "vanya"])                     # in the founders' order
+        for link in (vanya,):
+            with self.assertRaises(auth.InvalidLink):
+                self.auth.set_password(link.split("#t=")[1], PASSWORD, "203.0.113.7")
+        self.assertEqual([(user.login, user.invite_expires, user.has_password) for user in self.auth.users.list()],
+                         [("mika", None, True), ("misha", None, False), ("vanya", None, False)])
+        self.assertEqual(self.auth.retire_links(by="money-restore"), [])                   # none left: nothing to do
+        retired = [entry for entry in self.log.tail(50) if entry["event"] == "link-retired"]
+        self.assertEqual(sorted((entry["login"], entry["by"]) for entry in retired), [("misha", "ctl"), ("vanya", "ctl")])
+        self.assertEqual(self.auth.sign_in("mika", PASSWORD, "203.0.113.7").identity.login, "mika")   # passwords stay
+
+    def test_an_accounts_file_that_has_gone_is_lost_and_not_no_accounts_yet(self):
+        new = self.give_password()
+        marker = os.path.join(self.dir, "auth", "USERS_WRITTEN")
+        self.assertTrue(os.path.isfile(marker))                                            # left by the first write
+        kept = self.users_file()
+        os.unlink(self.auth.users.path)
+        for attempt in (lambda: self.auth.session(new.token), lambda: self.auth.sign_in("mika", PASSWORD, "203.0.113.7"),
+                        lambda: self.auth.issue_invite("mika"), lambda: self.auth.retire_links(),
+                        lambda: auth.Auth(self.settings_, self.clock).boot()):
+            with self.assertRaises(auth.AuthDamaged) as damaged:
+                attempt()
+            self.assertEqual((damaged.exception.status, damaged.exception.code), (503, "auth_damaged"))
+        self.assertFalse(os.path.exists(self.auth.users.path), "three founders without passwords were made anew")
+        self.assertEqual(self.auth.users.status()["state"], "damaged")
+        self.assertEqual(auth.verify(self.dir)["users"]["state"], "damaged")
+        with open(self.auth.users.path, "wb") as handle:                                   # put back from a backup
+            handle.write(kept)
+        self.assertEqual(self.auth.session(new.token).login, "mika")
 
     def test_a_weak_password_keeps_the_link(self):
         link, _ = self.auth.issue_invite("vanya")
@@ -1194,8 +1330,9 @@ class LogTests(CoreCase):
             handle.write(b"half a li")                                                     # a torn line is skipped
         self.assertEqual(len(security.tail(50)), 3)
         self.assertEqual(security.status()["files"], 1)
-        for event in ("boot", "sign-in", "sign-in-failed", "link-issued", "link-used", "password-set",
-                      "session-created", "sessions-closed", "seed", "restore"):
+        for event in ("boot", "sign-in", "sign-in-failed", "link-issued", "link-used", "link-retired", "password-set",
+                      "session-created", "sessions-closed", "seed", "restore", "doc-shrunk", "floor-raised",
+                      "storage-unsynced"):
             self.assertIn(event, log.EVENTS)
         gone = log.SecurityLog(os.path.join(self.dir, "nowhere"), self.clock)
         self.assertFalse(gone.write("boot"))                                               # swallowed, counted

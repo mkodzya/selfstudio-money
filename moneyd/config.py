@@ -13,8 +13,13 @@ API for the HTTP layer and the CLI
     * ``dev`` that does not bind a loopback address, or whose public host does
       not end in ``.localhost``;
     * ``MONEY_CSP`` other than ``enforce`` / ``report-only``; ``report-only`` on
-      prod without ``MONEY_CSP_OVERRIDE_UNTIL=YYYY-MM-DD`` naming a day that has
-      not passed (UTC);
+      prod without ``MONEY_CSP_OVERRIDE_UNTIL=YYYY-MM-DD``, or with a value that
+      is not a day. A day that has passed (UTC) is **not** a refusal: the
+      override has simply ended, the settings load, the policy is enforced
+      (``csp_report_only()`` is False) and ``warnings`` says on which day it
+      ended. Refusing a passed day is the deploy script's work, before
+      anything is touched - a stand that is already running must not lose
+      its command line and its restarts to a date;
     * prod/test on a Python without ``hashlib.scrypt``, or with ``MONEY_KDF``
       set to anything but ``scrypt``;
     * a founders list, a bind address, a proxy list or a data directory that
@@ -34,6 +39,15 @@ API for the HTTP layer and the CLI
     ``cookie_name``, ``cookie_secure``, ``logins``, ``first_name(login)``,
     ``put_limit(kind)``, ``warn_limit(kind)``, ``put_deadline(content_length)``,
     ``csp_report_only(now)``, ``describe()``.
+
+    Two of the plain numbers, because the HTTP layer is built on them:
+    ``signed_out_slots`` (8) is how many requests without a session may be
+    reading a body at once, and ``signed_out_body_slots_per_address`` (2) how
+    many of those one client address may hold - so that one address cannot
+    shut the sign-in and the set-password doors for everybody else.
+    ``put_deadline(n)`` is 20 s + 1 s per 10 000 bytes, 600 s at most
+    (``put_deadline_base``, ``put_deadline_bytes_per_second``,
+    ``put_deadline_max``).
 
     Tests shrink a limit with ``dataclasses.replace(settings, hash_wait=0.05)``.
 
@@ -233,12 +247,20 @@ class Settings:
     ledger_warn_bytes: int = 8 * MIB
     plan_warn_bytes: int = 512 * KIB
     max_connections: int = 32
+    #: Requests without a session that may be reading a body at the same moment.
     signed_out_slots: int = 8
+    #: Of those, how many one client address may hold. Well under ``signed_out_slots``, so that
+    #: one address cannot take them all and shut the sign-in and set-password doors for the others.
+    signed_out_body_slots_per_address: int = 2
     max_connections_per_address: int = 12
     socket_timeout: float = 30.0
     auth_body_deadline: float = 5.0
+    #: A document body has ``base + length / bytes_per_second`` seconds in all, ``max`` at most.
+    #: The edge does not buffer request bodies, so this clock runs against the founder's own uplink:
+    #: 10 000 bytes a second is a link a phone has on a train.
     put_deadline_base: float = 20.0
-    put_deadline_bytes_per_second: int = 50_000
+    put_deadline_bytes_per_second: int = 10_000
+    put_deadline_max: float = 600.0
     #: Deepest nesting of a request body; ``store.parse_json`` enforces it.
     json_max_depth: int = 16
 
@@ -313,14 +335,22 @@ class Settings:
         raise ValueError("no such document: %r" % (kind,))
 
     def put_deadline(self, content_length: int) -> float:
-        """Seconds a document body may take in total: 20 s + 1 s per 50 000 bytes."""
-        return self.put_deadline_base + max(0, int(content_length)) / float(self.put_deadline_bytes_per_second)
+        """Seconds a document body may take in total: 20 s + 1 s per 10 000 bytes, and 600 s at most.
+
+        A ledger of 2 MB has about four minutes; one at the 16 MiB limit has the ten.
+        """
+        length = max(0, int(content_length))
+        longest = float(self.put_deadline_max)
+        if length >= longest * self.put_deadline_bytes_per_second:
+            return longest              # also a length no float could hold
+        return min(longest, self.put_deadline_base + length / float(self.put_deadline_bytes_per_second))
 
     def csp_report_only(self, now: Optional[datetime.datetime] = None) -> bool:
         """Whether the policy is sent as ``Content-Security-Policy-Report-Only`` at ``now``.
 
         On prod the override runs out by itself: a server that is still up the
-        day after ``csp_override_until`` enforces again without a restart.
+        day after ``csp_override_until`` enforces again without a restart, and a
+        stand that is started after that day enforces from its first answer.
         """
         if self.csp_mode != "report-only":
             return False
@@ -391,8 +421,16 @@ class Settings:
                 "MONEY_TRUSTED_PROXIES is empty: X-Forwarded-For is never believed, "
                 "so every caller behind the edge counts as one address")
 
-        csp_mode, csp_until = _csp(get("MONEY_CSP"), get("MONEY_CSP_OVERRIDE_UNTIL"), stand, clock)
-        if csp_mode == "report-only":
+        csp_mode, csp_until, csp_ended = _csp(get("MONEY_CSP"), get("MONEY_CSP_OVERRIDE_UNTIL"), stand, clock)
+        if csp_ended and csp_until is not None:
+            # Not a refusal. The override is baked into the container until the next deploy; were this
+            # one, the health check and every ctl command would stop on the day after, and the next
+            # restart would not come up - for a setting that asks for nothing any more.
+            warnings.append(
+                "MONEY_CSP=report-only is no longer in force: the override ended on %s, so the content "
+                "security policy is enforced. Deploy without MONEY_CSP, or name a new day"
+                % csp_until.isoformat())
+        elif csp_mode == "report-only":
             warnings.append("the content security policy is report-only" + (
                 " until %s" % csp_until.isoformat() if stand == "prod" and csp_until else ""))
 
@@ -519,7 +557,9 @@ def _directories(raw_data: str, raw_web: str) -> Tuple[str, str]:
     data_dir = os.path.normpath(raw_data)
     # Without the variable the page is beside the package: a checkout that is simply run.
     web_dir = os.path.abspath(raw_web) if raw_web else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    laptop = os.path.join(os.path.realpath(web_dir), "data")
+    # Both sides are resolved through every link: the laptop's data/ may itself be a link to
+    # another volume, and it is the laptop's data wherever it lies.
+    laptop = os.path.realpath(os.path.join(web_dir, "data"))
     real = os.path.realpath(data_dir)
     if real == laptop or real.startswith(laptop + os.sep):
         raise ConfigError(
@@ -549,7 +589,8 @@ def _proxies(raw: str) -> Tuple[Network, ...]:
 _DAY = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 
 
-def _csp(raw_mode: str, raw_until: str, stand: str, clock: Clock) -> Tuple[str, Optional[datetime.date]]:
+def _csp(raw_mode: str, raw_until: str, stand: str, clock: Clock) -> Tuple[str, Optional[datetime.date], bool]:
+    """-> (mode, the day an override ends, whether a prod override has already ended)."""
     mode = raw_mode or "enforce"
     if mode not in ("enforce", "report-only"):
         raise ConfigError(
@@ -564,17 +605,16 @@ def _csp(raw_mode: str, raw_until: str, stand: str, clock: Clock) -> Tuple[str, 
             until = None
         if until is None:
             raise ConfigError("MONEY_CSP_OVERRIDE_UNTIL must be a day as YYYY-MM-DD (got '%s')." % _short(raw_until))
+    ended = False
     if mode == "report-only" and stand == "prod":
-        today = as_utc(clock()).date()
         if until is None:
             raise ConfigError(
                 "MONEY_CSP=report-only is refused on prod unless MONEY_CSP_OVERRIDE_UNTIL=YYYY-MM-DD "
                 "names the day the override ends.")
-        if until < today:
-            raise ConfigError(
-                "MONEY_CSP=report-only is refused on prod: the override ended on %s. "
-                "Remove MONEY_CSP or name a new day." % until.isoformat())
-    return mode, until
+        # A day that has passed is the override running out, as it was always going to:
+        # ``Settings.csp_report_only`` enforces from then on, and the caller says so in a warning.
+        ended = until < as_utc(clock()).date()
+    return mode, until, ended
 
 
 def _kdf(raw: str, stand: str, scrypt_available: bool) -> str:

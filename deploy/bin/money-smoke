@@ -18,7 +18,15 @@
 #   - a body one byte over the door's limit is 413;
 #   - /server.py, /.git/config and /data/ledger/current.json are not served,
 #     and neither is a path that climbs out of the vendor folder;
-#   - a foreign Host is 421.
+#   - a foreign Host is 421;
+#   - the stand believes the proxy about who is asking: one request to a path
+#     made up for this run is found again in the stand's own request log, and
+#     the address written beside it is the one sent in X-Forwarded-For. If it
+#     is the Docker bridge's address instead, MONEY_TRUSTED_PROXIES does not
+#     cover the network the container sits in - then every visitor counts as
+#     one address, and ten wrong passwords from anybody shut the sign-in door
+#     for all three founders. Only a deployed stand can get this wrong, and
+#     only from the host can it be seen.
 #
 # Nobody signs in here and nothing is written. The requests that are refused
 # are refused before a password is looked at, so they cost no sign-in attempt.
@@ -72,6 +80,12 @@ AUTH_LIMIT=4096
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+# dash, which is /bin/sh on the server, runs the line above only when the
+# script ends by itself. A Ctrl-C or a dropped connection has to be turned
+# into an ending first.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 HEADERS=$WORK/headers
 BODY=$WORK/body
 ERRORS=$WORK/curl-errors
@@ -209,6 +223,36 @@ if [ "$CODE" = 421 ]; then
 else
   fail "GET /login under a foreign Host is 421" "status $CODE"
 fi
+
+# --- the stand believes the proxy about who is asking ---------------------------
+# A path nobody else asks for, so that the line found in the log is this run's
+# own and not one a smoke left there an hour ago.
+PROBE=/api/smoke-$$-$(date -u +%H%M%S)
+CODE=$(ask "$HOST" "$BASE$PROBE")
+SEEN=""
+TRIES=0
+# The line is written as the answer goes out, and Docker hands it on a moment
+# later: asked again for up to ten seconds before it counts as missing.
+while [ "$TRIES" -lt 10 ]; do
+  SEEN=$("$STAND_SH" "$STAND" logs --no-log-prefix 2>/dev/null | grep -F "\"path\":\"$PROBE\"" | tail -n 1) || SEEN=""
+  if [ -n "$SEEN" ]; then
+    break
+  fi
+  TRIES=$((TRIES + 1))
+  sleep 1
+done
+case "$SEEN" in
+  *"\"addr\":\"$CLIENT\""*)
+    pass "the stand counts a visitor by the address the proxy names in X-Forwarded-For"
+    ;;
+  "")
+    fail "the stand counts a visitor by the address the proxy names in X-Forwarded-For" "status $CODE, and the request to $PROBE is not in the stand's log (deploy/stand.sh $STAND logs), so whose address the stand counted is not known"
+    ;;
+  *)
+    COUNTED=$(printf '%s\n' "$SEEN" | sed -n 's/.*"addr":"\([^"]*\)".*/\1/p')
+    fail "the stand counts a visitor by the address the proxy names in X-Forwarded-For" "it counted ${COUNTED:-something else}, not $CLIENT: the stand does not believe X-Forwarded-For from the host. Check MONEY_TRUSTED_PROXIES in deploy/compose.yml against the Docker network the container is in"
+    ;;
+esac
 
 if [ "$FAILED" -ne 0 ]; then
   echo "money-smoke $STAND: $FAILED of $CHECKS checks FAILED on $BASE (Host: $HOST)"
