@@ -1,0 +1,82 @@
+# One stand of Money: one container, one process, no database.
+#
+# The same file serves prod and test. What differs between them is five values
+# in deploy/stands/<stand>.env and the project name, and both are given on the
+# command line, so nobody types this by hand:
+#
+#   deploy/stand.sh <prod|test> <up|ctl ...|down|logs>
+#
+# which is
+#
+#   docker compose -p money-<stand> --env-file deploy/stands/<stand>.env -f deploy/compose.yml ...
+#
+# What is deliberate here, and why:
+#   - Nothing has a fallback that could be wrong. Compose refuses to start when
+#     a value of the stand file is missing, and says which one.
+#   - The port is published on 127.0.0.1 only. TLS and the public name belong
+#     to the edge proxy; this port is how it reaches the stand, and nothing
+#     outside the machine can.
+#   - The data is a directory on the host, not a named volume: `down -v` and
+#     `docker volume prune` cannot delete it, and a backup is plain file work.
+#   - The container can write to /data and to a small /tmp, and nowhere else.
+#   - There is no secret in this file or in a stand file, and none is passed.
+
+services:
+  app:
+    # Tagged per version, so the image a stand ran before the last deploy is
+    # still there to go back to. MONEY_VERSION is set by deploy/stand.sh.
+    image: "money-${MONEY_STAND:?set MONEY_STAND in the stand file}:${MONEY_VERSION:-dev}"
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        MONEY_VERSION: "${MONEY_VERSION:-dev}"
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The machine has 2 vCPU and 3.8 GB and serves the platform's prod as well.
+    # A stand idles at about 30 MB; the ceilings are what a runaway may take.
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: "1.0"
+    environment:
+      MONEY_STAND: "${MONEY_STAND:?set MONEY_STAND in the stand file}"
+      MONEY_PUBLIC_URL: "${MONEY_PUBLIC_URL:?set MONEY_PUBLIC_URL in the stand file}"
+      MONEY_FOUNDERS: "${MONEY_FOUNDERS:?set MONEY_FOUNDERS in the stand file}"
+      MONEY_DATA_DIR: /data
+      MONEY_BIND: "0.0.0.0:8080"
+      # Whose X-Forwarded-For is believed: the host itself, seen through the
+      # Docker bridge. The port is published on loopback, so no other peer exists.
+      MONEY_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # enforce unless said otherwise. report-only is refused on prod without a
+      # day on which it ends; `ctl selfcheck` prints the mode at every deploy.
+      MONEY_CSP: "${MONEY_CSP:-enforce}"
+      MONEY_CSP_OVERRIDE_UNTIL: "${MONEY_CSP_OVERRIDE_UNTIL:-}"
+      TZ: UTC
+    volumes:
+      - "${MONEY_DATA_HOST_DIR:?set MONEY_DATA_HOST_DIR in the stand file}:/data"
+    ports:
+      # Loopback only. Two stands on one host differ by this number.
+      - "127.0.0.1:${MONEY_PORT:?set MONEY_PORT in the stand file}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-m", "moneyd.ctl", "ping"]
+      # Once a minute: every probe starts a Python of its own. While the
+      # container starts it is asked every two seconds instead, so that
+      # `up --wait` returns when the service answers and not a minute later.
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

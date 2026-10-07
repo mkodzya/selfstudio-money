@@ -1,0 +1,97 @@
+#!/bin/sh
+# Deploy Money's PROD stand. Only on the owner's word, every time.
+#
+#   money-deploy            what `main` holds now
+#   money-deploy <tag>      that release instead - this is the rollback
+#
+# From the laptop, after a release has been cut and pushed:
+#   ssh root@<server> money-deploy
+#
+# What it does, in this order:
+#   1. takes the lock: one Money deploy at a time, whichever stand;
+#   2. refuses when memory is short or another image build is running - before
+#      anything has been touched;
+#   3. takes a backup of the data directory (deploy/bin/money-backup). A deploy
+#      that cannot back up does not go on;
+#   4. moves the checkout: `main`, fast-forward only - a deploy that has to
+#      merge is a deploy nobody reviewed - or the tag that was named;
+#   5. says which release that is, and says so in a WARNING line when the
+#      commit carries no release tag at all;
+#   6. hands over to deploy/stand.sh: build, start, self-check, smoke, and one
+#      verdict line. If the new container does not come up healthy or fails
+#      its self-check, the previous image is started again.
+#
+# It never seeds: prod holds the studio's real money and nothing else.
+#
+# A rollback changes the code and not the data. To take data back, see
+# docs/deploy.md, "Backup and restore".
+set -eu
+
+CHECKOUT=/opt/money
+LOCK=/run/lock/money-deploy.lock
+
+# Whatever stops a deploy before it starts ends in the same words a deploy
+# ends in, on standard output: one line, the last one.
+die() {
+  echo "money-prod: FAILED - $*"
+  exit 1
+}
+
+if [ $# -gt 1 ]; then
+  echo "usage: money-deploy [<tag>]" >&2
+  exit 2
+fi
+TAG=${1:-}
+case "$TAG" in
+  "") ;;
+  *[!0-9.]* | .* | *. | *..*)
+    die "a release tag is bare semver, like 1.0.0 (got '$TAG'). Nothing was deployed."
+    ;;
+esac
+
+cd "$CHECKOUT" || die "there is no checkout at $CHECKOUT. Nothing was deployed."
+
+if ! command -v flock >/dev/null 2>&1; then
+  die "flock is not installed. Nothing was changed."
+fi
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  die "another Money deploy holds $LOCK. Nothing was changed."
+fi
+MONEY_DEPLOY_LOCK_HELD=1
+export MONEY_DEPLOY_LOCK_HELD
+
+"$CHECKOUT/deploy/stand.sh" prod preflight
+
+if ! "$CHECKOUT/deploy/bin/money-backup"; then
+  die "the backup failed, so nothing was deployed."
+fi
+
+if [ -n "$TAG" ]; then
+  if ! git fetch -q --tags origin; then
+    die "could not fetch the tags. Nothing was deployed."
+  fi
+  if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+    die "there is no tag $TAG. Nothing was deployed."
+  fi
+  if ! git checkout -q --detach "refs/tags/$TAG"; then
+    die "could not check out $TAG. Nothing was deployed."
+  fi
+else
+  if ! git checkout -q main; then
+    die "could not switch the checkout to main. Nothing was deployed."
+  fi
+  if ! git pull --ff-only -q; then
+    die "main did not fast-forward. Nothing was deployed."
+  fi
+fi
+
+git log --oneline -1
+RELEASE=$(git describe --tags --exact-match 2>/dev/null) || RELEASE=""
+if [ -z "$RELEASE" ]; then
+  echo "WARNING: this commit of main carries no release tag"
+else
+  echo "release $RELEASE"
+fi
+
+exec "$CHECKOUT/deploy/stand.sh" prod up

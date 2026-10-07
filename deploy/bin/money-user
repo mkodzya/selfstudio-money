@@ -1,0 +1,113 @@
+#!/bin/sh
+# Accounts and sessions of a stand, from the server.
+#
+#   money-user <prod|test> list                      who may sign in, and who has a password
+#   money-user <prod|test> invite <login>            a one-time link to choose a password
+#   money-user <prod|test> disable <login>           the login stops working at the next request
+#   money-user <prod|test> enable <login>
+#   money-user <prod|test> sessions                  open sessions (counts and dates, never tokens)
+#   money-user <prod|test> logout <login>            close every session of one login
+#   money-user <prod|test> logout --all              close every session of the stand
+#
+# Money has no screen for any of this and no e-mail: a password is set, and
+# reset, by a link that a person issues here. The link signs its holder in as
+# a founder, so:
+#
+#   - `invite` needs a terminal on both ends. Over ssh that is `ssh -t`:
+#         ssh -t root@<server> money-user prod invite mika
+#     Without one the link would be issued and shown to nobody, and issuing a
+#     link retires the one before it - so this refuses before anything changes.
+#   - a Claude session never runs `invite` (CLAUDE.md). Mika runs the line and
+#     passes each link to its founder.
+#
+# Everything is `python -m moneyd.ctl user ...` and `... sessions ...` inside
+# the stand's container; the words of ctl itself are accepted as well
+# (`money-user prod user list`, `money-user prod sessions logout mika`).
+set -eu
+
+usage() {
+  echo "usage: money-user <prod|test> list | invite <login> | disable <login> | enable <login>" >&2
+  echo "       money-user <prod|test> sessions | logout <login> | logout --all" >&2
+  exit 2
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+STAND_SH=$ROOT/deploy/stand.sh
+
+if [ $# -lt 2 ]; then
+  usage
+fi
+STAND=$1
+WORD=$2
+shift 2
+case "$STAND" in
+  prod | test) ;;
+  *) usage ;;
+esac
+
+needs_terminal() {
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    echo "money-user: invite prints a one-time link and shows it to a terminal only." >&2
+    echo "Run it yourself, with -t:  ssh -t root@<server> money-user $STAND invite <login>" >&2
+    exit 1
+  fi
+}
+
+case "$WORD" in
+  list)
+    if [ $# -ne 0 ]; then
+      usage
+    fi
+    set -- user list
+    ;;
+  invite)
+    if [ $# -ne 1 ]; then
+      usage
+    fi
+    needs_terminal
+    set -- user invite "$1"
+    ;;
+  disable | enable)
+    if [ $# -ne 1 ]; then
+      usage
+    fi
+    set -- user "$WORD" "$1"
+    ;;
+  logout)
+    if [ $# -ne 1 ]; then
+      usage
+    fi
+    set -- sessions logout "$1"
+    ;;
+  sessions)
+    if [ $# -eq 0 ]; then
+      set -- sessions list
+    else
+      set -- sessions "$@"
+    fi
+    ;;
+  user)
+    if [ $# -lt 1 ]; then
+      usage
+    fi
+    if [ "$1" = invite ]; then
+      needs_terminal
+    fi
+    set -- user "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+exec "$STAND_SH" "$STAND" ctl "$@"

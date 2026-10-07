@@ -1,0 +1,217 @@
+#!/bin/sh
+# What a stranger meets at a stand's door, asked from the host after a deploy.
+#
+#   money-smoke <prod|test>
+#
+# `ctl selfcheck` runs inside the container and proves the service works for a
+# founder. It cannot see the published port, and it cannot be a stranger. This
+# does both: it talks to 127.0.0.1:<the stand's port> the way the edge proxy
+# does - the stand's public name in Host, a client address in
+# X-Forwarded-For - and holds the refusals that keep the money shut:
+#
+#   - /login answers 200 and carries its content security policy;
+#   - / without a session is sent to /login;
+#   - a path under /api/ without a session answers 401 as JSON: never HTML,
+#     never a redirect (the page reads a redirect as "the server is down");
+#   - a POST from a foreign Origin is 403;
+#   - a body that is not JSON by its Content-Type is 415;
+#   - a body one byte over the door's limit is 413;
+#   - /server.py, /.git/config and /data/ledger/current.json are not served,
+#     and neither is a path that climbs out of the vendor folder;
+#   - a foreign Host is 421.
+#
+# Nobody signs in here and nothing is written. The requests that are refused
+# are refused before a password is looked at, so they cost no sign-in attempt.
+# The client address is from a block reserved for documentation: no real
+# visitor shares it, and the request log shows whose lines these are.
+#
+# One line per check, then a count. Exit status 0 only when every check held.
+set -eu
+
+usage() {
+  echo "usage: money-smoke <prod|test>" >&2
+  exit 2
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+STAND_SH=$ROOT/deploy/stand.sh
+
+if [ $# -ne 1 ]; then
+  usage
+fi
+STAND=$1
+case "$STAND" in
+  prod | test) ;;
+  *) usage ;;
+esac
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "money-smoke: curl is not installed" >&2
+  exit 1
+fi
+
+PORT=$("$STAND_SH" "$STAND" get MONEY_PORT)
+URL=$("$STAND_SH" "$STAND" get MONEY_PUBLIC_URL)
+ORIGIN=${URL%/}
+HOST=${ORIGIN#*://}
+HOST=${HOST%%/*}
+BASE=http://127.0.0.1:$PORT
+CLIENT=192.0.2.10
+# The sign-in door reads 4 KiB and not a byte more.
+AUTH_LIMIT=4096
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+HEADERS=$WORK/headers
+BODY=$WORK/body
+ERRORS=$WORK/curl-errors
+
+CHECKS=0
+FAILED=0
+
+pass() {
+  CHECKS=$((CHECKS + 1))
+  printf 'ok    %s\n' "$1"
+}
+
+fail() {
+  CHECKS=$((CHECKS + 1))
+  FAILED=$((FAILED + 1))
+  printf 'FAIL  %s\n        got: %s\n' "$1" "$2"
+}
+
+# One request as the edge would hand it over. $1 is the Host to claim; the
+# rest goes to curl. Prints the status; the answer's headers and body are left
+# in $HEADERS and $BODY. "000" means nothing answered.
+ask() {
+  CLAIMED=$1
+  shift
+  : > "$HEADERS"
+  : > "$BODY"
+  curl -sS --max-time 10 --path-as-is -o "$BODY" -D "$HEADERS" -w '%{http_code}' \
+    -H "Host: $CLAIMED" -H "X-Forwarded-For: $CLIENT" -H 'Expect:' "$@" 2>"$ERRORS" || true
+}
+
+# The value of one header of the last answer; empty when it was not sent.
+header() {
+  grep -i "^$1:" "$HEADERS" | head -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//'
+}
+
+# --- the door is there -------------------------------------------------------
+CODE=$(ask "$HOST" "$BASE/login")
+if [ "$CODE" = 000 ]; then
+  WHY=$(head -n 1 "$ERRORS")
+  echo "money-smoke $STAND: nothing answers on $BASE ($WHY)" >&2
+  exit 1
+fi
+POLICY=$(header content-security-policy)
+MODE=enforced
+if [ -z "$POLICY" ]; then
+  POLICY=$(header content-security-policy-report-only)
+  MODE=report-only
+fi
+case "$CODE|$POLICY" in
+  "200|"*"default-src 'none'"*)
+    pass "GET /login is 200 and carries its policy ($MODE)"
+    ;;
+  *)
+    fail "GET /login is 200 and carries a policy that starts from default-src 'none'" "status $CODE, policy: ${POLICY:-none}"
+    ;;
+esac
+if [ "$MODE" = report-only ] && [ -n "$POLICY" ]; then
+  echo "WARNING: the $STAND stand sends its policy as report-only: it reports and does not block"
+fi
+
+CODE=$(ask "$HOST" "$BASE/")
+WHERE=$(header location)
+case "$CODE|$WHERE" in
+  "302|/login" | "302|$ORIGIN/login")
+    pass "GET / without a session is sent to /login"
+    ;;
+  *)
+    fail "GET / without a session is sent to /login" "status $CODE, location: ${WHERE:-none}"
+    ;;
+esac
+
+# --- the doors to the money answer a stranger 401, as JSON -------------------
+for DOOR in /api/me /api/founder/money /api/founder/money/cash /api/no-such-door; do
+  CODE=$(ask "$HOST" "$BASE$DOOR")
+  TYPE=$(header content-type)
+  WHERE=$(header location)
+  FIRST=$(head -c 1 "$BODY")
+  case "$CODE|$WHERE|$FIRST|$TYPE" in
+    "401||{|application/json"*)
+      pass "GET $DOOR without a session is 401, as JSON"
+      ;;
+    *)
+      fail "GET $DOOR without a session is 401 as JSON, never HTML and never a redirect" "status $CODE, content-type: ${TYPE:-none}, location: ${WHERE:-none}"
+      ;;
+  esac
+done
+
+# --- what the sign-in door refuses before it reads a password ----------------
+CODE=$(ask "$HOST" -H 'Origin: https://evil.example' -H 'Content-Type: application/json' \
+  --data-binary '{}' "$BASE/api/auth/login")
+if [ "$CODE" = 403 ]; then
+  pass "POST /api/auth/login from a foreign Origin is 403"
+else
+  fail "POST /api/auth/login from a foreign Origin is 403" "status $CODE"
+fi
+
+CODE=$(ask "$HOST" -H "Origin: $ORIGIN" -H 'Content-Type: text/plain' \
+  --data-binary '{}' "$BASE/api/auth/login")
+if [ "$CODE" = 415 ]; then
+  pass "POST /api/auth/login as text/plain is 415"
+else
+  fail "POST /api/auth/login as text/plain is 415" "status $CODE"
+fi
+
+head -c "$((AUTH_LIMIT + 1))" /dev/zero | tr '\0' 'a' > "$WORK/over"
+CODE=$(ask "$HOST" -H "Origin: $ORIGIN" -H 'Content-Type: application/json' \
+  --data-binary "@$WORK/over" "$BASE/api/auth/login")
+if [ "$CODE" = 413 ]; then
+  pass "POST /api/auth/login with one byte over $AUTH_LIMIT is 413"
+else
+  fail "POST /api/auth/login with one byte over $AUTH_LIMIT is 413" "status $CODE"
+fi
+
+# --- files that are not doors ------------------------------------------------
+for FILE in /server.py /.git/config /data/ledger/current.json /money/vendor/../../server.py; do
+  CODE=$(ask "$HOST" "$BASE$FILE")
+  case "$CODE" in
+    302 | 400 | 401 | 403 | 404)
+      if grep -q -e 'ThreadingHTTPServer' -e '\[core\]' -e '"rev"' "$BODY"; then
+        fail "GET $FILE is not served" "status $CODE, and the body looks like the file"
+      else
+        pass "GET $FILE is not served ($CODE)"
+      fi
+      ;;
+    *)
+      fail "GET $FILE is not served" "status $CODE"
+      ;;
+  esac
+done
+
+# --- a name that is not the stand's ------------------------------------------
+CODE=$(ask evil.example "$BASE/login")
+if [ "$CODE" = 421 ]; then
+  pass "GET /login under a foreign Host is 421"
+else
+  fail "GET /login under a foreign Host is 421" "status $CODE"
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "money-smoke $STAND: $FAILED of $CHECKS checks FAILED on $BASE (Host: $HOST)"
+  exit 1
+fi
+echo "money-smoke $STAND: all $CHECKS checks passed on $BASE (Host: $HOST)"

@@ -1,0 +1,109 @@
+#!/bin/sh
+# Return Money's TEST stand to the fabricated studio, as of today.
+#
+#   money-seed-test
+#
+# Run by money-deploy-test (when the stand is empty, or with --reseed) and
+# every night at 00:10 UTC by money-test-reseed.timer.
+#
+# The studio is made by scripts/money-demo.mjs, which is frozen and runs here
+# exactly as it is: in a throwaway container with no network and a read-only
+# root, reading nothing but the scripts folder -
+#
+#   docker run --rm --network none --read-only -v /opt/money-dev/scripts:/s:ro \
+#     node:22-alpine node /s/money-demo.mjs <ledger|plan> <YYYY-MM-DD>
+#
+# Its two documents then go in through the stand's own save door
+# (`ctl seed <ledger|plan> --fresh`), with a session of a few minutes that the
+# stand makes for itself. So there is no robot login and no password anywhere,
+# and every seeding also proves the write path. After that the stand's
+# snapshots older than two days are purged: whatever was typed or uploaded on
+# test - a real statement, by mistake - lives a day at most.
+#
+# Both documents are made first and stored after: a generator that fails
+# leaves the stand as it was. Accounts and passwords survive a seeding.
+#
+# Exit status: 0 seeded; 3 the generator is not in the checkout; anything else
+# is a failure, and the lines above it say where.
+set -eu
+
+LOCK=/run/lock/money-deploy.lock
+LOCK_WAIT_SECONDS=300
+NODE_IMAGE=node:22-alpine
+KEEP_SNAPSHOT_DAYS=2
+
+die() {
+  echo "money-seed-test: $*" >&2
+  exit 1
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin, and by the timer under its full name.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+STAND_SH=$ROOT/deploy/stand.sh
+GENERATOR=$ROOT/scripts/money-demo.mjs
+
+if [ $# -ne 0 ]; then
+  echo "usage: money-seed-test" >&2
+  exit 2
+fi
+
+if [ ! -f "$GENERATOR" ]; then
+  echo "money-seed-test: $GENERATOR is not in the checkout, so there is nothing to seed from" >&2
+  exit 3
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  die "docker is not installed"
+fi
+
+# A deploy in progress is waited for, not raced: the container it is about to
+# replace is the one this would be talking to. A deploy that calls this
+# already holds the lock and says so.
+if [ "${MONEY_DEPLOY_LOCK_HELD:-}" != 1 ]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    die "flock is not installed"
+  fi
+  exec 9>"$LOCK"
+  if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
+    die "a Money deploy has held $LOCK for more than $LOCK_WAIT_SECONDS s. Nothing was seeded."
+  fi
+  MONEY_DEPLOY_LOCK_HELD=1
+  export MONEY_DEPLOY_LOCK_HELD
+fi
+
+# "Today" as the page reckons it: the date in London.
+DAY=$(TZ=Europe/London date +%Y-%m-%d)
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+for WHAT in ledger plan; do
+  if ! docker run --rm --network none --read-only -v "$ROOT/scripts:/s:ro" "$NODE_IMAGE" \
+    node /s/money-demo.mjs "$WHAT" "$DAY" > "$WORK/$WHAT.json"; then
+    die "the generator failed on the $WHAT. Nothing was seeded."
+  fi
+  FIRST=$(head -c 1 "$WORK/$WHAT.json")
+  if [ "$FIRST" != "{" ]; then
+    die "the generator did not print a document for the $WHAT. Nothing was seeded."
+  fi
+done
+
+for WHAT in ledger plan; do
+  if ! "$STAND_SH" test ctl seed "$WHAT" --fresh < "$WORK/$WHAT.json"; then
+    die "the stand did not take the $WHAT"
+  fi
+done
+
+if ! "$STAND_SH" test ctl purge-snapshots --older-than-days "$KEEP_SNAPSHOT_DAYS"; then
+  die "the documents are in, but the old snapshots could not be purged"
+fi
+
+echo "money-test: seeded with the fabricated studio as of $DAY; snapshots older than $KEEP_SNAPSHOT_DAYS days purged"

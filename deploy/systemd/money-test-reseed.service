@@ -1,0 +1,31 @@
+# The test stand goes back to the fabricated studio.
+#
+# Two reasons, and both are rules rather than conveniences. The fabricated
+# studio is written relative to "today", so after a few days its last week of
+# the month is no longer the week the first screen is about. And nothing real
+# may stay on a stand that is reachable from the internet and looked after
+# with less care than prod: whatever was typed or uploaded there by mistake is
+# gone by morning, and the copies of it two days later.
+#
+# What runs is deploy/bin/money-seed-test: the frozen generator in a throwaway
+# container without a network, its two documents put in through the stand's
+# own save door (`ctl seed ... --fresh`), then `ctl purge-snapshots
+# --older-than-days 2`. Accounts and passwords survive it.
+#
+# Installed by linking:
+#   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.service /etc/systemd/system/
+#   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.timer   /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now money-test-reseed.timer
+
+[Unit]
+Description=Money — the test stand returns to the fabricated studio
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/money-dev/deploy/bin/money-seed-test
+# A night that fails leaves the stand as it was and says so in the journal:
+#   journalctl -u money-test-reseed -n 30 --no-pager
+# A deploy in progress is waited for, up to five minutes, not raced.
+Nice=10

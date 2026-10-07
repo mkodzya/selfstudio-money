@@ -1,0 +1,18 @@
+# Twenty to four in the studio's own morning, not the server's.
+#
+# The machine runs on UTC and the studio on Yerevan time. Writing the schedule
+# in the studio's timezone keeps it where it was put. It is ten minutes after
+# the platform's own backup (03:30 Yerevan), so the two never read the one disk
+# at the same moment.
+
+[Unit]
+Description=Money — nightly backup, 03:40 Yerevan
+
+[Timer]
+OnCalendar=*-*-* 03:40:00 Asia/Yerevan
+# If the machine was off at twenty to four, run once it is back rather than
+# skipping the night in silence.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,282 @@
+#!/bin/sh
+# Put a backup of Money's PROD stand back - or prove that one could be.
+#
+#   money-restore --rehearse <tarball>     prove it; nothing of prod is touched
+#   money-restore <tarball>                do it; asks for the stand's name first
+#
+# A backup nobody has restored is a guess. So the rehearsal comes first, on the
+# day prod is set up and whenever somebody wants to know:
+#
+#   --rehearse unpacks the tarball into a scratch directory, starts a throwaway
+#   container on it - the stand's own image, no published port, its own name -
+#   runs `ctl verify` (counts, never contents) and `ctl selfcheck` inside, and
+#   removes the container and the directory. It is a gate before the real
+#   ledger is loaded (docs/security.md, "Before prod").
+#
+# The real thing REPLACES the stand's data directory. Only on the owner's word.
+#   1. the tarball is read whole and must carry prod's own STAND marker;
+#   2. the stand's name has to be typed;
+#   3. the container is stopped;
+#   4. the directory as it stands is moved aside, never deleted:
+#        /var/lib/money/prod.before-restore-<utc>
+#   5. the tarball is unpacked into a new, empty directory owned by 10001;
+#   6. the container is started and has to pass `ctl selfcheck`;
+#   7. if it does not, the directory that was moved aside is put back, and the
+#      one that failed is kept beside it for looking at.
+# A backup holds no sessions, so afterwards every founder signs in again;
+# accounts and passwords are as they were when the backup was taken.
+#
+# One document back from a snapshot is a different, smaller thing:
+# `deploy/stand.sh prod ctl restore <ledger|plan> <snapshot>`.
+#
+# A prod tarball is never restored into the test stand; this cannot do it.
+set -eu
+umask 077
+
+STAND=prod
+LOCK=/run/lock/money-deploy.lock
+SCRATCH_PARENT=/var/tmp
+CONTAINER_USER=10001
+WAIT_SECONDS=60
+
+die() {
+  echo "money-restore: $*" >&2
+  exit 1
+}
+
+usage() {
+  echo "usage: money-restore [--rehearse] <tarball>" >&2
+  exit 2
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+STAND_SH=$ROOT/deploy/stand.sh
+
+REHEARSE=0
+if [ "${1:-}" = --rehearse ]; then
+  REHEARSE=1
+  shift
+fi
+if [ $# -ne 1 ]; then
+  usage
+fi
+TARBALL=$1
+case "$TARBALL" in
+  -*) usage ;;
+  /*) ;;
+  *) TARBALL=$(pwd)/$TARBALL ;;
+esac
+
+if [ ! -f "$TARBALL" ]; then
+  die "no such file: $TARBALL"
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  die "docker is not installed"
+fi
+if [ "$(id -u)" -ne 0 ]; then
+  die "run this as root: the data belongs to the container's user and is closed to everybody else"
+fi
+
+# The archive has to read whole before anything is done with it, and it has to
+# be a backup of this stand and no other.
+if ! gzip -t "$TARBALL"; then
+  die "$TARBALL does not read as gzip"
+fi
+if ! tar -tzf "$TARBALL" >/dev/null; then
+  die "$TARBALL does not list as tar"
+fi
+MARKER=$(tar -xzOf "$TARBALL" ./STAND 2>/dev/null | tr -d '[:space:]') || MARKER=""
+if [ "$MARKER" != "$STAND" ]; then
+  die "$TARBALL is not a backup of the $STAND stand (its STAND marker says '${MARKER:-nothing}')"
+fi
+
+DATA=$("$STAND_SH" "$STAND" get MONEY_DATA_HOST_DIR)
+PUBLIC_URL=$("$STAND_SH" "$STAND" get MONEY_PUBLIC_URL)
+FOUNDERS=$("$STAND_SH" "$STAND" get MONEY_FOUNDERS)
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+# The container the stand runs now, if there is one - found by the labels
+# compose gives it, so that this works from whichever checkout it is run.
+running_container() {
+  docker ps -a -q \
+    --filter "label=com.docker.compose.project=money-$STAND" \
+    --filter "label=com.docker.compose.service=app" | head -n 1
+}
+
+# Ask a container until it answers, or give up. $1 is its name or id.
+wait_for() {
+  WAITED=0
+  while [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
+    if docker exec "$1" python -m moneyd.ctl ping >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# The rehearsal
+# ---------------------------------------------------------------------------
+if [ "$REHEARSE" -eq 1 ]; then
+  # The image the stand runs; failing that, the newest one built for it.
+  IMAGE=""
+  NOW=$(running_container)
+  if [ -n "$NOW" ]; then
+    IMAGE=$(docker inspect -f '{{.Image}}' "$NOW" 2>/dev/null) || IMAGE=""
+  fi
+  if [ -z "$IMAGE" ]; then
+    IMAGE=$(docker image ls -q "money-$STAND" | head -n 1)
+  fi
+  if [ -z "$IMAGE" ]; then
+    die "there is no Money image on this machine to rehearse with: run money-deploy first"
+  fi
+
+  SCRATCH=$(mktemp -d "$SCRATCH_PARENT/money-rehearse.XXXXXX")
+  NAME=money-rehearse-$STAMP
+  trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$SCRATCH"' EXIT
+
+  mkdir "$SCRATCH/data"
+  if ! tar -xzf "$TARBALL" -C "$SCRATCH/data" --numeric-owner; then
+    die "the tarball did not unpack"
+  fi
+  chown "$CONTAINER_USER:$CONTAINER_USER" "$SCRATCH/data"
+  chmod 700 "$SCRATCH/data"
+
+  echo "money-restore: starting a throwaway container on a copy of $TARBALL"
+  # As deploy/compose.yml starts the stand, with two differences: no port is
+  # published, and /data is the scratch copy.
+  if ! docker run -d --name "$NAME" \
+    --init --read-only --tmpfs /tmp:size=16m \
+    --user "$CONTAINER_USER:$CONTAINER_USER" --cap-drop ALL --security-opt no-new-privileges:true \
+    --pids-limit 64 --memory 256m --cpus 1.0 \
+    -e "MONEY_STAND=$STAND" \
+    -e "MONEY_PUBLIC_URL=$PUBLIC_URL" \
+    -e "MONEY_FOUNDERS=$FOUNDERS" \
+    -e MONEY_DATA_DIR=/data \
+    -e MONEY_BIND=0.0.0.0:8080 \
+    -e MONEY_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 \
+    -e TZ=UTC \
+    -v "$SCRATCH/data:/data" \
+    "$IMAGE" >/dev/null; then
+    die "the throwaway container did not start"
+  fi
+
+  if ! wait_for "$NAME"; then
+    docker logs --tail 40 "$NAME" >&2 || true
+    echo "money-restore --rehearse: FAILED - the service did not start on the restored data ($TARBALL)"
+    exit 1
+  fi
+  if ! docker exec "$NAME" python -m moneyd.ctl verify /data; then
+    echo "money-restore --rehearse: FAILED - ctl verify refused the restored data ($TARBALL)"
+    exit 1
+  fi
+  if ! docker exec "$NAME" python -m moneyd.ctl selfcheck; then
+    docker logs --tail 40 "$NAME" >&2 || true
+    echo "money-restore --rehearse: FAILED - the self-check failed on the restored data ($TARBALL)"
+    exit 1
+  fi
+  echo "money-restore --rehearse: OK - $TARBALL unpacks, starts and passes the self-check. Prod was not touched."
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# The real thing
+# ---------------------------------------------------------------------------
+ASIDE=$DATA.before-restore-$STAMP
+FAILED_COPY=$DATA.failed-restore-$STAMP
+
+echo "About to REPLACE the data of Money's PROD stand with $TARBALL."
+echo "The directory as it stands is moved to $ASIDE and kept."
+echo "Every founder will have to sign in again. Type the stand's name to go on:"
+read -r CONFIRM || CONFIRM=""
+if [ "$CONFIRM" != "$STAND" ]; then
+  die "not confirmed - nothing done"
+fi
+
+# Not while a deploy is replacing the container, and no deploy while this runs.
+if [ "${MONEY_DEPLOY_LOCK_HELD:-}" != 1 ]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    die "flock is not installed"
+  fi
+  exec 9>"$LOCK"
+  if ! flock -n 9; then
+    die "a Money deploy holds $LOCK. Nothing was changed."
+  fi
+  MONEY_DEPLOY_LOCK_HELD=1
+  export MONEY_DEPLOY_LOCK_HELD
+fi
+
+# What is undone when the new data cannot be put in place or does not hold up:
+# the attempt is set aside for looking at, the directory as it was comes back,
+# and the container is started on it again.
+put_back() {
+  if [ -e "$DATA" ]; then
+    mv "$DATA" "$FAILED_COPY"
+  fi
+  if [ -e "$ASIDE" ]; then
+    mv "$ASIDE" "$DATA"
+  else
+    install -d -o "$CONTAINER_USER" -g "$CONTAINER_USER" -m 700 "$DATA"
+  fi
+  if [ -n "$NOW" ]; then
+    docker start "$NOW" >/dev/null || true
+  fi
+}
+
+NOW=$(running_container)
+if [ -n "$NOW" ]; then
+  docker stop "$NOW" >/dev/null
+fi
+
+if [ -e "$DATA" ]; then
+  mv "$DATA" "$ASIDE"
+fi
+UNPACKED=0
+if install -d -o "$CONTAINER_USER" -g "$CONTAINER_USER" -m 700 "$DATA"; then
+  if tar -xzf "$TARBALL" -C "$DATA" --numeric-owner; then
+    UNPACKED=1
+  fi
+fi
+if [ "$UNPACKED" -ne 1 ]; then
+  echo "money-restore: the tarball did not unpack; putting the directory back as it was" >&2
+  put_back
+  echo "money-restore: FAILED - $TARBALL did not unpack. The data is as it was; what was unpacked is in $FAILED_COPY."
+  exit 1
+fi
+chown "$CONTAINER_USER:$CONTAINER_USER" "$DATA"
+chmod 700 "$DATA"
+
+if [ -z "$NOW" ]; then
+  echo "money-restore: OK - the data of $TARBALL is in $DATA. No container exists for the stand: start it with money-deploy."
+  echo "The directory as it was: $ASIDE (remove it by hand once you have looked)."
+  exit 0
+fi
+
+HEALTHY=0
+if docker start "$NOW" >/dev/null && wait_for "$NOW" && docker exec "$NOW" python -m moneyd.ctl selfcheck; then
+  HEALTHY=1
+fi
+
+if [ "$HEALTHY" -ne 1 ]; then
+  echo "money-restore: the stand does not pass its self-check on the restored data; putting the directory back as it was" >&2
+  docker logs --tail 40 "$NOW" >&2 || true
+  docker stop "$NOW" >/dev/null || true
+  put_back
+  echo "money-restore: FAILED - the stand did not come up on $TARBALL. The data is as it was before; the restored copy is in $FAILED_COPY."
+  exit 1
+fi
+
+echo "money-restore: OK - the stand runs on the data of $TARBALL and passes its self-check."
+echo "Every founder signs in again. The directory as it was: $ASIDE (remove it by hand once you have looked)."

@@ -1,0 +1,29 @@
+# One nightly copy of Money's prod data directory.
+#
+# /var/lib/money/prod is the only copy of the studio's money as the founders
+# filed it: two documents, the copies each day started with, the accounts and
+# the security log. It survives a restart, a rebuild and `docker compose down
+# -v` — and is lost to one disk failure or one careless `rm`.
+#
+# Prod only. The test stand is a generated copy by definition and goes back to
+# the fabricated studio every night.
+#
+# Installed by linking, never by copying, so the text that runs is the text in
+# the repository:
+#   ln -sf /opt/money/deploy/systemd/money-backup.service /etc/systemd/system/
+#   ln -sf /opt/money/deploy/systemd/money-backup.timer   /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now money-backup.timer
+
+[Unit]
+Description=Money — nightly backup of the prod data directory
+
+[Service]
+Type=oneshot
+ExecStart=/opt/money/deploy/bin/money-backup
+# The script writes to a .part file and renames it only after the archive has
+# been read back whole, so a failure here means no file was written — not half
+# of one that looks like a backup. A night that fails is in the journal
+# (journalctl -u money-backup) and, a day later, in the words at login
+# (deploy/motd/98-money-backup).
+Nice=10
+IOSchedulingClass=idle

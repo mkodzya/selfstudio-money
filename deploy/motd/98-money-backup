@@ -1,0 +1,50 @@
+#!/bin/sh
+# Say something at login only when Money's backup has stopped happening.
+#
+# A schedule makes a backup run; it does not make anybody notice when it
+# stops. systemd records the failure in its journal, and nobody reads a
+# journal they have no reason to open. This is the cheapest thing that closes
+# that gap: whoever signs in to this machine is told, and nothing is said on a
+# good day.
+#
+# Prod only: the test stand is not backed up. And nothing is said on a machine
+# where prod holds nothing yet.
+#
+# Installed by linking, as /etc/update-motd.d/98-money-backup (one before the
+# platform's own 99-selfstudio-backup):
+#   ln -sf /opt/money/deploy/motd/98-money-backup /etc/update-motd.d/
+set -eu
+
+DIR=/var/backups/money
+DATA=/var/lib/money/prod
+
+if [ ! -d "$DATA" ]; then
+  exit 0
+fi
+if [ -z "$(find "$DATA" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  exit 0
+fi
+
+# The names carry a UTC stamp, so the last one in order is the newest.
+NEWEST=""
+for FILE in "$DIR"/money-prod-*.tar.gz; do
+  if [ -f "$FILE" ]; then
+    NEWEST=$FILE
+  fi
+done
+
+if [ -z "$NEWEST" ]; then
+  printf '\n  \033[1;33mNo backup of Money (prod) exists yet.\033[0m\n'
+  printf '  systemctl status money-backup.timer\n\n'
+  exit 0
+fi
+
+WRITTEN=$(stat -c %Y "$NEWEST" 2>/dev/null) || exit 0
+AGE_H=$(( ($(date +%s) - WRITTEN) / 3600 ))
+# 26 rather than 24: the run itself takes a moment, and an hour of slack keeps
+# a healthy night from reporting itself as a failure.
+if [ "$AGE_H" -gt 26 ]; then
+  printf '\n  \033[1;33mThe newest backup of Money (prod) is %sh old.\033[0m\n' "$AGE_H"
+  printf '  journalctl -u money-backup -n 30 --no-pager\n\n'
+fi
+exit 0

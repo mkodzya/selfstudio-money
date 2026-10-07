@@ -1,0 +1,330 @@
+# Money's checks. Everything that needs a container or a browser runs here and
+# nowhere else: the Mac this is written on has 8 GB and other work to do.
+#
+#   unit         the Python tests, on 3.9 (the Mac's own Python) and 3.13 (the image)
+#   image        deploy/Dockerfile builds and runs as the stand runs it; the
+#                server's own commands are rehearsed on the runner; shellcheck;
+#                caddy validate on the edge blocks
+#   page-checks  the page's own checks, frozen, exactly as they were handed over
+#   stand-smoke  the unchanged page against the real backend, in a real browser
+#
+# Nothing here holds or needs a secret, and nothing deploys.
+name: ci
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - "feature/**"
+      - "hotfix/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the run for the older one pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  unit:
+    name: unit (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: The tests
+        run: python -m unittest discover -s tests -t .
+      - name: Nothing is left running
+        run: |
+          if pgrep -fl moneyd; then
+            echo "::error::a moneyd process outlived the tests"
+            exit 1
+          fi
+
+  image:
+    name: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deploy/Dockerfile
+        run: |
+          docker build --pull -f deploy/Dockerfile \
+            --build-arg "MONEY_VERSION=ci-${GITHUB_SHA::12}" -t money-ci:ci .
+
+      - name: The build context is the allow-list and nothing else
+        run: |
+          # Decoys of everything that must never reach a build: a ledger beside
+          # the code, an environment file, design notes.
+          mkdir -p data design
+          echo '{"decoy":true}' > data/db.json
+          echo 'DECOY=1' > .env.decoy
+          echo 'decoy' > design/notes.md
+          printf 'FROM busybox:stable\nCOPY . /ctx/\n' | docker build -q -f - -t money-ctx:ci .
+          docker run --rm money-ctx:ci sh -c 'cd /ctx && ls -A' | sort > "$RUNNER_TEMP/context.txt"
+          rm -rf data design .env.decoy
+          cat "$RUNNER_TEMP/context.txt"
+          printf 'index.html\nmoneyd\nvendor\n' > "$RUNNER_TEMP/expected.txt"
+          if ! diff "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/context.txt"; then
+            echo "::error::.dockerignore lets more than moneyd/, index.html and vendor/ into a build"
+            exit 1
+          fi
+          # And the image itself holds the service, the page and its readers.
+          docker run --rm --entrypoint sh money-ci:ci -c \
+            'test -f /app/moneyd/__main__.py && test -f /app/web/index.html && test -f /app/web/vendor/pdf.min.js && test ! -e /app/server.py && test ! -e /app/data'
+
+      - name: Run it non-root on a read-only root, as the test stand
+        run: |
+          sudo install -d -o 10001 -g 10001 -m 700 "$RUNNER_TEMP/money-data"
+          docker run -d --name money-ci \
+            --init --read-only --tmpfs /tmp:size=16m \
+            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true \
+            --pids-limit 64 --memory 256m --cpus 1.0 \
+            -e MONEY_STAND=test \
+            -e MONEY_PUBLIC_URL=https://finance.test.selfstudio.se \
+            -e MONEY_FOUNDERS=mika:Mika,misha:Misha,vanya:Vanya \
+            -e MONEY_DATA_DIR=/data \
+            -e MONEY_BIND=0.0.0.0:8080 \
+            -e MONEY_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 \
+            -e TZ=UTC \
+            -v "$RUNNER_TEMP/money-data:/data" \
+            money-ci:ci
+          up=0
+          for attempt in $(seq 1 30); do
+            if docker exec money-ci python -m moneyd.ctl ping >/dev/null 2>&1; then
+              up=1
+              echo "answered after $attempt s"
+              break
+            fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::the service did not answer ctl ping within 30 s"
+            docker logs money-ci
+            exit 1
+          fi
+          test "$(docker exec money-ci id -u)" = 10001
+          # /var/tmp is open to every user, so only a read-only root refuses this.
+          if docker exec money-ci sh -c ': > /var/tmp/written-by-the-check' 2>/dev/null; then
+            echo "::error::the root filesystem is writable"
+            exit 1
+          fi
+          docker exec money-ci sh -c ': > /tmp/scratch && : > /data/.writable && rm /data/.writable'
+
+      - name: ctl selfcheck
+        run: docker exec money-ci python -m moneyd.ctl selfcheck
+
+      - name: What the container said
+        if: always()
+        run: |
+          docker logs money-ci 2>&1 | tail -n 60 || true
+          docker rm -f money-ci >/dev/null 2>&1 || true
+
+      - name: shellcheck
+        if: ${{ !cancelled() }}
+        run: |
+          shellcheck --version
+          shellcheck deploy/bin/* deploy/stand.sh deploy/motd/98-money-backup
+
+      - name: caddy validate on the edge blocks
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm -v "$PWD/deploy/edge/Caddyfile.money:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: The timers' calendars parse
+        if: ${{ !cancelled() }}
+        run: |
+          for unit in deploy/systemd/*.timer; do
+            when=$(sed -n 's/^OnCalendar=//p' "$unit")
+            echo "$unit: $when"
+            systemd-analyze calendar "$when"
+          done
+
+      # From here on the runner plays the server: the checkout is linked to the
+      # two places the stands live in, and the commands that will first run for
+      # real on the studio's machine are run here first.
+      - name: "Rehearsal: the test stand's deploy, twice, and its reseed"
+        run: |
+          sudo ln -sfn "$GITHUB_WORKSPACE" /opt/money-dev
+          sudo install -d -o 10001 -g 10001 -m 700 /var/lib/money/test
+          # 1. a first deploy of an empty stand: it is seeded
+          /opt/money-dev/deploy/bin/money-deploy-test | tee "$RUNNER_TEMP/deploy-1.txt"
+          tail -n 1 "$RUNNER_TEMP/deploy-1.txt" | grep -q '^money-test: OK - deployed and seeded'
+          # 2. the same again: there is a previous image now, and the stand holds data
+          /opt/money-dev/deploy/bin/money-deploy-test | tee "$RUNNER_TEMP/deploy-2.txt"
+          tail -n 1 "$RUNNER_TEMP/deploy-2.txt" | grep -q '^money-test: OK - deployed. The stand holds data'
+          docker image inspect money-test:previous >/dev/null
+          # 3. what the nightly timer runs
+          /opt/money-dev/deploy/bin/money-seed-test
+          # 4. the wrappers a person uses
+          /opt/money-dev/deploy/bin/money-user test list
+          /opt/money-dev/deploy/bin/money-smoke test
+          if /opt/money-dev/deploy/bin/money-user test invite mika; then
+            echo "::error::invite went ahead without a terminal"
+            exit 1
+          fi
+          # 5. a seeded stand is not an empty one
+          if /opt/money-dev/deploy/stand.sh test ctl empty; then
+            echo "::error::ctl empty says the stand is empty right after it was seeded"
+            exit 1
+          fi
+
+      - name: "Rehearsal: the prod stand, its backup, and a restore"
+        run: |
+          sudo ln -sfn "$GITHUB_WORKSPACE" /opt/money
+          sudo install -d -o 10001 -g 10001 -m 700 /var/lib/money/prod
+          # Not money-deploy itself: it moves the checkout to main. What it
+          # hands over to is the same.
+          /opt/money/deploy/stand.sh prod up | tee "$RUNNER_TEMP/deploy-prod.txt"
+          tail -n 1 "$RUNNER_TEMP/deploy-prod.txt" | grep -q '^money-prod: OK - '
+          # prod never takes a seed: exit status 2, and nothing is written
+          status=0
+          echo '{"tx":[]}' | /opt/money/deploy/stand.sh prod ctl seed ledger --fresh || status=$?
+          test "$status" -eq 2
+          /opt/money/deploy/stand.sh prod ctl empty
+          # a backup, the rehearsal of its restore, then the restore itself
+          sudo /opt/money/deploy/bin/money-backup
+          tarball=$(sudo sh -c 'ls /var/backups/money/money-prod-*.tar.gz' | tail -n 1)
+          test "$(sudo stat -c %a "$tarball")" = 600
+          test "$(sudo stat -c %a /var/backups/money)" = 700
+          sudo /opt/money/deploy/bin/money-restore --rehearse "$tarball"
+          # On the server every command is root's. Here the lock was made by
+          # the runner's own user a moment ago, and the kernel will not let
+          # root reopen somebody else's file in /run/lock.
+          sudo rm -f /run/lock/money-deploy.lock
+          echo prod | sudo /opt/money/deploy/bin/money-restore "$tarball"
+          sudo rm -f /run/lock/money-deploy.lock
+          /opt/money/deploy/stand.sh prod ctl selfcheck
+          /opt/money/deploy/bin/money-smoke prod
+          sudo sh -c 'ls -d /var/lib/money/prod.before-restore-*'
+          # the words at login: nothing to say right after a backup
+          test -z "$(sudo /opt/money/deploy/motd/98-money-backup)"
+
+      - name: What the stands said
+        if: failure()
+        run: |
+          docker ps -a || true
+          docker image ls || true
+          for stand in test prod; do
+            echo "--- money-$stand"
+            docker compose -p "money-$stand" logs --tail 80 2>&1 || true
+          done
+
+  page-checks:
+    name: page-checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The three files are written by another session and arrive whole. Until
+      # they are all here there is nothing to check, and that is not a failure.
+      - name: Are the handed-over files here
+        id: frozen
+        run: |
+          if [ -f index.html ] && [ -f scripts/money-checks.mjs ] && [ -f scripts/money-demo.mjs ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=page-checks skipped::index.html, scripts/money-checks.mjs and scripts/money-demo.mjs are not all in this commit"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.frozen.outputs.present == 'true'
+        with:
+          node-version: 22
+
+      - name: Playwright, at the one version package.json names
+        if: steps.frozen.outputs.present == 'true'
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      # The checks are run exactly as they were handed over. They find the page
+      # through PUB alone, so they get a copy of it - under a path that does
+      # not begin with /money/, or the page opened as a file would take itself
+      # for the hosted one.
+      - name: The frozen checks, on a copy of the page
+        if: steps.frozen.outputs.present == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/pub/money"
+          cp index.html "$RUNNER_TEMP/pub/money/index.html"
+          cp -R vendor "$RUNNER_TEMP/pub/money/vendor"
+          case "$RUNNER_TEMP" in
+            /money/*) echo "::error::the copy must not live under /money/"; exit 1 ;;
+          esac
+          PUB="$RUNNER_TEMP/pub" node scripts/money-checks.mjs
+
+  stand-smoke:
+    name: stand-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is there a page and a studio to put behind it
+        id: frozen
+        run: |
+          if [ -f index.html ] && [ -f scripts/money-demo.mjs ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=stand-smoke skipped::index.html and scripts/money-demo.mjs are not both in this commit"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.frozen.outputs.present == 'true'
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        if: steps.frozen.outputs.present == 'true'
+        with:
+          node-version: 22
+
+      - name: Playwright, at the one version package.json names
+        if: steps.frozen.outputs.present == 'true'
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: The unchanged page on the real backend, in Chromium
+        if: steps.frozen.outputs.present == 'true'
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/stand-smoke
+        run: node checks/stand-smoke.mjs
+
+      - name: Nothing is left running
+        if: steps.frozen.outputs.present == 'true'
+        run: |
+          if pgrep -fl moneyd; then
+            echo "::error::a moneyd process outlived the smoke"
+            exit 1
+          fi
+
+      # Pictures of the screen the smoke was on when it failed, and the
+      # service's own log. A throwaway dev stand: a fabricated studio and a
+      # password made up for the run.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: stand-smoke
+          path: ${{ runner.temp }}/stand-smoke
+          if-no-files-found: ignore
+          retention-days: 7

@@ -6,3 +6,26 @@ design/
 
 .DS_Store
 __pycache__/
+*.py[cod]
+
+# Copies of the ledger made by hand or by a tool are the same money as data/.
+backups/
+
+# Environment files. Money has no secret to keep in one, and none may arrive
+# this way. The stand files (deploy/stands/prod.env, test.env) are not matched
+# by this pattern: they hold no secret and are committed on purpose.
+.env*
+
+# The browser checks. Playwright is installed by CI with `npm install`; nothing
+# of it is run on the Mac. There is no lock file on purpose: package.json pins
+# one exact version, and a lock written on somebody's machine must not creep in.
+node_modules/
+package-lock.json
+playwright-report/
+test-results/
+
+# Pictures the page checks save when asked (SHOTS=...).
+shots/
+
+# Worktrees made beside or inside a clone.
+_worktrees/

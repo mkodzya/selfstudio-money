@@ -1,0 +1,115 @@
+#!/bin/sh
+# Take a backup of Money's PROD data directory.
+#
+#   money-backup
+#
+# Run every night by money-backup.timer (03:40 Yerevan) and by money-deploy
+# before every prod deploy. As root: the data directory is closed to everybody
+# but the container's user.
+#
+# The directory is the only copy of the studio's money as the founders filed
+# it: two documents, the copy each day started with, the accounts and the
+# security log. A backup is one tarball of it,
+#
+#   /var/backups/money/money-prod-<utc>.tar.gz      mode 600, in a directory of mode 700
+#
+# without the open sessions (a restore signs everybody out, on purpose) and
+# without the half-written temporary files. The newest KEEP_DAYS (default 14)
+# are kept. Each tarball carries up to 90 day copies of each document, so the
+# tarballs reach further back than 14 days.
+#
+# No stop and no lock are needed: Money never changes a file in place, every
+# file in the directory is replaced whole. `tar` may still see a file vanish
+# while it reads the directory - a snapshot pruned, a temporary file renamed -
+# and says so with exit status 1. That is tried once more; a second time, or
+# any worse failure, fails loudly and leaves no file behind.
+#
+# The tarball is written to a .part file, read back whole (`gzip -t`,
+# `tar -tzf`) and only then given its name: an interrupted run never leaves a
+# file that looks like a backup and is half of one.
+#
+# Same disk as the data, not encrypted, and it holds the ledger and the
+# password hashes. Good against an emptied document, not against a dead disk.
+# The test stand is not backed up: it is a generated copy by definition.
+set -eu
+umask 077
+
+OUT_DIR=/var/backups/money
+KEEP_DAYS="${KEEP_DAYS:-14}"
+
+die() {
+  echo "money-backup: $*" >&2
+  exit 1
+}
+
+# Where this file really is: on the server it is run through a link in
+# /usr/local/bin, and by the timer under its full name.
+SELF=$0
+while [ -L "$SELF" ]; do
+  TARGET=$(readlink "$SELF")
+  case "$TARGET" in
+    /*) SELF=$TARGET ;;
+    *) SELF=$(dirname "$SELF")/$TARGET ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
+
+if [ $# -ne 0 ]; then
+  echo "usage: money-backup" >&2
+  exit 2
+fi
+
+DATA=$("$ROOT/deploy/stand.sh" prod get MONEY_DATA_HOST_DIR)
+
+if [ ! -d "$DATA" ]; then
+  die "no data directory $DATA: is the prod stand set up on this machine?"
+fi
+if [ ! -r "$DATA" ] || [ ! -x "$DATA" ]; then
+  die "cannot read $DATA: run this as root"
+fi
+# A stand that has never started has nothing to lose yet, and an archive of an
+# empty directory would only look like a backup.
+if [ -z "$(find "$DATA" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+  echo "money-backup: $DATA is empty, so there is nothing to back up yet"
+  exit 0
+fi
+
+mkdir -p "$OUT_DIR"
+chmod 700 "$OUT_DIR"
+
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+PART=$OUT_DIR/.money-prod-$STAMP.tar.gz.part
+FINAL=$OUT_DIR/money-prod-$STAMP.tar.gz
+
+pack() {
+  tar -C "$DATA" --exclude='*.tmp-*' --exclude='auth/sessions.json*' -czf "$PART" .
+}
+
+STATUS=0
+pack || STATUS=$?
+if [ "$STATUS" -eq 1 ]; then
+  echo "money-backup: a file changed or vanished while tar was reading; trying once more" >&2
+  sleep 2
+  STATUS=0
+  pack || STATUS=$?
+fi
+if [ "$STATUS" -ne 0 ]; then
+  rm -f "$PART"
+  die "tar failed with status $STATUS. NO BACKUP WAS WRITTEN."
+fi
+
+if ! gzip -t "$PART"; then
+  rm -f "$PART"
+  die "the archive does not read back as gzip. NO BACKUP WAS WRITTEN."
+fi
+if ! tar -tzf "$PART" >/dev/null; then
+  rm -f "$PART"
+  die "the archive does not list as tar. NO BACKUP WAS WRITTEN."
+fi
+
+mv "$PART" "$FINAL"
+echo "$FINAL ($(du -h "$FINAL" | cut -f1))"
+
+find "$OUT_DIR" -name 'money-prod-*.tar.gz' -type f -mtime "+$KEEP_DAYS" -print -delete
+# What an interrupted run left behind a day or more ago.
+find "$OUT_DIR" -name '.money-prod-*.tar.gz.part' -type f -mtime +0 -delete
