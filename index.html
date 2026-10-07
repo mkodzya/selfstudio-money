@@ -3429,7 +3429,9 @@ const Live=(()=>{
   // even one still unrecognised in «Разбор»: it is the bank's fact either way. A row that was already filed (or
   // recognised) when the mark was made is never taken this way: a tap that silently re-filed it would move the
   // total under the founder's finger. One that sat in «Разбор» with no block and no name had been counted in
-  // nothing but the balance, so it may be the one whenever it was uploaded.
+  // nothing but the balance, so it may be the one whenever it was uploaded. (A line said «Частично» of has been
+  // given the row of its part already, before the rows were dealt, wherever another line of its label could have
+  // taken it; what it is still short of here is looked for among the rows nothing claimed.)
   items.forEach(it=>{if(it.pamt!=null&&canPay(it))it.rem=Math.min(it.rem,Math.max(0,it.pamt-it.got)/it.vk);});
   const byMark=(a,b)=>a.paid.on<b.paid.on?-1:a.paid.on>b.paid.on?1:byItem(a,b);
   items.filter(it=>!it.wd&&it.paid&&canPay(it)&&!word(it)).sort(byMark).forEach(it=>{
@@ -4735,8 +4737,9 @@ const Ed=(()=>{
  document.addEventListener("keydown",ev=>{
   const t=ev.target;if(!t.matches)return;
   if((ev.key==="Enter"||ev.key===" ")&&t.matches("[data-ed-open]:not(button),[data-ed-bal]:not(button)")){ev.preventDefault();return t.click();}
-  // Enter in either field of «Частично» answers that question; left to the line below it would press the card's
-  // own «Сохранить», and the answer would be lost.
+  // Enter in either field of «Частично» answers that question, whatever else was typed into the card. Left to the
+  // line below it would press the card's own button — which answers the question only while nothing of the row
+  // itself was changed, and saves the row otherwise.
   if(ev.key==="Enter"&&t.matches("[data-ed-part],[data-ed-partdate]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
   if(ev.key==="Enter"&&t.matches("[data-ed-card] input:not([type=checkbox]):not([list])")){const b=t.closest("[data-ed-card]").querySelector("[data-ed-save]");if(b){ev.preventDefault();b.click();}}
   if(ev.key==="Enter"&&t.matches("[data-ed-rv]"))t.blur();
