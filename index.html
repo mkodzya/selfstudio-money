@@ -2510,8 +2510,9 @@ const Cash=(()=>{
 //                                  {октября}», carry:{ym}, no mon, the same list, link and VAT; a one-off row even
 //                                  when it came from a month of a repeating one. On a row that is itself such a rest
 //                                  the new one keeps its name and its carry.ym. Without `date` (a caller from
-//                                  before) the row has no date and mon = the NEXT month. Not for a computed tax.
-//                                  Returns the new row (null if nothing is left)
+//                                  before) it writes what it always wrote: no date, mon = the NEXT month, named
+//                                  after the line it was said of. Not for a computed tax. Returns the new row
+//                                  (null if nothing is left)
 //  off(P, it) / on(P, it)          the tick: row.on=false · x[ym].off for one month · per.none («не платим») for a tax
 //  tx(P, it, id) / notx / closed   «Это оно» / «Нет, другой» / «Это всё» — on the row or x[ym]
 //  link(P, it, sk)                 «{label} в таблице — это «{name}»? Да»: the row's link, by hand
@@ -3953,11 +3954,11 @@ const Live=(()=>{
   // the founder names (`date`) — a one-off row even when it came from a month of a «каждый месяц» row, named after
   // where it came from; that row's own months stand beside it untouched. Said of a row that is itself such a rest,
   // the new row keeps its name and the month the debt first came from: nothing is «остаток с октября — остаток с
-  // ноября». `on` is the day of the mark. Called without a date it writes what it wrote before the founder chose
-  // the day — a row of the NEXT month with no date (mon) — which is what a plan from before may hold. Returns the
-  // new row.
+  // ноября». `on` is the day of the mark. Called without a date it writes, to the letter, what it wrote before the
+  // founder chose the day — a row of the NEXT month with no date (mon), named after the line it was said of —
+  // which is what a plan from before may hold. Returns the new row.
   partial(P,it,got,id,now,by,on,date){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
-   const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,from=obj(it.carry)&&isM(it.carry.ym)?it.carry.ym:"",day=isD(date)?date:"";
+   const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,day=isD(date)?date:"",from=day&&obj(it.carry)&&isM(it.carry.ym)?it.carry.ym:"";
    s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
    const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
    ["sk","skBy","vat","ptax","f"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});

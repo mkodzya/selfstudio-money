@@ -1248,6 +1248,8 @@ await run('dated rest', '«Частично» with a day for the rest: a dated r
   same([Q2.team.map((r) => [r.id, r.name, r.amt, r.date, r.carry || null]), Q2.team[1].paid.amt, states(K2, ['debt', 'debt2']), item(K2, 'debt').done.note, item(K2, 'debt').done.got, item(K2, 'debt2').day, item(K2, 'debt2').cash],
     [[['rB', 'Person B', 6000, '2026-10-20', null], ['debt', 'Person B — остаток с октября', 600, '2026-11-12', { ym: '2026-10' }], ['debt2', 'Person B — остаток с октября', 400, '2026-12-10', { ym: '2026-10' }]], 200, ['done', 'due'], 'partial', 200, '2026-12-10', -400],
     '«Частично» on the rest itself — 200 of the 600 on 12 Nov, the other 400 on 10 Dec: the new row keeps the name and the month the debt first came from — «Person B — остаток с октября», not «… — остаток с октября — остаток с ноября»');
+  const bare2 = (await wr(Q, 'partial', item(K, 'debt'), 200, 'debt3', ms('2026-11-12T11:00:00Z'), BY, '2026-11-12')).team.find((r) => r.id === 'debt3');
+  same([bare2.name, bare2.date, bare2.mon, bare2.carry], ['Person B — остаток с октября — остаток с ноября', '', '2026-12', { ym: '2026-11' }], '… (the hand called WITHOUT a day is the hand from before to the letter, on such a row too: no control of the page calls it so any more, and what a caller from before meant by it is kept)');
   // Money coming in: what a client still owes is expected on the day named.
   const a1 = filed('a1', '2026-10-28', 8000, 'rev', 'Client A', { b: 'Barclays', v: 1333.33, at: ms('2026-10-29T08:00:00Z') });
   const AI = await C(ledP({ tx: [a1] }), P, '2026-10-30');
@@ -3151,6 +3153,8 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   await holds(pg, '«По дням» with the rest', 'cash');
   // «частично» pressed in a row of the month opens the same question.
   await goCash(pg);
+  same([await pg.$eval(cs('team', 'rB@2026-11') + ' [data-ed-ask="part"]', (e) => e.title), (await text(pg, '#cs-plan')).includes('«Частично» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.')],
+    ['Оплачена часть: строка закроется на ней, остаток встанет отдельной строкой на день, который вы выберете', true], 'the button «частично» of a row says in its title what it does, and «Как читать» under the lists says the same: the rest stands on a day the founder chooses — neither speaks of the next month any more');
   await pg.click(cs('team', 'rB@2026-11') + ' [data-ed-ask="part"]');
   same([await pg.inputValue(PART), await text(pg, K('row') + '[data-ed-partnote]'), await pg.inputValue(REST)], ['', 'из £6,000', ''], '«частично» in a row of the month opens the row\'s card on the same question, empty where no payment has come — the sum and the day alike');
   await pg.fill(PART, '6000');
