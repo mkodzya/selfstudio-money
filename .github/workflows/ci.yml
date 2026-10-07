@@ -269,7 +269,20 @@ jobs:
           case "$RUNNER_TEMP" in
             /money/*) echo "::error::the copy must not live under /money/"; exit 1 ;;
           esac
-          PUB="$RUNNER_TEMP/pub" node scripts/money-checks.mjs
+          mkdir -p "$RUNNER_TEMP/shots"
+          PUB="$RUNNER_TEMP/pub" SHOTS="$RUNNER_TEMP/shots" node scripts/money-checks.mjs
+
+      # The checks take full-page pictures of the main states of the made-up
+      # studio when SHOTS is set. They are kept for three days, so that a
+      # change to the page can be looked at by eye without a browser at hand.
+      - name: The pictures of the screens
+        if: always() && steps.frozen.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-shots
+          path: ${{ runner.temp }}/shots
+          retention-days: 3
+          if-no-files-found: warn
 
   stand-smoke:
     name: stand-smoke

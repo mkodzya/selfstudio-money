@@ -3823,6 +3823,35 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
     await holds(pg, `«Касса · План», ${w}px`, 'cash');
     await calm(pg, `«Касса · План», ${w}px`, 'cash');
     if (tag !== 's') await shot(pg, tag === 'd' ? 'live-d-plan-oct' : 'live-m-plan');
+    if (tag === 'd') {
+      // A row's card opened under its row in the table. The table draws its own boxes small and as wide as their cells;
+      // none of that may reach into the card: there a tick box is a small square and every field is one height.
+      const ids = await pg.$$eval('#cs-sec-inflows tr[data-cs-id]', (l) => l.map((e) => e.dataset.csId));
+      let g = null;
+      for (const id of ids) {
+        await pg.click(cs('inflows', id) + ' .cs-mo [data-ed-open]');
+        await pg.waitForSelector('#view-cash tr.cs-edrow [data-ed-card="row"]');
+        g = await pg.$eval('#view-cash tr.cs-edrow [data-ed-card="row"]', (card) => {
+          const box = (e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; };
+          const mv = card.querySelector('.ed-mv');
+          return {
+            ticks: [...card.querySelectorAll('input[type=checkbox]')].map(box),
+            fields: [...card.querySelectorAll('.ed-grid .fld > input, .ed-grid .fld > select')].map((e) => box(e)[1]),
+            date: mv ? box(mv.querySelector('input'))[1] : 0,
+            arrows: mv ? [...mv.querySelectorAll('button')].map((b) => box(b)[1]) : [],
+            words: [...card.querySelectorAll('.ed-chk')].map((l) => box(l)[1]),
+          };
+        });
+        if (g.ticks.length === 2) break; // an income still expected: «+ VAT» and «каждый месяц»
+        await pg.click('#view-cash tr.cs-edrow [data-ed-card="row"] [data-ed-x]');
+        g = null;
+      }
+      ok(!!g && g.ticks.every(([bw, bh]) => bw <= 18 && bh <= 18), 'a row\'s card opened inside the table of «Касса»: «+ VAT» and «каждый месяц» are small tick boxes, not boxes as wide as a field', g && g.ticks);
+      ok(!!g && g.date > 0 && g.arrows.length === 2 && g.arrows.concat(g.fields).every((fh) => Math.abs(fh - g.date) <= 1), '… every field of that card is one height, the date and the two arrows beside it included', g);
+      ok(!!g && g.words.every((wh) => wh <= 48), '… and the words beside a tick box stay on a line or two: nothing squeezes them into a column', g && g.words);
+      await shot(pg, 'live-d-plan-row');
+      if (g) await pg.click('#view-cash tr.cs-edrow [data-ed-card="row"] [data-ed-x]');
+    }
     if (tag === 'd') { await toMonth(pg, '2026-11'); await shot(pg, 'live-d-plan-nov'); }
     await pg.click('#view-cash [data-cs-view="days"]');
     await pg.waitForSelector('#cs-stmt');
