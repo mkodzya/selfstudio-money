@@ -85,6 +85,11 @@ stops the run when `<checkout>/data` exists.
     `ctl purge-snapshots` there. Each of them replaces or deletes the real
     documents. `money-deploy-test` without `--reseed` leaves a stand that
     holds something alone.
+  - The lock is a file a person puts in the stand's data directory,
+    `/var/lib/money/test/REAL_DATA`: while it is there those four refuse, and
+    `money-deploy-test` backs the stand up before it deploys. A person makes
+    and removes it; a session does neither. Until it is there, only this rule
+    holds them back.
   - The fabricated studio (`scripts/money-demo.mjs`) lives in CI and on dev
     stands.
   - What this decision accepts, and what still protects the data on that
@@ -288,9 +293,12 @@ not a password on prod.
 The test stand was built to forget: seeded with the fabricated studio when it
 is empty, reseeded every night at 00:10 UTC, every snapshot purged. **Since
 8 October 2026 it does not forget**: it holds real data (see "Data rules"), so
-the nightly timer is switched off on the server, and `money-deploy-test` says
-so in a `WARNING` line at every deploy until the deploy commands learn of it.
-That warning is expected; switching the timer back on is not the answer to it.
+the nightly timer is switched off on the server. With the marker `REAL_DATA`
+in its data directory `money-deploy-test` backs the stand up first, seeds
+nothing, and warns when the reseed timer is on or the backup timer
+(`money-backup-test.timer`) is off. Without the marker it still prints the old
+`WARNING` that the timer is not switched on: switching the timer back on is
+not the answer to it.
 
 ## Before a change lands
 
