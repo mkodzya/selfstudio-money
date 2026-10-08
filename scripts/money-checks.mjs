@@ -4435,19 +4435,19 @@ await run('rv-acctnum', 'a statement row moves the account whose number it carri
   // Mika, 8 October 2026: a second Barclays account and Tochka's tax account, each with a statement of its own. The
   // plan told accounts apart by bank and currency alone, so every row of either statement moved the first of them:
   // the total was right and the split between the two was not.
-  const MAIN = { ...bal('Barclays', 'GBP', 1000, '2026-10-05'), ac: '4159' }, VAT = { ...bal('Barclays', 'GBP', 2500, '2026-10-05'), id: 'b-vat', name: 'Barclays — VAT', ac: '8457' };
+  const MAIN = { ...bal('Barclays', 'GBP', 1000, '2026-10-05'), ac: '0001' }, VAT = { ...bal('Barclays', 'GBP', 2500, '2026-10-05'), id: 'b-vat', name: 'Barclays — VAT', ac: '0002' };
   const rowOf = (id, amt, ac) => ({ ...filed(id, '2026-10-06', amt, 'fixed', 'Example', { b: 'Barclays' }), ...(ac ? { ac } : {}) });
-  const pg = await scene('two accounts, two numbers', ledA({ tx: [rowOf('m1', -100, '73414159'), rowOf('v1', -40, '83988457'), rowOf('n1', -7, '')] }), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), MAIN, VAT] }), { H: 60 });
+  const pg = await scene('two accounts, two numbers', ledA({ tx: [rowOf('m1', -100, '10000001'), rowOf('v1', -40, '10000002'), rowOf('n1', -7, '')] }), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), MAIN, VAT] }), { H: 60 });
   let S = await holds(pg, 'two Barclays accounts, each with its number');
   const ests = () => S.M.accounts.filter((a) => a.bank === 'Barclays').map((a) => [a.ac, a.est]);
-  same(ests(), [['4159', 893], ['8457', 2460]], '£100 on a row of account …4159 and £7 on a row that carries no number come off the first account; £40 on a row of …8457 comes off the second');
+  same(ests(), [['0001', 893], ['0002', 2460]], '£100 on a row of account …0001 and £7 on a row that carries no number come off the first account; £40 on a row of …0002 comes off the second');
   // The readers say whose statement a file is — Barclays in a column of its own — and the number goes with every row.
-  const BARC = 'Number,Date,Account,Amount,Subcategory,Memo\n ,06/10/2026,20-41-50 83988457,-60.00,PAYMENT,EXAMPLE SHOP\n';
-  same(await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'data barc.csv'); return [p.bank, p.acn]; }, BARC), ['Barclays', '20415083988457'], 'a Barclays file names its account in the column «Account», and the page reads the number off it');
-  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'data barc.csv'), 'data barc.csv'); }, BARC);
+  const BARC = 'Number,Date,Account,Amount,Subcategory,Memo\n ,06/10/2026,20-00-00 10000002,-60.00,PAYMENT,EXAMPLE SHOP\n';
+  same(await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'barclays.csv'); return [p.bank, p.acn]; }, BARC), ['Barclays', '20000010000002'], 'a Barclays file names its account in the column «Account», and the page reads the number off it');
+  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'barclays.csv'), 'barclays.csv'); }, BARC);
   await pg.click('.nav [data-tab="today"]');
   S = await holds(pg, 'a statement of the second account');
-  same(ests(), [['4159', 893], ['8457', 2400]], 'a payment that arrives in a statement of …8457 moves the second account and leaves the first where it was');
+  same(ests(), [['0001', 893], ['0002', 2400]], 'a payment that arrives in a statement of …0002 moves the second account and leaves the first where it was');
   // A founder writes the number in «Вписать остаток» — with or without a balance typed beside it.
   await pg.click('#view-today .td-acc summary');
   await pg.click('#view-today .td-accs [data-ed-bal]');
