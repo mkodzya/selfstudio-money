@@ -402,7 +402,10 @@ GitHub runner; that guard is a last line, not a permission.
   in the stand's container, not with `ssh -t`. The link it prints signs its
   holder in as a founder. Mika runs the line in a Terminal and passes each
   link to its founder, together with the login the command prints above it; a
-  session may write the line out for Mika to copy.
+  session may write the line out for Mika to copy - as plain text, never as a
+  block the app can run. Run from inside a conversation, the command prints
+  its link into the chat: that happened twice on 8 October 2026, and both
+  links had to be spent.
   (The tests issue links on throwaway dev stands in temporary directories;
   that is not this.)
 - **Secrets never pass through a chat.** A founder types a password only into
