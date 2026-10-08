@@ -14,14 +14,26 @@
 # Test only, and nothing is said on a machine where the test stand was never
 # set up.
 #
+# While the stand holds real documents - a person's marker,
+# /var/lib/money/test/REAL_DATA, says so - there is no night to complain
+# about: the reseed is switched off on purpose and refuses if it is run. Then
+# one line is said instead, at every login: this stand holds real data.
+#
 # Installed by linking, as /etc/update-motd.d/97-money-test-reseed:
 #   ln -sf /opt/money-dev/deploy/motd/97-money-test-reseed /etc/update-motd.d/
 set -eu
 
 DATA=/var/lib/money/test
 UNIT=money-test-reseed
+# A person's marker in the data directory: the documents are real
+# (moneyd/store.py, REAL_DATA_FILE).
+REAL_MARKER=REAL_DATA
 
 if [ ! -d "$DATA" ]; then
+  exit 0
+fi
+if [ -e "$DATA/$REAL_MARKER" ] || [ -L "$DATA/$REAL_MARKER" ]; then
+  printf '\n  \033[1;33mMoney (test) holds REAL data\033[0m (%s): it is not reseeded, and nothing there is fabricated.\n\n' "$DATA/$REAL_MARKER"
   exit 0
 fi
 if ! command -v systemctl >/dev/null 2>&1; then

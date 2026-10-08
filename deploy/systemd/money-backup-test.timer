@@ -1,0 +1,17 @@
+# Ten to four in the studio's own morning, not the server's.
+#
+# Written in the studio's timezone, like prod's backup, and ten minutes after
+# it (03:40 Yerevan), which is ten minutes after the platform's own (03:30):
+# the three never read the one disk at the same moment.
+
+[Unit]
+Description=Money — nightly backup of the test stand, 03:50 Yerevan
+
+[Timer]
+OnCalendar=*-*-* 03:50:00 Asia/Yerevan
+# If the machine was off at ten to four, run once it is back rather than
+# skipping the night in silence.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

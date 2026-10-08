@@ -138,14 +138,18 @@ def read(path):
 
 
 def files_under(directory):
-    """Every file below ``directory``: relative path -> content. Lock files are left out: taking a lock makes one."""
+    """Every file below ``directory``: relative path -> content. Lock files are left out: taking a lock makes one.
+    A link stands for where it points, whether or not anything is there."""
     found = {}
     for root, _directories, names in os.walk(directory):
         for name in names:
             if name.endswith(".lock"):
                 continue
             path = os.path.join(root, name)
-            found[os.path.relpath(path, directory)] = read(path)
+            if os.path.islink(path):
+                found[os.path.relpath(path, directory)] = b"-> " + os.fsencode(os.readlink(path))
+            else:
+                found[os.path.relpath(path, directory)] = read(path)
     return found
 
 
@@ -911,6 +915,133 @@ class PurgeTests(CtlCase):
 
 
 # ---------------------------------------------------------------------------
+# REAL_DATA: a person's marker, and what refuses beside it
+# ---------------------------------------------------------------------------
+
+#: What a person might write into the marker. Nothing reads it, so nothing may ever print it.
+MARKER_TEXT = b"the real ledger, since 8 October 2026 - MARKER-TEXT-OF-A-PERSON\n"
+
+
+class RealDataTests(CtlCase):
+    """``<data>/REAL_DATA`` says that the documents are real (``store.holds_real_data``).
+
+    The stand here is a dev stand that is served: without the marker every command below is
+    taken, which the last lines of each test show. So what refuses is the marker and nothing else.
+    """
+
+    def setUp(self):
+        super().setUp()
+        stand = self.stand
+        history(stand.data_dir, "ledger", [ledger(30), ledger(31), ledger(32)])       # two day copies
+        history(stand.data_dir, "plan", [plan(2), plan(3)])                           # one
+        self.marker = self.path(store.REAL_DATA_FILE)
+
+    def mark(self, how="words"):
+        """Put the marker there the ways a person might: with words in it, empty, or as a link to nowhere."""
+        if os.path.lexists(self.marker):
+            os.unlink(self.marker)
+        if how == "a link to nowhere":
+            os.symlink(self.path("no-such-file"), self.marker)
+        else:
+            write(self.marker, MARKER_TEXT if how == "words" else b"")
+
+    def test_the_name_is_real_data_in_the_root_of_the_data_directory(self):
+        self.assertEqual(store.REAL_DATA_FILE, "REAL_DATA")
+        self.assertEqual(self.marker, os.path.join(self.stand.data_dir, "REAL_DATA"))
+        self.assertFalse(store.holds_real_data(self.stand.data_dir))
+        self.mark()
+        self.assertTrue(store.holds_real_data(self.stand.data_dir))
+
+    def test_seed_is_2_beside_the_marker_and_nothing_is_read_or_written(self):
+        stand = self.stand
+        for how in ("words", "empty", "a link to nowhere"):
+            self.mark(how)
+            before = files_under(stand.data_dir)
+            names = sorted(os.listdir(stand.data_dir))
+            asked = len(stand.log_lines())
+            for arguments in (("seed", "ledger", "--fresh"), ("seed", "plan", "--fresh"), ("seed", "ledger")):
+                with self.subTest(marker=how, arguments=arguments):
+                    # As a process of its own for the marker a person would write; the same in this process for the rest.
+                    run = self.ctl if how == "words" else (lambda *args, text="": self.main(*args, typed=text))
+                    done = run(*arguments, text=ledger(1, note="MARKER-ON-STDIN"))
+                    self.assertEqual((done.status, done.out), (2, ""), done.said)
+                    self.assertIn("moneyd.ctl: refused: seed ", done.err)
+                    self.assertIn("the documents of this dev stand are real: %s is there." % self.marker, done.err)
+                    self.assertTrue(done.err.endswith("Nothing was read or written.\n"), done.err)
+                    self.assertNotIn("MARKER", done.said)
+                    self.assertNoTraceback(done)
+            self.assertEqual(files_under(stand.data_dir), before)
+            self.assertEqual(sorted(os.listdir(stand.data_dir)), names)
+            self.assertEqual(len(stand.log_lines()), asked, "the service was asked: a seed begins with a GET")
+        self.assertEqual((self.revision("ledger"), self.revision("plan")), (3, 2))
+        self.assertEqual(self.events("seed") + self.events("session-created"), [])
+        self.assertEqual(stand.auth.sessions.list(), [], "no session was made for a door that was never asked")
+        # the marker gone, the very same command is taken
+        os.unlink(self.marker)
+        taken = self.ctl("seed", "ledger", "--fresh", text=ledger(4))
+        self.assertEqual(taken.status, 0, taken.said)
+        self.assertEqual(self.revision("ledger"), 4)
+
+    def test_purge_snapshots_is_2_beside_the_marker_and_every_snapshot_stays(self):
+        stand = self.stand
+        self.mark()
+        before = files_under(stand.data_dir)
+        for days in ("0", "2", "36500"):
+            with self.subTest(days=days):
+                done = self.ctl("purge-snapshots", "--older-than-days", days)
+                self.assertEqual((done.status, done.out), (2, ""), done.said)
+                self.assertIn("moneyd.ctl: refused: purge-snapshots ", done.err)
+                self.assertIn("the documents of this dev stand are real: %s is there." % self.marker, done.err)
+                self.assertNotIn("MARKER-TEXT", done.said)
+                self.assertNoTraceback(done)
+        same = self.main("purge-snapshots", "--older-than-days", "0")
+        self.assertEqual((same.status, same.out), (2, ""))
+        self.assertEqual(files_under(stand.data_dir), before)
+        self.assertEqual((self.snapshots("ledger"), self.snapshots("plan")), (sorted(SNAPSHOTS), [SNAPSHOTS[1]]))
+        self.assertEqual(self.events("snapshots-purged"), [])
+        # the marker gone, the very same command is taken
+        os.unlink(self.marker)
+        taken = self.ctl("purge-snapshots", "--older-than-days", "0")
+        self.assertEqual((taken.status, taken.err), (0, ""), taken.said)
+        self.assertEqual((self.snapshots("ledger"), self.snapshots("plan")), ([], []))
+
+    def test_the_marker_stops_a_seed_and_a_purge_and_no_other_command(self):
+        # One document back from a snapshot is how a real ledger is repaired: it must go on working.
+        self.mark()
+        self.assertEqual(self.ctl("empty").status, 1)
+        self.assertEqual(self.ctl("snapshots", "ledger").status, 0)
+        self.assertEqual(self.ctl("user", "list").status, 0)
+        self.assertEqual(self.ctl("selfcheck").status, 0)
+        self.assertEqual(self.ctl("floor", "ledger", "0").status, 0)
+        restored = self.ctl("restore", "ledger", SNAPSHOTS[1], text="dev\n")
+        self.assertEqual(restored.status, 0, restored.said)
+        self.assertEqual(self.revision("ledger"), 4)
+        self.assertEqual(read(self.marker), MARKER_TEXT, "no command changes the marker")
+
+    def test_doctor_and_verify_name_the_marker_in_one_line_and_find_nothing_wrong_with_it(self):
+        stand = self.stand
+        line = "  REAL_DATA marker: there - the documents are real; seed and purge-snapshots are refused"
+        for arguments in (("doctor",), ("verify", stand.data_dir)):
+            without = self.main(*arguments)
+            self.assertEqual((without.status, without.err), (0, ""), without.said)
+            self.assertNotIn("REAL_DATA", without.out, "nothing is said of a marker that is not there")
+        for how in ("words", "empty", "a link to nowhere"):
+            self.mark(how)
+            before = files_under(stand.data_dir)
+            for arguments in (("doctor",), ("verify", stand.data_dir)):
+                with self.subTest(marker=how, arguments=arguments):
+                    done = (self.ctl if how == "words" else self.main)(*arguments)
+                    self.assertEqual((done.status, done.err), (0, ""), done.said)
+                    self.assertRegex(done.out, r"(doctor|verify): OK - nothing is wrong\n$")
+                    self.assertEqual([said for said in done.out.splitlines() if "REAL_DATA" in said], [line])
+                    self.assertLess(done.out.index("  STAND marker: dev\n"), done.out.index(line))
+                    self.assertNotIn("MARKER-TEXT", done.said)
+            self.assertEqual(files_under(stand.data_dir), before)
+        report = store.doctor(stand.data_dir, "dev")
+        self.assertEqual((report["realData"], report["problems"]), (True, []))
+
+
+# ---------------------------------------------------------------------------
 # verify, doctor: counts, never contents - and never a write
 # ---------------------------------------------------------------------------
 
@@ -1268,6 +1399,41 @@ class ServerStandTests(unittest.TestCase):
         self.assertEqual((purged.status, purged.err), (0, ""), purged.said)
         self.assertEqual(os.listdir(os.path.join(directory, "ledger", "snapshots")), [])
         self.assertEqual(store.DocStore(directory, "ledger").revision(), 3, "what is current is never purged")
+
+    def test_beside_the_real_data_marker_a_test_stand_refuses_both_with_2_and_touches_nothing(self):
+        # The test stand as it is since 8 October 2026: MONEY_STAND=test, and real documents under it.
+        environ, directory = self.stand("test")
+        marker = os.path.join(directory, store.REAL_DATA_FILE)
+        write(marker, MARKER_TEXT)
+        before = files_under(directory)
+        names = sorted(os.listdir(directory))
+        for arguments in (("seed", "ledger", "--fresh"), ("seed", "plan"), ("purge-snapshots", "--older-than-days", "0"),
+                          ("purge-snapshots", "--older-than-days", "2")):
+            with self.subTest(arguments=arguments):
+                done = run_ctl(environ, arguments, text=ledger(1, note="MARKER-ON-STDIN"), scrypt=True)
+                self.assertEqual((done.status, done.out), (2, ""), done.said)
+                self.assertIn("the documents of this test stand are real: %s is there." % marker, done.err)
+                self.assertIn("Nothing was read or written.", done.err)
+                self.assertNotIn("does not answer", done.err, "it went as far as the door")
+                self.assertNotIn("MARKER", done.said)
+                self.assertNotIn("Traceback", done.said)
+        self.assertEqual(files_under(directory), before)
+        self.assertEqual(sorted(os.listdir(directory)), names, "no log, no lock, no session: nothing at all")
+        self.assertFalse(os.path.exists(os.path.join(directory, "auth", "sessions.json")))
+        self.assertEqual(sorted(os.listdir(os.path.join(directory, "ledger", "snapshots"))), sorted(SNAPSHOTS))
+
+    def test_on_prod_the_marker_changes_nothing_prod_refuses_for_being_prod(self):
+        environ, directory = self.stand("prod")
+        write(os.path.join(directory, store.REAL_DATA_FILE), MARKER_TEXT)
+        before = files_under(directory)
+        for arguments in (("seed", "ledger", "--fresh"), ("purge-snapshots", "--older-than-days", "0")):
+            done = run_ctl(environ, arguments, text=ledger(1), scrypt=True)
+            self.assertEqual((done.status, done.out), (2, ""), done.said)
+            self.assertIn("test and dev only. This stand is prod.", done.err)
+        doctor = run_ctl(environ, ["doctor"], scrypt=True)
+        self.assertEqual((doctor.status, doctor.err), (0, ""), doctor.said)
+        self.assertIn("  REAL_DATA marker: there - ", doctor.out)
+        self.assertEqual(files_under(directory), before)
 
     def test_floor_and_retire_links_are_taken_on_prod_they_lose_nothing(self):
         # They are what a whole-stand restore of prod runs before the stand starts: nobody listens yet.

@@ -5,8 +5,9 @@
 # the security log. It survives a restart, a rebuild and `docker compose down
 # -v` — and is lost to one disk failure or one careless `rm`.
 #
-# Prod only. The test stand is a generated copy by definition and goes back to
-# the fabricated studio every night.
+# Prod only. The test stand is a generated copy by definition; for the time it
+# holds real documents instead it has a unit of its own,
+# money-backup-test.service.
 #
 # Installed by linking, never by copying, so the text that runs is the text in
 # the repository:

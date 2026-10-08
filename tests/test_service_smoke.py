@@ -38,7 +38,7 @@ from tests._harness import HELD, NEVER, PASSWORD, PATIENCE, ledger, plan, until
 LEDGER = "/api/founder/money"
 PLAN = "/api/founder/money/cash"
 INDEX = os.path.join(_harness.CHECKOUT, "index.html")
-BAND = "Тестовый стенд — выдуманная студия. Настоящие выписки сюда не загружать"
+BAND = "Тестовый стенд Money — проверка перед выпуском"
 
 #: The paths that answer for themselves without a session: these and no others.
 PUBLIC = (

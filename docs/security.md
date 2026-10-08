@@ -557,17 +557,31 @@ How to bring each of these back, or to begin one anew on purpose, is in
 | a stand on a name where the page would quietly keep data in the browser | `prod` and `test` refuse a public host that does not begin with `finance.` |
 | the ledger in an image | `.dockerignore` is an allow-list, and CI builds from a copy with decoys planted to prove it |
 | the ledger in git, or tests run beside it | `data/` is ignored; every test stops when `<checkout>/data` exists; a hygiene test looks for tracked data and ledger-sized JSON; no CI step writes to or removes a path called `data/` beside the code |
-| real statements on the test stand | it is filled only from the generator and reseeded every night at 00:10 UTC, and **every snapshot is purged after each successful reseed** — so anything put there is out of the document and out of every copy within a day, while the nights succeed; `/data` on test draws no upload control; `ctl seed` and `ctl purge-snapshots` refuse on prod; the test sign-in pages are dark and carry the band «Тестовый стенд — выдуманная студия. Настоящие выписки сюда не загружать» |
+| real statements on the test stand | **since 8 October 2026 the owner keeps them there on purpose**, for the rehearsal before prod (`docs/handoff.md`, «Настоящие данные на тестовом стенде»). What must not happen now is the reverse — see the next row. Until that day, and again once the stand returns to the fabricated studio: it is filled only from the generator and reseeded every night at 00:10 UTC, and **every snapshot is purged after each successful reseed** — so anything put there is out of the document and out of every copy within a day, while the nights succeed; `/data` on test draws no upload control; `ctl seed` and `ctl purge-snapshots` refuse on prod; the test sign-in pages are dark and carry the band «Тестовый стенд Money — проверка перед выпуском» |
+| the real documents on the test stand replaced by the fabricated studio, or their copies purged | a marker a person puts into the stand's data directory, `REAL_DATA` (`docs/deploy.md`, "The test stand's data"). Beside it `ctl seed` and `ctl purge-snapshots` refuse on every stand, before anything is read or written; `money-seed-test` — and so the nightly unit — refuses before the generator runs; `money-deploy-test --reseed` is refused before anything is touched, and a plain `money-deploy-test` seeds nothing and takes a backup first. A marker that cannot be looked at counts as there. The stand is backed up nightly (`money-backup test`) once its timer is switched on |
 | a prod backup unpacked onto test | `money-restore` restores prod's tarballs into prod only, and checks the tarball's own `STAND` marker; the rehearsal's copy of prod's data is served by a container without a network and removed afterwards, also when the run is interrupted |
 
-What remains a rule and not a lock: the page's own «Загрузить данные из
-файла» works on the test stand like anywhere else, and `ctl seed` reads its
-document from standard input, so a person with root ssh could pipe a real file
-into test. The nightly reseed bounds how long such a mistake lives, and the
-bound is only as good as the nights: a reseed that fails leaves the stand as it
-was for another day. A failed night is therefore said where people look — in a
-`WARNING` of the next test deploy and in the words at login — and a reseed
-that hangs is ended after fifteen minutes.
+What remains a rule and not a lock, on a stand that holds the fabricated
+studio: the page's own «Загрузить данные из файла» works on the test stand
+like anywhere else, and `ctl seed` reads its document from standard input, so
+a person with root ssh could pipe a real file into test. The nightly reseed
+bounds how long such a mistake lives, and the bound is only as good as the
+nights: a reseed that fails leaves the stand as it was for another day. A
+failed night is therefore said where people look — in a `WARNING` of the next
+test deploy and in the words at login — and a reseed that hangs is ended
+after fifteen minutes.
+
+And on a stand that holds real documents: the marker is a file, made and
+removed by hand, and root can remove it — the lock holds against a command
+typed by mistake and a timer left on, not against somebody who means to. It
+is not put there by itself either: a stand whose real documents nobody has
+marked is reseeded like any other. An upload through the page still replaces
+a document whole — it is an ordinary save, which keeps what it replaces only
+on the day's first save or when most rows go — and `ctl restore` is not
+refused. A script run by somebody who is not root cannot look into the data
+directory and does not see the marker; it is then `ctl` inside the container
+that refuses. The test stand's backups share the disk with its data, like
+prod's, and nothing says at login when they have stopped.
 
 ## Logs
 
@@ -614,7 +628,7 @@ aside holds its lines for the days since the backup. Its events:
 | `session-created`, `sessions-closed` | a session was created or closed from the server, not by signing in |
 | `user-disabled`, `user-enabled` | a login was switched off or on |
 | `sessions-damaged` | `sessions.json` could not be read and was moved aside |
-| `seed`, `snapshots-purged` | test and dev only: a document written by `ctl seed`; snapshots deleted |
+| `seed`, `snapshots-purged` | test and dev only, and never on a stand marked `REAL_DATA`: a document written by `ctl seed`; snapshots deleted. A seed or a purge that is refused leaves no line: it writes nothing at all |
 | `doc-shrunk` | a save dropped more than half of a document's rows (of more than 20). It names the snapshot that kept what was replaced: a `shrink-` copy, or the day's copy when that save was the first of its day |
 | `restore` | a snapshot was restored as a new revision |
 | `floor-raised` | the server was told that no revision of a document at or below a number may be given out again — after a stand was put back from a backup, or before the cut-over import |
@@ -695,9 +709,12 @@ and a request id; the detail is in the log.
    when a session is closed from the server. The page then stops saving, and
    what was typed after that moment is lost on the reload.
 7. **Backups share the disk with the data**, are not encrypted, and contain the
-   ledger and the password hashes. Nothing is off the host.
+   ledger and the password hashes. Nothing is off the host. That holds for the
+   test stand's tarballs too, for as long as it holds real documents.
 8. **Root ssh reads everything.** Any session with root on the server can read
-   `/var/lib/money/prod` and could run `invite`. Only rules stand in the way.
+   `/var/lib/money/prod` — and `/var/lib/money/test`, which holds the real
+   ledger since 8 October 2026 — could run `invite`, and could remove the
+   `REAL_DATA` marker. Only rules stand in the way.
 9. **The edge is the platform's.** Money's two proxy blocks live in the
    platform's `Caddyfile.edge`; a mistake in that file takes every name of both
    products down. `docs/deploy.md` has the guards.
@@ -732,9 +749,11 @@ and a request id; the detail is in the log.
 19. **A sign-out can fail on the server's side** (a full disk) while the
     browser is signed out; the session then stays open until it is closed
     there.
-20. **Detection is thin.** A stale backup and a failed test reseed are said at
-    login to whoever opens an ssh session. A flood of failed sign-ins is seen
-    only by someone who opens the security log or the `/data` page.
+20. **Detection is thin.** A stale backup of prod and a failed test reseed are
+    said at login to whoever opens an ssh session. A stale backup of the test
+    stand is said nowhere but in its journal; only a backup timer that is not
+    switched on is said, by the next test deploy. A flood of failed sign-ins
+    is seen only by someone who opens the security log or the `/data` page.
 21. **Not seen in a browser beyond CI's Chromium.** That a file handed over by
     `/data` downloads under the pages' policy, and that password managers file
     the login with the password on the set-password page, is checked only

@@ -1635,6 +1635,35 @@ class PurgeTests(StoreCase):
                 document.purge(0, stand)
         self.assertEqual(len(document.snapshots()), 1)
 
+    def test_beside_a_real_data_marker_no_copy_is_purged_on_the_stand_that_purges_every_night(self):
+        # Since 8 October 2026 the test stand holds the real ledger: its copies are copies of real documents.
+        document = self.ledger
+        document.save(0, ledger(60), "mika")
+        self.clock.tick(days=5)
+        document.save(1, ledger(60), "mika")                                # a day copy
+        document.save(2, ledger(2), "mika")                                 # a before-shrink copy
+        write_new(self.path("ledger", "current.json.damaged-20261002T101000Z"), b"what a restore moved aside")
+        marker = self.path(store.REAL_DATA_FILE)
+        journal = log.SecurityLog(self.dir, self.clock)
+        for content in (b"real, since 8 October 2026\n", b""):
+            write_new(marker, content)
+            kept, stored = self.kept(), read_file(document.path)
+            self.assertEqual(len(kept[1]), 2)
+            for days in (0, 2, 36500):
+                with self.subTest(days=days, marker=content):
+                    with self.assertRaises(store.Refused) as refused:
+                        self.open("ledger", security_log=journal).purge(days, "test")
+                    self.assertEqual((refused.exception.status, refused.exception.code), (403, "refused"))
+                    self.assertIn("REAL_DATA", refused.exception.message)
+                    self.assertIn("nothing was purged", refused.exception.message)
+            self.assertEqual((self.kept(), read_file(document.path)), (kept, stored))
+            self.assertEqual(read_file(marker), content, "the marker is looked for and never touched")
+            os.unlink(marker)
+        self.assertEqual([entry for entry in journal.tail(10) if entry["event"] == "snapshots-purged"], [])
+        # the marker gone, the same call purges as it always did
+        self.assertEqual(document.purge(0, "test"), 3)
+        self.assertEqual(self.kept(), (["EVER_SAVED", "current.json"], []))
+
 
 # ---------------------------------------------------------------------------
 # Restore: a new revision (design 1.4 "Restore"; BUILD-SPEC 2.8, 2.10)
@@ -2334,6 +2363,79 @@ class DataDirTests(unittest.TestCase):
                 before = tree(directory)
                 store.prepare_data_dir(directory, stand)
                 self.assertEqual(tree(directory), before)
+
+    def test_a_real_data_marker_is_a_file_a_person_put_there_whatever_it_holds(self):
+        directory = self.directory()
+        marker = os.path.join(directory, "REAL_DATA")
+        self.assertEqual(os.path.join(directory, store.REAL_DATA_FILE), marker)
+        self.assertFalse(store.holds_real_data(directory))
+        for what, put in (
+                ("a file with words", lambda: write_new(marker, b"the real ledger, since 8 October 2026\n")),
+                ("an empty file", lambda: write_new(marker, b"")),
+                ("bytes that are no text", lambda: write_new(marker, b"\xff\x00\xfe")),
+                ("a link to nowhere", lambda: os.symlink(os.path.join(directory, "no-such-file"), marker)),
+                ("a directory", lambda: os.mkdir(marker))):
+            with self.subTest(what=what):
+                put()
+                before = tree(directory)
+                self.assertTrue(store.holds_real_data(directory))
+                self.assertEqual(tree(directory), before, "looking for the marker changed something")
+                if os.path.isdir(marker) and not os.path.islink(marker):
+                    os.rmdir(marker)
+                else:
+                    os.unlink(marker)
+                self.assertFalse(store.holds_real_data(directory))
+        # a directory that is not there, or is no directory, holds nothing
+        self.assertFalse(store.holds_real_data(os.path.join(directory, "nowhere")))
+        write_new(os.path.join(directory, "a-file"), b"")
+        self.assertFalse(store.holds_real_data(os.path.join(directory, "a-file")))
+        # lower-case, or one level down, is not the marker
+        write_new(os.path.join(directory, "real_data.txt"), b"")
+        os.mkdir(os.path.join(directory, "ledger"))
+        write_new(os.path.join(directory, "ledger", "REAL_DATA"), b"")
+        self.assertFalse(store.holds_real_data(directory))
+
+    @unittest.skipIf(os.geteuid() == 0, "root looks into every directory")
+    def test_a_marker_that_cannot_be_looked_for_counts_as_there(self):
+        # Nothing is replaced or deleted on a guess: "I could not look" is not "it is not there".
+        directory = self.directory()
+        closed = os.path.join(directory, "data")
+        os.mkdir(closed)
+        os.chmod(closed, 0)
+        self.addCleanup(os.chmod, closed, 0o700)
+        self.assertTrue(store.holds_real_data(closed))
+        os.chmod(closed, 0o700)
+        self.assertFalse(store.holds_real_data(closed))
+
+    def test_a_stand_starts_and_runs_beside_the_marker_and_never_touches_it(self):
+        # The marker may be put there before the first start, and it is nobody's file but the person's.
+        for stand in config.STANDS:
+            with self.subTest(stand=stand):
+                directory = self.directory()
+                marker = os.path.join(directory, store.REAL_DATA_FILE)
+                write_new(marker, b"real\n")
+                kept = os.lstat(marker)
+                store.prepare_data_dir(directory, stand)                   # the first start
+                self.assertEqual(sorted(os.listdir(directory)), ["REAL_DATA", "STAND", "auth", "ledger", "plan"])
+                store.prepare_data_dir(directory, stand)                   # and a later one
+                document = store.DocStore(directory, "ledger", FakeClock())
+                self.assertEqual(document.save(0, ledger(3), "mika").rev, 1)
+                report = store.doctor(directory, stand)
+                self.assertEqual((report["realData"], report["problems"]), (True, []))
+                self.assertEqual(store.verify(directory)["problems"], [])
+                after = os.lstat(marker)
+                self.assertEqual((read_file(marker), after.st_mtime_ns, after.st_ino), (b"real\n", kept.st_mtime_ns, kept.st_ino))
+
+    def test_doctor_says_whether_the_marker_is_there_and_it_is_never_a_problem(self):
+        directory = self.directory()
+        self.assertFalse(store.doctor(os.path.join(directory, "nowhere"))["realData"])
+        store.prepare_data_dir(directory, "test")
+        for report in (store.doctor(directory, "test"), store.verify(directory)):
+            self.assertEqual((report["realData"], report["problems"]), (False, []))
+        write_new(os.path.join(directory, store.REAL_DATA_FILE), CANARY.encode("ascii"))
+        for report in (store.doctor(directory, "test"), store.verify(directory)):
+            self.assertEqual((report["realData"], report["problems"]), (True, []))
+            self.assertNotIn(CANARY, json.dumps(report, default=str), "what the marker holds is never read")
 
     def test_the_marker_is_the_last_thing_a_first_start_writes(self):
         # With the marker there, the three directories have been made - so one that is missing later was lost.

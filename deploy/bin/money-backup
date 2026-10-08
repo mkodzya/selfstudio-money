@@ -1,22 +1,27 @@
 #!/bin/sh
-# Take a backup of Money's PROD data directory.
+# Take a backup of the data directory of one of Money's stands.
 #
-#   money-backup
+#   money-backup            the PROD stand
+#   money-backup prod       the same
+#   money-backup test       the TEST stand - while it holds real documents
 #
-# Run every night by money-backup.timer (03:40 Yerevan) and by money-deploy
-# before every prod deploy. As root: the data directory is closed to everybody
-# but the container's user.
+# prod: run every night by money-backup.timer (03:40 Yerevan) and by
+# money-deploy before every prod deploy. test: run every night by
+# money-backup-test.timer (03:50 Yerevan) and by money-deploy-test before
+# every deploy of a test stand that holds real documents. As root: a data
+# directory is closed to everybody but the container's user.
 #
 # The directory is the only copy of the studio's money as the founders filed
 # it: two documents, the copy each day started with, the accounts and the
 # security log. A backup is one tarball of it,
 #
-#   /var/backups/money/money-prod-<utc>.tar.gz      mode 600, in a directory of mode 700
+#   /var/backups/money/money-<stand>-<utc>.tar.gz      mode 600, in a directory of mode 700
 #
 # without the open sessions (a restore signs everybody out, on purpose) and
 # without the half-written temporary files. The newest KEEP_DAYS (default 14)
-# are kept. Each tarball carries up to 90 day copies of each document, so the
-# tarballs reach further back than 14 days.
+# are kept, for each stand by itself: a run for one stand never removes a
+# tarball of the other. Each tarball carries up to 90 day copies of each
+# document, so the tarballs reach further back than 14 days.
 #
 # No stop and no lock are needed: Money never changes a file in place, every
 # file in the directory is replaced whole. `tar` may still see a file vanish
@@ -30,12 +35,27 @@
 #
 # Same disk as the data, not encrypted, and it holds the ledger and the
 # password hashes. Good against an emptied document, not against a dead disk.
-# The test stand is not backed up: it is a generated copy by definition.
+#
+# THE TEST STAND is a generated copy by definition, and a generated copy is
+# not backed up: `money-backup test` says so, writes nothing and ends with 0.
+# It is backed up only while a person's marker says its documents are real -
+#
+#   /var/lib/money/test/REAL_DATA
+#
+# (docs/deploy.md, "The test stand's data"). The marker is in the tarball, so
+# a directory unpacked from one is still marked. money-restore puts back
+# prod's tarballs only; a tarball of test is unpacked by hand.
+#
+# Exit status: 0 a backup was written, or there was nothing to back up; 2 a
+# wrong command line; anything else is a failure, and no file was written.
 set -eu
 umask 077
 
 OUT_DIR=/var/backups/money
 KEEP_DAYS="${KEEP_DAYS:-14}"
+# A person's marker in a data directory: the documents are real
+# (moneyd/store.py, REAL_DATA_FILE).
+REAL_MARKER=REAL_DATA
 
 die() {
   echo "money-backup: $*" >&2
@@ -54,18 +74,33 @@ while [ -L "$SELF" ]; do
 done
 ROOT=$(cd "$(dirname "$SELF")/../.." && pwd)
 
-if [ $# -ne 0 ]; then
-  echo "usage: money-backup" >&2
+usage() {
+  echo "usage: money-backup [prod|test]" >&2
   exit 2
-fi
+}
 
-DATA=$("$ROOT/deploy/stand.sh" prod get MONEY_DATA_HOST_DIR)
+if [ $# -gt 1 ]; then
+  usage
+fi
+STAND=${1-prod}
+case "$STAND" in
+  prod | test) ;;
+  *) usage ;;
+esac
+
+DATA=$("$ROOT/deploy/stand.sh" "$STAND" get MONEY_DATA_HOST_DIR)
 
 if [ ! -d "$DATA" ]; then
-  die "no data directory $DATA: is the prod stand set up on this machine?"
+  die "no data directory $DATA: is the $STAND stand set up on this machine?"
 fi
 if [ ! -r "$DATA" ] || [ ! -x "$DATA" ]; then
   die "cannot read $DATA: run this as root"
+fi
+# Asked only now, of a directory that can be looked into: "the marker is not
+# there" has to be something that was seen.
+if [ "$STAND" = test ] && [ ! -e "$DATA/$REAL_MARKER" ] && [ ! -L "$DATA/$REAL_MARKER" ]; then
+  echo "money-backup: the test stand holds the fabricated studio ($DATA/$REAL_MARKER is not there), so there is nothing to keep"
+  exit 0
 fi
 # A stand that has never started has nothing to lose yet, and an archive of an
 # empty directory would only look like a backup.
@@ -78,8 +113,8 @@ mkdir -p "$OUT_DIR"
 chmod 700 "$OUT_DIR"
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-PART=$OUT_DIR/.money-prod-$STAMP.tar.gz.part
-FINAL=$OUT_DIR/money-prod-$STAMP.tar.gz
+PART=$OUT_DIR/.money-$STAND-$STAMP.tar.gz.part
+FINAL=$OUT_DIR/money-$STAND-$STAMP.tar.gz
 
 # The half-written file goes however this ends: it holds the ledger and the
 # password hashes. After a good run it has its real name and is not there to
@@ -119,6 +154,7 @@ fi
 mv "$PART" "$FINAL"
 echo "$FINAL ($(du -h "$FINAL" | cut -f1))"
 
-find "$OUT_DIR" -name 'money-prod-*.tar.gz' -type f -mtime "+$KEEP_DAYS" -print -delete
+# This stand's own tarballs, and no other stand's.
+find "$OUT_DIR" -name "money-$STAND-*.tar.gz" -type f -mtime "+$KEEP_DAYS" -print -delete
 # What an interrupted run left behind a day or more ago.
-find "$OUT_DIR" -name '.money-prod-*.tar.gz.part' -type f -mtime +0 -delete
+find "$OUT_DIR" -name ".money-$STAND-*.tar.gz.part" -type f -mtime +0 -delete
