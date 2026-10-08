@@ -4475,16 +4475,51 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
   let S = await holds(pg, 'October\'s team, once more in November', 'cash');
   const g2 = S.P.team.find((r) => r.name === 'Person G' && r.id !== 'g');
   same([S.P.team.length, g2 && [g2.amt, g2.cur, g2.bank, g2.date, 'paid' in g2, 'rec' in g2, g2.on, g2.m.by], S.P.team.find((r) => r.id === 'g').date, await pg.$('#cs-sec-team [data-cs-dup]'), said],
-    [3, [1000, 'GBP', 'Wise', '2026-11-30', false, false, true, 'Mika'], '2026-10-31', null, 'Продублировано с октября: 1 строка'],
-    'the press writes Person G again as a row of November — the same sum, currency and bank, on the last day of the month where October had its 31st, not paid and not repeating — leaves October\'s row alone, and the button is gone: there is nothing left to bring');
+    [3, [0, 'GBP', 'Wise', '2026-11-30', false, false, true, 'Mika'], '2026-10-31', null, 'Продублировано с октября: 1 строка'],
+    'the press writes Person G again as a row of November — the name, the currency and the bank, on the last day of the month where October had its 31st, with no sum, not paid and not repeating — leaves October\'s row alone, and the button is gone: there is nothing left to bring');
+  // «Пустые суммы и только имена»: the box is empty, not a nought, and the row is in no figure until a sum is typed.
+  const out0 = S.fig('out');
+  same([await pg.$eval(box('team', g2.id, 'amt'), (e) => [e.value, e.placeholder]), S.M.items.find((it) => it.id === g2.id).state], [['', 'сумма'], 'empty'], 'its sum is an empty box that says «сумма», and the plan counts nothing for it yet');
+  await pg.fill(box('team', g2.id, 'amt'), '1100');
+  await leave(pg);
+  S = await holds(pg, 'the sum typed into the copied row', 'cash');
+  same([S.P.team.find((r) => r.id === g2.id).amt, round2(S.fig('out') - out0)], [1100, 1100], '£1,100 typed into it is this month\'s payment, and «Уйдёт» is larger by exactly that');
   await pg.click('#cs-sec-inflows [data-cs-dup]');
   await saved(pg);
   S = await holds(pg, '… and October\'s receipts', 'cash');
   const q2 = S.P.inflows.find((r) => r.name === 'Client Q' && r.id !== 'q');
-  same(q2 && [q2.amt, q2.date, q2.vat], [500, '2026-11-20', true], 'a receipt comes on the same day of the month, with the VAT its invoice carried');
+  same(q2 && [q2.amt, q2.date, q2.vat], [0, '2026-11-20', true], 'a receipt comes on the same day of the month, with the VAT its invoice carries and no sum');
   await pg.click('#toastUndo');
   await saved(pg);
   same(await pg.evaluate(() => window.__cash.state().inflows.map((r) => r.name)), ['Client A', 'Client Q'], '«Отменить» takes the copied rows back');
+  await finish(pg);
+});
+
+await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
+  // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
+  // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
+  // whose repeat ends with October (Person L).
+  const pg = await scene('the cross', ledA(), planW({ team: [row('g', 'Person G', 1000, '2026-10-08'), every('rL', 'Person L', 500, 15, '2026-10', { rec: { day: 15, from: '2026-10', to: '2026-10' } })] }), { H: 60 });
+  await pg.click('.nav [data-tab="cash"]');
+  const X = (id) => `#cs-sec-team tr[data-cs-id="${id}"] [data-ed-do="del"]`, team = () => pg.evaluate(() => window.__cash.state().team.map((r) => [r.id, r.rec && r.rec.x ? JSON.stringify(r.rec.x) : ''].join(' ')));
+  same([await pg.$$eval('#cs-sec-team tr[data-cs-id] [data-ed-do="del"]', (l) => l.length), await pg.$$eval('#cs-sec-taxes tr[data-cs-id] [data-ed-do="del"]', (l) => l.length)], [3, 0], 'every row a founder wrote ends with a cross; a tax the page works out has none — it is not a row to take away');
+  // a row of its own: gone at once
+  await pg.click(X('g'));
+  await saved(pg);
+  same([await team(), await toastText(pg), await pg.$('[data-ed-card="row"]')], [['rB ', 'rL '], 'Удалено: Person G', null], 'a row of its own goes with one press — no card, no «Точно удалить?» — and the page says «Удалено: Person G», with «Отменить»');
+  await pg.click('#toastUndo');
+  await saved(pg);
+  same((await team()).length, 3, '… which brings it back');
+  // the last month of a repeat is just a row of this month
+  await pg.click(X('rL@2026-10'));
+  await saved(pg);
+  same([(await team()).find((r) => r.startsWith('rL')), await pg.$('[data-ed-card="row"]')], ['rL {"2026-10":{"off":true}}', null], 'the last month of a repeating row goes the same way: there is no «и дальше» to ask about');
+  // a month of a repeat that goes on has two answers, so the press asks — under the row, as «ещё → Убрать» did
+  await pg.click(X('rB@2026-10'));
+  same([await pg.$$eval('[data-ed-card="row"] [data-ed-askbox="del"] [data-ed-go]', (l) => l.map((e) => [e.dataset.edGo, e.textContent.trim()].join(': '))), (await team()).find((r) => r.startsWith('rB'))], [['del-only: только октябрь', 'del-onward: октябрь и дальше'], 'rB '], 'a month of a row that repeats on is asked about first — «только октябрь» or «октябрь и дальше» — and nothing is written until the answer');
+  await pg.click('[data-ed-card="row"] [data-ed-go="del-only"]');
+  await saved(pg);
+  same((await team()).find((r) => r.startsWith('rB')), 'rB {"2026-10":{"off":true}}', '«только октябрь» takes October out of the repeat and leaves the months after it');
   await finish(pg);
 });
 
