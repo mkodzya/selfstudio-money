@@ -4475,13 +4475,20 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
   let S = await holds(pg, 'October\'s team, once more in November', 'cash');
   const g2 = S.P.team.find((r) => r.name === 'Person G' && r.id !== 'g');
   same([S.P.team.length, g2 && [g2.amt, g2.cur, g2.bank, g2.date, 'paid' in g2, 'rec' in g2, g2.on, g2.m.by], S.P.team.find((r) => r.id === 'g').date, await pg.$('#cs-sec-team [data-cs-dup]'), said],
-    [3, [1000, 'GBP', 'Wise', '2026-11-30', false, false, true, 'Mika'], '2026-10-31', null, 'Продублировано с октября: 1 строка'],
-    'the press writes Person G again as a row of November — the same sum, currency and bank, on the last day of the month where October had its 31st, not paid and not repeating — leaves October\'s row alone, and the button is gone: there is nothing left to bring');
+    [3, [0, 'GBP', 'Wise', '2026-11-30', false, false, true, 'Mika'], '2026-10-31', null, 'Продублировано с октября: 1 строка'],
+    'the press writes Person G again as a row of November — the name, the currency and the bank, on the last day of the month where October had its 31st, with no sum, not paid and not repeating — leaves October\'s row alone, and the button is gone: there is nothing left to bring');
+  // «Пустые суммы и только имена»: the box is empty, not a nought, and the row is in no figure until a sum is typed.
+  const out0 = S.fig('out');
+  same([await pg.$eval(box('team', g2.id, 'amt'), (e) => [e.value, e.placeholder]), S.M.items.find((it) => it.id === g2.id).state], [['', 'сумма'], 'empty'], 'its sum is an empty box that says «сумма», and the plan counts nothing for it yet');
+  await pg.fill(box('team', g2.id, 'amt'), '1100');
+  await leave(pg);
+  S = await holds(pg, 'the sum typed into the copied row', 'cash');
+  same([S.P.team.find((r) => r.id === g2.id).amt, round2(S.fig('out') - out0)], [1100, 1100], '£1,100 typed into it is this month\'s payment, and «Уйдёт» is larger by exactly that');
   await pg.click('#cs-sec-inflows [data-cs-dup]');
   await saved(pg);
   S = await holds(pg, '… and October\'s receipts', 'cash');
   const q2 = S.P.inflows.find((r) => r.name === 'Client Q' && r.id !== 'q');
-  same(q2 && [q2.amt, q2.date, q2.vat], [500, '2026-11-20', true], 'a receipt comes on the same day of the month, with the VAT its invoice carried');
+  same(q2 && [q2.amt, q2.date, q2.vat], [0, '2026-11-20', true], 'a receipt comes on the same day of the month, with the VAT its invoice carries and no sum');
   await pg.click('#toastUndo');
   await saved(pg);
   same(await pg.evaluate(() => window.__cash.state().inflows.map((r) => r.name)), ['Client A', 'Client Q'], '«Отменить» takes the copied rows back');

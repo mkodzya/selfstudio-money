@@ -1801,7 +1801,7 @@ const Cash=(()=>{
   const tick=ro?"":`<label class="cs-tap"><input type="checkbox" class="cs-chk" data-cs-f="on"${st==="off"?"":" checked"} aria-label="${name}: ждём в этом месяце"></label>`;
   const nm=ro||lockName?`<span class="cs-nt">${name||"(без названия)"}</span>`:`<input data-cs-f="name" value="${name}" list="cs-names-${k}" autocomplete="off" aria-label="Название">`;
   // A computed figure has a box nobody sees until it is typed into: it is only as wide as the figure.
-  const amt=ro?`<span class="cs-at">${figure}</span>`:`<span class="cs-am2"><input class="cs-amt" data-cs-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(sum)}"${soft?` style="width:${narrow(sum)}"`:""} aria-label="Сумма: ${name}"></span>`;
+  const amt=ro?`<span class="cs-at">${figure}</span>`:`<span class="cs-am2"><input class="cs-amt" data-cs-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${sum?esc(sum):""}" placeholder="сумма"${soft?` style="width:${narrow(sum)}"`:""} aria-label="Сумма: ${name}"></span>`;
   const cur=ro||lockCur?`<span class="cs-ct">${esc(it.cur)}</span>`:`<select data-cs-f="cur" aria-label="Валюта: ${name}">${opt(CURS.map(c=>[c,c]),it.cur)}</select>`;
   const date=ro?`<span class="cs-dd">${it.date?dRu(it.date):"—"}</span>`:`<input data-cs-f="date" type="date" max="${dAdd(M.T,731)}" value="${esc(it.date)}"${it.date?"":' class="cs-nodate"'} aria-label="Дата: ${name}">`;
   const bank=ro?`<span class="cs-bkn">${dot(it.bank)}${esc(it.bank)}</span>`:`<select data-cs-f="bank" aria-label="Банк: ${name}">${opt(BANKS.map(b=>[b,b]),it.bank)}</select>`;
@@ -1844,10 +1844,11 @@ const Cash=(()=>{
  }
  // «Продублировать с {октября}» stands under a list for what that list held the month before and this month does
  // not, by name: a row marked «каждый месяц» is here already, a tax the page works out comes by itself, and what
- // was left of a line paid in part belongs to the month it was owed in.
+ // was left of a line paid in part belongs to the month it was owed in. A row still waiting for its sum is brought
+ // too: it is a name on the list like any other.
  const prevYm=ym=>{const n=(+ym.slice(0,4))*12+(+ym.slice(5,7))-2;return Math.floor(n/12)+"-"+String(n%12+1).padStart(2,"0");};
  const dupOf=k=>{const have=new Set(mon(k).rows.map(id=>by[id]).filter(Boolean).map(it=>norm(it.name)));
-  return ((((M.months.by[prevYm(cu.month)]||{})[k]||{}).rows)||[]).map(id=>by[id]).filter(it=>it&&it.src!=="tax"&&!it.carry&&it.on!==false&&it.amt>0&&!have.has(norm(it.name)));};
+  return ((((M.months.by[prevYm(cu.month)]||{})[k]||{}).rows)||[]).map(id=>by[id]).filter(it=>it&&it.src!=="tax"&&!it.carry&&it.on!==false&&!have.has(norm(it.name)));};
  function section(k,adding){
   const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k);
   const body=rows.map(it=>{const card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td colspan="10">${card}</td></tr>`:"");}).join("")||'<tr class="cs-none"><td colspan="10" class="note">В этом месяце строк нет.</td></tr>';
@@ -2573,8 +2574,9 @@ const Cash=(()=>{
 //  add(P, list, row)               a new row. A tax with a founder in its name goes to `div` as ptax; an inflow gets
 //                                  vat as a boolean; a tax row gets of:false unless told otherwise. Returns the list
 //  dup(P, its, ym, ids, now, by)   «Продублировать с {октября}»: each line of `its` written again as a one-off row
-//                                  of the month `ym` on the same day of the month — the same name, sum, currency,
-//                                  bank and VAT; not paid, not repeating, of:false for a tax. Returns the rows
+//                                  of the month `ym` on the same day of the month — the same name, currency, bank
+//                                  and VAT, and no sum (amt 0); not paid, not repeating, of:false for a tax.
+//                                  Returns the rows
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it
 //  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
@@ -4044,12 +4046,14 @@ const Live=(()=>{
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});if(f){k="div";r.ptax=true;r.f=f;delete r.of;}else if(r.of===undefined)r.of=false;}
    r.blk=k==="div"?"div":BLOCKS[k].includes(r.blk)?r.blk:BLK0[k];if(k==="inflows")r.vat=r.vat===true;else delete r.vat;
    if(!Array.isArray(P[k]))P[k]=[];P[k].push(r);return k;},
-  // «Продублировать с {октября}»: lines of the month before, written again as rows of the month `ym` — the same
-  // name, sum, currency, bank and VAT, on the same day of the month. Each is a row of its own: not paid, not
-  // repeating, tied to no tax period, and a line that had no date is a row of `ym` without one. `its` are items of
-  // the model, `ids` the ids of the new rows. Returns the rows.
+  // «Продублировать с {октября}»: lines of the month before, written again as rows of the month `ym` — the name,
+  // the currency, the bank and the VAT, on the same day of the month, and NO SUM: who is paid and when repeats, how
+  // much is typed for each month (Mika, 8 October 2026: «пустые суммы и только имена»). A row without a sum is in
+  // no figure until it has one. Each is a row of its own: not paid, not repeating, tied to no tax period, and a line
+  // that had no date is a row of `ym` without one. `its` are items of the model, `ids` the ids of the new rows.
+  // Returns the rows.
   dup(P,its,ym,ids,now,by){return its.map((it,i)=>{const src=(P[it.list]||[]).find(x=>String(x.id)===String(it.row))||{},day=isD(it.date)?+it.date.slice(8):0;
-    const r={id:String(ids[i]),name:it.name,amt:it.amt,cur:it.cur,bank:it.bank,on:true,tag:"",info:false,date:day?dayIn(ym,day):"",c0:now,m:{t:now,by},blk:src.blk};
+    const r={id:String(ids[i]),name:it.name,amt:0,cur:it.cur,bank:it.bank,on:true,tag:"",info:false,date:day?dayIn(ym,day):"",c0:now,m:{t:now,by},blk:src.blk};
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
     if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}
     write.add(P,it.list,r);return r;});},
