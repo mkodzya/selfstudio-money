@@ -602,12 +602,15 @@ class DoorLimitTests(DoorCase):
 # Whole or not at all (design 1.4 "Atomic writes")
 # ---------------------------------------------------------------------------
 
-#: A writer that dies - os._exit, no cleanup - at a chosen step of a save. argv: directory, kind, when, base, doc.
-#: ``when`` is "before:<suffix>" or "after:<suffix>": the rename whose target ends with that suffix.
+#: A writer that dies - os._exit, no cleanup - at a chosen step of a save. argv: directory, kind, when, base, doc, now.
+#: ``when`` is "before:<suffix>" or "after:<suffix>": the rename whose target ends with that suffix. ``now`` is the
+#: test's own clock: a writer on the real one is on another day than the store it writes into on every day but
+#: 7 October 2026, and takes a day's copy the test did not ask for.
 DYING_WRITER = r'''
-import os, sys
+import datetime, os, sys
 from moneyd import store
 directory, kind, when, base, doc = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5]
+now = datetime.datetime.fromisoformat(sys.argv[6])
 moment, suffix = when.split(":", 1)
 rename = os.replace
 def dying(source, target, *rest, **more):
@@ -617,14 +620,15 @@ def dying(source, target, *rest, **more):
     if moment == "after" and target.endswith(suffix):
         os._exit(9)
 os.replace = dying
-store.DocStore(directory, kind).save(base, doc, "mika")
+store.DocStore(directory, kind, lambda: now).save(base, doc, "mika")
 os._exit(0)
 '''
 
 
 class AtomicTests(StoreCase):
     def die(self, when, base, doc, kind="ledger"):
-        done = subprocess.run([sys.executable, "-c", DYING_WRITER, self.dir, kind, when, str(base), doc], cwd=CHECKOUT,
+        done = subprocess.run([sys.executable, "-c", DYING_WRITER, self.dir, kind, when, str(base), doc,
+                               self.clock().isoformat()], cwd=CHECKOUT,
                               env=child_environ(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, timeout=60)
         self.assertEqual(done.returncode, 9, done.stderr.decode("utf-8", "replace"))

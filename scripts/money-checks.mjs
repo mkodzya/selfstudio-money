@@ -2085,12 +2085,25 @@ async function answer(pg, amt, day, enter = false) {
 await run('30 the shell', 'where the page opens, its tabs, a phone, midnight — and that opening it writes nothing', async () => {
   // `page` was opened at the top on the fabricated studio, whose «Разбор» holds four rows.
   same(await page.evaluate(() => [document.querySelector('.nav .active').dataset.tab, [...document.querySelectorAll('main > [id^="view-"]')].filter((e) => !e.hidden).map((e) => e.id), location.hash, document.querySelector('#inboxBadge').textContent]), ['today', ['view-today'], '', '4'], 'with four rows waiting in «Разбор» the page opens on «Сегодня», and puts nothing in the address');
-  same(await page.$$eval('.nav [data-tab]', (e) => e.map((x) => [x.firstChild.textContent.trim(), x.dataset.tab].join(' '))), ['Сегодня today', 'Касса cash', 'Разбор inbox', 'Загрузка upload', 'Месяцы dashboard', 'Отчёты reports', 'Таблица ledger', 'Настройки settings'], 'the tabs read Сегодня · Касса · Разбор · Загрузка · Месяцы · Отчёты · Таблица · Настройки, each under the id it had');
+  same(await page.$$eval('.nav [data-tab]', (e) => e.map((x) => [x.firstChild.textContent.trim(), x.dataset.tab].join(' '))), ['Сегодня today', 'Касса cash', 'Разбор inbox', 'Месяцы dashboard', 'Отчёты reports', 'Настройки settings'], 'the tabs read Сегодня · Касса · Разбор · Месяцы · Отчёты · Настройки, each under the id it had — «Загрузка» and «Таблица» are not in the bar');
   ok(/<a class="wordmark" href="#today" data-tab="today">/.test(fs.readFileSync(PUB + '/money/index.html', 'utf8')), 'the wordmark leads to «Сегодня» — on every name the page is served under: Money has no link to the studio\'s other product («rv-small» holds it on the running page)');
-  for (const t of ['cash', 'inbox', 'upload', 'dashboard', 'reports', 'ledger', 'settings', 'today']) {
+  for (const t of ['cash', 'inbox', 'dashboard', 'reports', 'settings', 'today']) {
     await page.click(`.nav [data-tab="${t}"]`);
     const vis = await page.evaluate(() => [[...document.querySelectorAll('main > [id^="view-"]')].filter((e) => !e.hidden).map((e) => e.id).join(), location.hash].join(' '));
     ok(vis === `view-${t} #${t}` && (await page.$eval('#view-' + t, (e) => e.innerText.trim().length)) > 20, `tab ${t} opens, alone, under #${t}, with something in it`, vis);
+  }
+  // «Загрузка» and «Таблица» are opened from «Настройки» (Mika, 8 October 2026): the three screens begin with one
+  // switch, and the bar keeps «Настройки» lit on each of them. Their addresses are as they were.
+  const here = () => page.evaluate(() => {
+    const v = [...document.querySelectorAll('main > [id^="view-"]')].filter((e) => !e.hidden), nav = v.length === 1 ? v[0].querySelector('.set-nav') : null;
+    return [v.map((e) => e.id).join(), location.hash, [...document.querySelectorAll('.nav .active, .nav [aria-current="page"]')].map((e) => e.dataset.tab).join(), nav ? [...nav.querySelectorAll('button')].map((b) => [b.textContent.trim(), b.dataset.tabgo, b.getAttribute('aria-pressed')].join(' ')) : null, !!nav && v[0].firstElementChild === nav, document.activeElement.dataset.tabgo || ''];
+  });
+  const sw = (on) => [['Общие', 'settings'], ['Загрузка выписок', 'upload'], ['Таблица', 'ledger']].map(([n, k]) => `${n} ${k} ${k === on}`);
+  await page.click('.nav [data-tab="settings"]');
+  same((await here()).slice(0, 5), ['view-settings', '#settings', 'settings', sw('settings'), true], '«Настройки» begins with a switch of its three screens: Общие · Загрузка выписок · Таблица');
+  for (const [t, h1, has] of [['upload', 'Загрузка выписок', '#drop'], ['ledger', 'Таблица', '.blocks'], ['settings', 'Настройки', '#ed-forecast']]) {
+    await page.click(`main > [id^="view-"]:not([hidden]) .set-nav [data-tabgo="${t}"]`);
+    same([await here(), await text(page, `#view-${t} h1`), await page.isVisible(`#view-${t} ${has}`)], [[`view-${t}`, `#${t}`, 'settings', sw(t), true, t], h1, true], `… «${h1}» opens from it: alone, under #${t}, «Настройки» still lit in the bar, the switch saying where one is and the keyboard left on it`);
   }
   await page.click('.nav [data-tab="dashboard"]');
   same([await text(page, '#view-dashboard h1'), await page.$eval('#periodSel', (e) => e.value), await text(page, '#view-dashboard .page-sub'), (await texts(page, '#view-dashboard .dash th')).find((x) => x.includes('идёт')), await page.$eval('#view-dashboard .dash a[data-tab]', (e) => e.dataset.tab)],
@@ -3735,6 +3748,29 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
   same([await h1.evaluate(() => [document.querySelector('.nav .active').dataset.tab, !!document.querySelector('#cs-plan')]), await h2.evaluate(() => [document.querySelector('.nav .active').dataset.tab, document.querySelector('#cs-cal').children.length > 7, location.hash])], [['cash', true], ['cash', true, '#cash-days']], '#cash in the address opens the tab on the month, #cash-days on the days');
   await h1.context().close();
   await h2.context().close();
+  // «Загрузка» and «Таблица» left the bar and kept their addresses: each opens under «Настройки».
+  const shown = (pg) => pg.evaluate(() => { const v = [...document.querySelectorAll('main > [id^="view-"]')].filter((e) => !e.hidden), on = v.length === 1 && v[0].querySelector('.set-nav [aria-pressed="true"]'); return [v.map((e) => e.id).join(), document.querySelector('.nav .active').dataset.tab, on ? on.dataset.tabgo : '', location.hash]; });
+  const h3 = await open('#ledger', undefined, { hash: '#ledger' });
+  const h4 = await open('#upload', undefined, { hash: '#upload' });
+  await h3.waitForSelector('#view-ledger .set-nav');
+  await h4.waitForSelector('#view-upload .set-nav');
+  same([await shown(h3), await shown(h4)], [['view-ledger', 'settings', 'ledger', '#ledger'], ['view-upload', 'settings', 'upload', '#upload']], '#ledger and #upload in the address still open «Таблица» and «Загрузка выписок» — with «Настройки» lit, where they now live');
+  await h3.context().close();
+  await h4.context().close();
+  // An empty studio: «Сегодня» and «Месяцы» send the founder to upload by a button — not by the name of a tab the bar
+  // no longer has — and «Таблица», with no row in it yet, still begins with the switch.
+  serve(ledger([]), null);
+  const e0 = await open('an empty studio');
+  await e0.click('#view-today .empty [data-tabgo="upload"]');
+  const fromToday = await shown(e0);
+  await e0.click('.nav [data-tab="dashboard"]');
+  const months = await text(e0, '#view-dashboard .empty');
+  await e0.click('#view-dashboard .empty [data-tabgo="upload"]');
+  const fromMonths = await shown(e0);
+  await e0.click('#view-upload .set-nav [data-tabgo="ledger"]');
+  same([fromToday, fromMonths, /вкладк/i.test(months), await shown(e0), await text(e0, '#view-ledger .empty b')], [['view-upload', 'settings', 'upload', '#upload'], ['view-upload', 'settings', 'upload', '#upload'], false, ['view-ledger', 'settings', 'ledger', '#ledger'], 'В таблице пока нет строк'],
+    'with nothing loaded «Загрузить выписки» on «Сегодня» and on «Месяцы» both open «Загрузка выписок»; «Месяцы» names no tab; an empty «Таблица» keeps the switch', months);
+  await e0.context().close();
   // with no server at all the plan is kept in the browser, as version 3
   const lf = await browser.newContext({ viewport: { width: 1320, height: 900 } }).then((c) => c.newPage());
   lf.on('pageerror', (e) => errs.push(`file: PAGEERROR ${e.message}`));
@@ -4439,6 +4475,9 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
       await pg.click('.nav [data-tab="settings"]');
       await pg.waitForSelector('#ed-taxes .ed-rule');
       await shot(pg, 'live-d-settings-taxes');
+      // The two screens «Настройки» opens, reached the way a founder reaches them — and back, for the check below.
+      for (const t of ['upload', 'ledger']) { await pg.click(`main > [id^="view-"]:not([hidden]) .set-nav [data-tabgo="${t}"]`); await shot(pg, `live-d-settings-${t}`); }
+      await pg.click('#view-ledger .set-nav [data-tabgo="settings"]');
     }
     ok((await pg.evaluate(() => document.documentElement.scrollWidth)) <= w, `${w}px: no tab of the three scrolls sideways`);
     await pg.context().close();

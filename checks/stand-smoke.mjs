@@ -540,10 +540,17 @@ const pill = (page) => page.evaluate(() => {
   const e = document.querySelector('#sync');
   return e ? { text: e.textContent, kind: e.className } : null;
 });
-// The page's own way in for statements: the file box of «Загрузка».
+// The page's own way in for statements: the file box of «Загрузка», which is opened from «Настройки» (until
+// 8 October 2026 it had a button of its own in the bar).
 async function statementBox(page) {
   const tab = page.locator('.nav [data-tab="upload"]');
+  const settings = page.locator('.nav [data-tab="settings"]');
   if (await tab.count()) await tab.first().click();
+  else if (await settings.count()) {
+    await settings.first().click();
+    const door = page.locator('main > [id^="view-"]:not([hidden]) [data-tabgo="upload"]');
+    if (await door.count()) await door.first().click();
+  }
   const box = await found(page, ['input[type="file"][accept*=".pdf"]', '#fileIn']);
   need(box, 'the page has a file box that takes statements (CSV, Excel, PDF)', await screen(page));
   return box;
