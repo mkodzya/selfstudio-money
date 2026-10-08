@@ -33,7 +33,7 @@ from unittest import mock
 from moneyd import __main__ as boot
 from moneyd import config, ctl, httpd
 from tests import _harness
-from tests._harness import PASSWORD, ledger, plan
+from tests._harness import HELD, NEVER, PASSWORD, PATIENCE, ledger, plan, until
 
 LEDGER = "/api/founder/money"
 PLAN = "/api/founder/money/cash"
@@ -60,16 +60,6 @@ FIXED = {
 def read(path):
     with open(path, "rb") as handle:
         return handle.read()
-
-
-def until(probe, seconds=3.0, every=0.02):
-    """Ask ``probe`` until it says something true, for ``seconds`` at most."""
-    deadline = time.monotonic() + seconds
-    while True:
-        value = probe()
-        if value or time.monotonic() > deadline:
-            return value
-        time.sleep(every)
 
 
 class StandCase(unittest.TestCase):
@@ -201,10 +191,11 @@ class PageFactsTests(unittest.TestCase):
         self.assertEqual(facts.inline_handlers, 1)
         self.assertEqual(facts.scripted_handlers, 2, "two templates with a handler; a property and a comparison are neither")
         self.assertEqual(facts.unknown_vendor, ("cmaps/x.bcmap", "pdf.worker.min.mjs"))
-        # A page of megabytes of script is read in a moment: the guess is bounded.
-        began = time.monotonic()
+        # A page of megabytes of script is read in a moment: the guess is bounded. A moment of this
+        # process's own work, that is - the clock on the wall also counts what the machine does for others.
+        began = time.process_time()
         httpd.inspect_page(("<script>" + "if(a<b){x=1;} " * 200000 + "</script>").encode("ascii"))
-        self.assertLess(time.monotonic() - began, 5.0)
+        self.assertLess(time.process_time() - began, 5.0)
 
 
 class HeaderLineTests(unittest.TestCase):
@@ -742,6 +733,7 @@ class PageScriptTests(unittest.TestCase):
 
     def test_a_replace_first_saves_what_it_replaces_and_replaces_nothing_without_that_copy(self):
         page = self.web().render("data", firstName="Mika", entries="[]")
+        began = datetime.date.today()
         out = self.run_page(page, self.DOORS + r"""
           const NEW = '{"tx":[{"id":"n"}],"note":"новый"}';
           input.files = [file('new.json', NEW)]; await input.fire('change');
@@ -772,7 +764,9 @@ class PageScriptTests(unittest.TestCase):
           return { asked: asked, replaced: replaced, moved: moved, uncopied: uncopied,
                    fresh: { keeps: first, saved: saved.slice(), puts: puts.slice(), done: shown('data-done') } };
         """, path="/data")
-        kept = "money-ledger-before-replace-%s.json" % datetime.date.today().isoformat()
+        # The page names the copy after its own today, which is this test's unless midnight came in between.
+        names = ["money-ledger-before-replace-%s.json" % day.isoformat() for day in (began, datetime.date.today())]
+        kept = names[0] if names[0] in out["asked"]["keeps"] else names[1]
         self.assertTrue(out["asked"]["panel"])
         self.assertIn("Перед ней страница сама скачает то, что сейчас на сервере", out["asked"]["keeps"])
         self.assertIn(kept, out["asked"]["keeps"])
@@ -1355,7 +1349,24 @@ class RefusalTests(StandCase):
         body = json.dumps({"base": 0, "doc": ledger()}).encode("utf-8")
         head = self.head("PUT", LEDGER, "Content-Type: application/json", "Origin: " + stand.origin,
                          "Content-Length: %d" % len(body), "Expect: 100-continue", cookie=cookie)
-        answer = stand.raw(head, pause=0.2, then=body, half_close=True)
+        # The body is sent when the server has said "go on", and not a moment earlier: it says so
+        # without having seen a byte of it.
+        connection = socket.create_connection(("127.0.0.1", stand.port), timeout=PATIENCE)
+        self.addCleanup(connection.close)
+        connection.sendall(head)
+        answer = b""
+        while len(answer) < 25:
+            more = connection.recv(4096)
+            self.assertTrue(more, "the connection was closed before the body was asked for: %r" % answer[:80])
+            answer += more
+        self.assertEqual(answer, b"HTTP/1.1 100 Continue\r\n\r\n")
+        connection.sendall(body)
+        connection.shutdown(socket.SHUT_WR)
+        while True:
+            more = connection.recv(65536)
+            if not more:
+                break
+            answer += more
         self.assertTrue(answer.startswith(b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 "), answer[:80])
         refused = stand.raw(self.head("PUT", LEDGER, "Content-Type: application/json", "Origin: https://evil.example",
                                       "Content-Length: %d" % len(body), "Expect: 100-continue", cookie=cookie))
@@ -1511,54 +1522,70 @@ class AddressTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class LimitsTests(unittest.TestCase):
+    """What is held here is held until the test lets go of it (``HELD``), and what a test asks next it asks
+    when the server holds what was sent before - never straight after sending it: the next request is
+    served by another thread, and may reach a limit first."""
+
     def hold(self, stand, data=b""):
         """A connection that stays open, having sent ``data``."""
-        connection = socket.create_connection(("127.0.0.1", stand.port), timeout=5)
+        connection = socket.create_connection(("127.0.0.1", stand.port), timeout=PATIENCE)
         self.addCleanup(connection.close)
         if data:
             connection.sendall(data)
         return connection
 
-    def half_a_sign_in(self, stand, forwarded=None):
+    def half_a_sign_in(self, stand, forwarded=None, length=40):
         """The head of a sign-in whose body never comes: it holds a signed-out slot until its deadline."""
         lines = ["POST /api/auth/login HTTP/1.1", "Host: " + stand.host, "Origin: " + stand.origin,
-                 "Content-Type: application/json", "Content-Length: 40"]
+                 "Content-Type: application/json", "Content-Length: %d" % length]
         if forwarded:
             lines.append("X-Forwarded-For: " + forwarded)
         return ("\r\n".join(lines) + "\r\n\r\n").encode("ascii")
 
+    def said(self, connection):
+        """What the server says on this connection before it hangs up: b"" when it hangs up without a word
+        (a reset is that too). Its hanging up is what ends the wait; a server that keeps the connection
+        fails the test with a timeout."""
+        try:
+            return connection.recv(4096)
+        except ConnectionError:
+            return b""
+
     def test_a_body_that_misses_its_deadline_is_cut_without_an_answer(self):
         with _harness.Stand(tune={"auth_body_deadline": 0.3}) as stand:
+            # The server hangs up while this test still waits, and it waits less than the 30 seconds
+            # after which a caller who says nothing at all is let go of anyway.
+            self.assertLess(PATIENCE, stand.settings.socket_timeout)
             began = time.monotonic()
-            answer = stand.raw(self.half_a_sign_in(stand) + b'{"login":', timeout=5)
-            self.assertEqual(answer, b"")
-            self.assertLess(time.monotonic() - began, 2.0)
+            connection = self.hold(stand, self.half_a_sign_in(stand) + b'{"login":')
+            self.assertEqual(self.said(connection), b"")
+            self.assertGreater(time.monotonic() - began, 0.25, "it was cut before its deadline")
             line = until(lambda: [entry for entry in stand.log_lines() if entry.get("path") == "/api/auth/login"])
             self.assertEqual([entry["status"] for entry in line], [408])
-            # A body that trickles in is cut at the same moment: the deadline is for all of it.
-            connection = self.hold(stand, self.half_a_sign_in(stand))
-            began = time.monotonic()
-            try:
-                for _byte in range(20):
+            # A body that trickles in is cut all the same: the deadline is for all of it, not for each
+            # read. A byte every twentieth of a second: the 4000 announced would take three minutes.
+            connection = self.hold(stand, self.half_a_sign_in(stand, length=4000))
+            connection.settimeout(0.05)
+            began, cut = time.monotonic(), False
+            while not cut and time.monotonic() - began < PATIENCE:
+                try:
                     connection.sendall(b" ")
-                    time.sleep(0.05)
-            except OSError:
-                pass
-            connection.settimeout(3)
-            try:
-                self.assertEqual(connection.recv(100), b"")
-            except ConnectionError:
-                pass
-            self.assertLess(time.monotonic() - began, 2.5)
+                    self.assertEqual(connection.recv(100), b"", "a body that was still on its way was answered")
+                    cut = True
+                except socket.timeout:
+                    pass
+                except OSError:
+                    cut = True
+            self.assertTrue(cut, "a body that never stops trickling was never cut")
 
     def test_strangers_with_a_body_work_within_their_slots_and_nobody_waits_behind_them(self):
-        with _harness.Stand(tune={"signed_out_slots": 2, "auth_body_deadline": 5.0}) as stand:
+        with _harness.Stand(tune=dict(HELD, signed_out_slots=2)) as stand:
             cookie = stand.session()
             held = [self.hold(stand, self.half_a_sign_in(stand)) for _slot in range(2)]
+            self.assertTrue(until(lambda: stand.server.signed_out() == 2), "the two stalled sign-ins were not let in")
             # With both slots taken, a stranger who brings a body is turned away at once ...
-            busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.post("/api/auth/login", {})))
-            self.assertIsNotNone(busy, "with both slots taken a stranger's body is turned away at once")
-            self.assertEqual(busy.json()["error"], "busy")
+            busy = stand.post("/api/auth/login", {})
+            self.assertEqual((busy.status, busy.json()["error"]), (503, "busy"))
             self.assertEqual(busy.header("Retry-After"), "1")
             self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}).status, 503)
             # ... and one who brings none is answered: such a request cannot stall, so it takes no slot.
@@ -1572,14 +1599,15 @@ class LimitsTests(unittest.TestCase):
             self.assertEqual(stand.get("/", cookie=cookie).status, 200)
             self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json(), {"rev": 1})
             self.assertEqual(stand.get("/healthz").status, 200)
+            self.assertEqual(stand.server.signed_out(), 2, "all of it was answered while both of them still stalled")
             for connection in held:
                 connection.close()
-            self.assertTrue(until(lambda: stand.post("/api/auth/login", {}).status == 400))
             self.assertTrue(until(lambda: stand.server.signed_out() == 0))
+            self.assertEqual(stand.post("/api/auth/login", {}).status, 400)
 
     def test_one_address_holds_two_of_the_eight_slots_and_everybody_else_gets_in(self):
         env = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}
-        with _harness.Stand(env=env, tune={"auth_body_deadline": 5.0}) as stand:
+        with _harness.Stand(env=env, tune=HELD) as stand:
             token = stand.invite("misha")
             held = [self.hold(stand, self.half_a_sign_in(stand, "203.0.113.7")) for _connection in range(2)]
             self.assertTrue(until(lambda: stand.server.signed_out("203.0.113.7") == 2))
@@ -1590,56 +1618,71 @@ class LimitsTests(unittest.TestCase):
             # Another address signs in through the link - the way out of a lock-out - while the first stalls.
             self.assertEqual(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}, headers=other).status, 200)
             self.assertEqual(stand.get("/login", headers=mine).status, 200, "and a page is no body: even the address itself gets it")
+            self.assertEqual(stand.server.signed_out("203.0.113.7"), 2)
             for connection in held:
                 connection.close()
             self.assertTrue(until(lambda: stand.server.signed_out("203.0.113.7") == 0))
             self.assertEqual(stand.post("/api/auth/login", {}, headers=mine).status, 400)
 
     def test_no_thread_free_is_a_bare_503(self):
-        with _harness.Stand(tune={"max_connections": 3}) as stand:
+        # Three threads, each kept by a caller that says nothing - for as long as the test wants, not for 30 seconds.
+        with _harness.Stand(tune={"max_connections": 3, "socket_timeout": NEVER}) as stand:
             held = [self.hold(stand) for _thread in range(3)]
-            refused = until(lambda: (lambda a: a if a.startswith(b"HTTP/1.1 503 ") else None)(
-                stand.raw(b"", half_close=True)))
-            self.assertIsNotNone(refused)
+            self.assertTrue(until(lambda: stand.server.connections() == 3))
+            refused = stand.raw(b"", half_close=True)
+            self.assertTrue(refused.startswith(b"HTTP/1.1 503 "), refused[:80])
             self.assertTrue(refused.endswith(b"\r\n\r\n"), "no body")
             self.assertIn(b"Content-Length: 0\r\n", refused)
             for connection in held:
                 connection.close()
+            # Asking is what shows a thread free again, and asking in vain takes nothing: it may be repeated.
             self.assertTrue(until(lambda: stand.raw(b"", half_close=True) == b"" and stand.get("/login").status == 200))
             self.assertTrue(until(lambda: [line for line in stand.log_lines() if line.get("event") == "overload"]))
 
     def test_twelve_connections_per_client_address(self):
         env = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}
-        with _harness.Stand(env=env, tune={"max_connections_per_address": 2, "auth_body_deadline": 5.0}) as stand:
+        with _harness.Stand(env=env, tune=dict(HELD, max_connections_per_address=2)) as stand:
             held = [self.hold(stand, self.half_a_sign_in(stand, "203.0.113.7")) for _connection in range(2)]
             mine = {"X-Forwarded-For": "203.0.113.7"}
-            third = until(lambda: (lambda a: a if a.status == 503 else None)(stand.get("/login", headers=mine)))
-            self.assertIsNotNone(third)
-            self.assertEqual(third.json()["error"], "too_many_connections")
+            self.assertTrue(until(lambda: stand.counted("203.0.113.7") == 2), "the two stalled requests were not let in")
+            third = stand.get("/login", headers=mine)
+            self.assertEqual((third.status, third.json()["error"]), (503, "too_many_connections"))
             self.assertEqual(stand.get("/login", headers={"X-Forwarded-For": "203.0.113.8"}).status, 200)
             for connection in held:
                 connection.close()
-            self.assertTrue(until(lambda: stand.get("/login", headers=mine).status == 200))
+            self.assertTrue(until(lambda: stand.counted("203.0.113.7") == 0))
+            self.assertEqual(stand.get("/login", headers=mine).status, 200)
 
     def test_stop_lets_a_request_finish_and_cuts_what_is_idle(self):
-        stand = _harness.Stand(tune={"auth_body_deadline": 5.0})
+        stand = _harness.Stand(tune=HELD)
         self.addCleanup(stand.stop)
         idle = self.hold(stand)
         body = json.dumps({"login": "mika", "password": "x" * 12}).encode("ascii")
-        busy = self.hold(stand, self.half_a_sign_in(stand).replace(b"Content-Length: 40", b"Content-Length: %d" % len(body)))
+        busy = self.hold(stand, self.half_a_sign_in(stand, length=len(body)))
         server = stand.server
         self.assertTrue(until(lambda: server.connections() == 2 and server.in_flight() == 1))
-        began = time.monotonic()
-        finisher = threading.Timer(0.3, lambda: busy.sendall(body))
+        # The request in flight gets its body once the stop is under way - and that is known the moment
+        # the idle connection is cut: a stop cuts what is idle first, and waits for the rest after.
+        seen = []
+
+        def finish():
+            try:
+                seen.append(self.said(idle))
+                busy.sendall(body)
+            except OSError as error:
+                seen.append(error)
+
+        finisher = threading.Thread(target=finish, daemon=True)
         finisher.start()
-        self.addCleanup(finisher.cancel)
-        cut = server.stop(grace=5.0)
+        grace = 2 * PATIENCE
+        began = time.monotonic()
+        cut = server.stop(grace=grace)
+        waited = time.monotonic() - began
+        finisher.join(PATIENCE)
+        self.assertEqual(seen, [b""], "what was idle was not cut, and said nothing")
         self.assertEqual(cut, 0, "the request in flight was let to finish")
-        self.assertLess(time.monotonic() - began, 3.0)
-        busy.settimeout(3)
+        self.assertLess(waited, grace, "the stop came back when the request was over, not when its grace was")
         self.assertTrue(busy.recv(4096).startswith(b"HTTP/1.1 401 "))
-        idle.settimeout(3)
-        self.assertEqual(idle.recv(100), b"")
         with self.assertRaises(OSError):
             socket.create_connection(("127.0.0.1", stand.port), timeout=1).close()
 

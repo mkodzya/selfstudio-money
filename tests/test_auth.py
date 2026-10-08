@@ -20,6 +20,7 @@ second, and that only to keep a password hash busy while a burst piles up behind
 """
 from tests import _safety  # noqa: F401  - first: no test runs beside a ledger
 
+import dataclasses
 import datetime
 import errno
 import hashlib
@@ -37,7 +38,7 @@ from unittest import mock
 
 from moneyd import auth, config, log, store
 from tests import _harness
-from tests._harness import PASSWORD, ledger
+from tests._harness import NEVER, PASSWORD, PATIENCE, ledger
 
 MIB = 1024 * 1024
 HAS_SCRYPT = hasattr(hashlib, "scrypt")
@@ -52,8 +53,10 @@ LEDGER = "/api/founder/money"
 EDGE = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}
 #: Room for a burst of fifty connections at once, so that only the limiter stands in its way: one
 #: address may hold only two signed-out bodies by default (docs/security.md, "Signed-out slots").
+#: And time for it: fifty at once take their turns at the two hash slots, and on a machine that is busy
+#: elsewhere the last in the line is not told "busy" after five seconds of waiting.
 ROOMY = {"signed_out_slots": 64, "signed_out_body_slots_per_address": 64,
-         "max_connections": 64, "max_connections_per_address": 64}
+         "max_connections": 64, "max_connections_per_address": 64, "hash_wait": NEVER}
 
 INVALID = b'{"error":"invalid_credentials","message":"That login and password do not match."}'
 WRONG = "not the password, not at all"
@@ -157,12 +160,14 @@ class AuthCase(unittest.TestCase):
     """``auth.Auth`` on a temporary directory with a dev stand's settings and a clock the test moves."""
 
     env = {}
+    tune = {}       # fields of the settings to replace, as ``Stand(tune=...)`` does
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="money-test-")
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.clock = _harness.FakeClock()
-        self.settings = config.Settings.from_env(_harness.dev_environ(self.dir, 8123, **self.env), self.clock)
+        self.settings = dataclasses.replace(
+            config.Settings.from_env(_harness.dev_environ(self.dir, 8123, **self.env), self.clock), **self.tune)
         store.prepare_data_dir(self.dir, "dev")
         self.security = log.SecurityLog(self.dir, self.clock)
         self.auth = auth.Auth(self.settings, self.clock, self.security)
@@ -684,6 +689,10 @@ class LimiterTests(AuthCase):
 class BurstTests(AuthCase):
     """BUILD-SPEC 2.4: checked and counted under one lock before the hash - a burst gets no more hashed than the limit."""
 
+    #: Fifty at once take their turns at the two hash slots. What is counted here is who was let to a
+    #: slot at all, so nobody in the line is told "busy" because the machine took five seconds over it.
+    tune = {"hash_wait": NEVER}
+
     def burst(self, attempts, hold=0.004):
         with CountedHash(hold=hold) as hashes:
             outcomes = all_at_once([
@@ -840,7 +849,9 @@ class HashSlotTests(unittest.TestCase):
             with stand.auth.limiter.hash_slot(), stand.auth.limiter.hash_slot():
                 answers = [stand.post(LOGIN, {"login": "mika", "password": PASSWORD}) for _attempt in range(12)]
                 link = stand.post(SETUP, {"token": stand.invite("vanya"), "password": PASSWORD})
-            self.assertLess(time.monotonic() - began, 4.0, "the wait is bounded")
+            # Thirteen waits of a fiftieth of a second. Five seconds each - the wait of a stand that is not
+            # tuned - would be a minute; a wait without an end would fail the request itself.
+            self.assertLess(time.monotonic() - began, PATIENCE, "the wait is bounded, and it is this stand's own")
             for answer in answers + [link]:
                 self.assertEqual((answer.status, answer.json()["error"]), (503, "busy"))
                 self.assertEqual(answer.all("Set-Cookie"), [])

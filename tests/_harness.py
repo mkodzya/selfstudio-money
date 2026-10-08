@@ -11,6 +11,7 @@ Two ways to have one, with the same doors on both::
         stand.put("/api/founder/money", {"base": 0, "doc": _harness.ledger(3)}, cookie=cookie)
         stand.clock.tick(days=29)                # sessions, links and day copies follow this clock
         stand.ctl("user", "list")                # moneyd.ctl in this process, on this stand's data
+        _harness.until(lambda: stand.server.signed_out() == 2)      # wait for what is on its way, not for a while
 
     with _harness.ProcessStand() as stand:       # the real thing: `python -m moneyd` as a child process
         stand.ctl("empty").returncode            # `python -m moneyd.ctl` as another one
@@ -23,8 +24,12 @@ Two ways to have one, with the same doors on both::
 
 What is here
     ``FakeClock``                 a clock that stands still until the test moves it (``tick``, ``set``)
+    ``until(probe)``              ask until the answer is true: how a test waits for what another thread is doing
+    ``PATIENCE``, ``NEVER``       how long such a wait may last before it is a failure (25 s), and a deadline
+                                  that does not come while a test runs (600 s). See "Time" below
     ``free_port()``               a loopback port nobody listens on
     ``dev_environ(dir, port)``    the ``MONEY_*`` settings of a dev stand; ``Stand(env={...})`` changes them
+    ``HELD``                      ``Stand(tune=HELD)``: a body that never comes is waited for until the test hangs up
     ``Stand(clock=, env=, tune=)``  ``tune`` replaces fields of the settings (``{"signed_out_slots": 1}``).
                                   Without a trusted proxy every request of a test comes from one address,
                                   127.0.0.1, which may hold two signed-out slots: a test that stalls more
@@ -40,6 +45,26 @@ What is here
 
 Nothing is left behind: ``stop()`` (or leaving the ``with``) removes the directory and ends the
 process, and whatever a failing test forgot is cleaned up when the interpreter exits.
+
+Time
+    A test must give the same verdict on a laptop and on a shared CI runner that stops for a
+    second now and then. Three rules keep it so:
+
+    * The date is the test's. ``FakeClock`` stands on 7 October 2026 whatever the day is, and
+      a process a test starts beside such a clock is given that clock (as an argument: the
+      child cannot read this process's). A stand that has to share the real clock with a
+      child - ``ProcessStand``, or ``Stand(clock=config.utcnow)`` - reads it on both sides.
+    * What is on its way is waited for by asking for it - ``until(...)``, an answer read off
+      a socket - never by sleeping, and never by sending the next request and hoping that the
+      one before it was taken in first: two connections are served by two threads, and which
+      of them reaches a limit first is the scheduler's choice. ``stand.server.signed_out()``,
+      ``stand.counted()``, ``connections()`` and ``in_flight()`` say what the server holds.
+    * A wait is ``PATIENCE`` long, which nobody sees while the tests pass, and what a test
+      holds open is held under ``NEVER``: a stand whose stalled requests have to stay stalled
+      is tuned so (``HELD``), and the test ends them itself, by closing their connections.
+      Where a test is about a deadline, the deadline is tuned short, what is asserted from
+      below is exact (nothing is cut before its time), and from above it is only that the
+      cut came before anything else would have made it.
 """
 from tests import _safety  # noqa: F401  - first: no test runs beside a ledger
 
@@ -65,8 +90,8 @@ from unittest import mock
 from moneyd import auth, config, ctl, httpd, log, store
 
 __all__ = [
-    "CHECKOUT", "FOUNDERS", "PASSWORD", "FakeClock", "free_port", "dev_environ", "stand_changes", "scrypt_stand_in",
-    "Response", "request", "raw", "Stand", "ProcessStand", "CtlResult", "ledger", "plan",
+    "CHECKOUT", "FOUNDERS", "PASSWORD", "PATIENCE", "NEVER", "HELD", "FakeClock", "until", "free_port", "dev_environ",
+    "stand_changes", "scrypt_stand_in", "Response", "request", "raw", "Stand", "ProcessStand", "CtlResult", "ledger", "plan",
 ]
 
 CHECKOUT = _safety.CHECKOUT
@@ -74,6 +99,29 @@ FOUNDERS = "mika:Mika,misha:Misha,vanya:Vanya"
 #: 28 characters, none of the refused words, no founder's login or name in it.
 PASSWORD = "correct horse battery staple"
 UTC = datetime.timezone.utc
+
+#: How long a test waits for what is on its way before it says that it never came. Nobody waits this
+#: long while the tests pass - every wait ends with the thing waited for - so it is long: a runner that
+#: stops for seconds at a time must not fail a test. It is under the 30 seconds the server gives a
+#: caller who says nothing, so that "it came" is never that wait running out.
+PATIENCE = 25.0
+#: A deadline that does not come while a test runs (and the most a document's body can have).
+NEVER = 600.0
+#: ``Stand(tune=HELD)``: a body that never comes is waited for until the test hangs up. For a stand on
+#: which requests are held open - the five seconds a sign-in's body has by default are over the moment
+#: the machine is busy with something else.
+HELD = {"auth_body_deadline": NEVER, "put_deadline_base": NEVER}
+
+
+def until(probe: Any, seconds: float = PATIENCE, every: float = 0.005) -> Any:
+    """Ask ``probe`` until it says something true, and return what it said (the last answer, a false
+    one, when ``seconds`` have passed). The way to wait for what another thread or process is doing."""
+    deadline = time.monotonic() + seconds
+    while True:
+        value = probe()
+        if value or time.monotonic() > deadline:
+            return value
+        time.sleep(every)
 
 
 class FakeClock:
@@ -199,7 +247,7 @@ class Response(NamedTuple):
 
 
 def request(port: int, method: str, path: str, *, host: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
-            body: Optional[bytes] = None, timeout: float = 10.0) -> Response:
+            body: Optional[bytes] = None, timeout: float = PATIENCE) -> Response:
     """One request to 127.0.0.1:``port``. ``host`` is the Host header; nothing else is added but what
     ``http.client`` itself adds (``Accept-Encoding: identity``, and a ``Content-Length`` for a body).
     Returns when the service has closed the connection."""
@@ -221,7 +269,7 @@ def request(port: int, method: str, path: str, *, host: Optional[str] = None, he
         connection.close()
 
 
-def raw(port: int, data: bytes, *, timeout: float = 5.0, pause: float = 0.0, then: bytes = b"",
+def raw(port: int, data: bytes, *, timeout: float = PATIENCE, pause: float = 0.0, then: bytes = b"",
         half_close: bool = False) -> bytes:
     """Send ``data`` as it is, optionally wait and send ``then``, and return everything that comes back
     until the server closes (b"" when it closes without a word).
@@ -278,7 +326,7 @@ class _Doors:
 
     def request(self, method: str, path: str, json_body: Any = None, *, body: Optional[bytes] = None,
                 cookie: Optional[str] = None, headers: Optional[Dict[str, str]] = None, origin: Any = _AUTO,
-                host: Any = _AUTO, timeout: float = 10.0) -> Response:
+                host: Any = _AUTO, timeout: float = PATIENCE) -> Response:
         """A request the way the page behind the edge would send it.
 
         ``json_body`` is sent as JSON with its content type. ``origin`` is the stand's own for
@@ -427,6 +475,38 @@ class Stand(_Doors):
         link, _expires = self.auth.issue_invite(login, by="tests")
         return link.split("#t=", 1)[1]
 
+    # -- what the server holds right now -------------------------------------
+    #
+    # ``self.server.signed_out(key=None)``, ``connections()`` and ``in_flight()`` are the server's own
+    # words for it, and ``counted()`` below is the one it has no word for. When are they true again
+    # after a request? A request that was read whole gives its slot and its address's count back
+    # before its connection is closed: both are exact the moment ``get``/``post``/``put`` return. One
+    # that was turned away with its body unread is answered first and counted a moment longer (the
+    # server reads on, so that the answer is not lost in a reset): after such a request, a test that
+    # needs the room waits for ``counted()`` to say that it is there. ``connections()`` and
+    # ``in_flight()`` always follow a moment later.
+
+    def counted(self, key: Optional[str] = None) -> int:
+        """How many requests the server counts against a client address right now - against the one
+        counted as ``key`` (an IPv4 address as it is written; the /64 of an IPv6 one), or against all
+        of them. A request is counted from the moment its head is read to the moment it is over.
+
+        The server has no door for this number (it has ``signed_out()`` for the slots), so its own
+        table is read, under its own lock. It is what a test waits for before it asks for "one more
+        than the address may have": a founder's stalled save takes no slot, and nothing else shows
+        that it has been let in.
+        """
+        server = self.server
+        with server._lock:
+            return sum(server._addresses.values()) if key is None else server._addresses.get(key, 0)
+
+    def retune(self, **fields: Any) -> None:
+        """Replace fields of the settings the running server reads: ``retune(auth_body_deadline=0.3)``.
+        For what a request reads as it is served - the deadlines. A request that has begun keeps the
+        deadline it began with; the store, the sign-in and the server's own threads were made from
+        the settings as they stood."""
+        self.server.settings = dataclasses.replace(self.server.settings, **fields)
+
     # -- what the stand wrote down ------------------------------------------
 
     def log_text(self) -> str:
@@ -485,7 +565,7 @@ class ProcessStand(_Doors):
                 self.stop()
                 raise
 
-    def start(self, wait: float = 15.0) -> None:
+    def start(self, wait: float = PATIENCE) -> None:
         """Start the service and wait until it answers. Raises ``AssertionError`` with its output when it does not."""
         with open(self._output, "ab") as sink:
             self.process = subprocess.Popen([self.python, "-m", "moneyd"], cwd=CHECKOUT, env=self.environ,
