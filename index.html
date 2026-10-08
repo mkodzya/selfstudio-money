@@ -907,7 +907,40 @@ function guessBank(name,hdr){
  if(/mosta/.test(n))return "Mosta";if(/nebeus/.test(n))return "Nebeus";if(/revolut/.test(n))return "Revolut";
  return "";
 }
+// A wallet's export of its orders (Mosta's «wallet-orders»): a row is an order, not a line of a statement, and no sum
+// in it has a sign. What an order did to the money its «Order Type» says, so the three kinds seen so far are read
+// each in its own way: an on-ramp brings dollars in from a bank and takes its fee out of them — two rows, the money
+// and the fee; a transfer pays somebody, the fee inside the sum; an exchange swaps one dollar token for another and
+// moves nothing, so it is no row at all. A token pegged to the dollar is dollars here. An order that is not
+// complete, or of a kind this has not met, is left out and counted, and «Загрузка» says how many and of what kind.
+// Read as an ordinary statement this file was six receipts in pounds, two of them payments to people.
+function parseWallet(grid){
+ const low=r=>(r||[]).map(x=>String(x==null?"":x).trim().toLowerCase());
+ const hi=grid.slice(0,10).findIndex(r=>{const h=low(r);return h.includes("order type")&&h.includes("amount from")&&h.includes("to currency symbol");});
+ if(hi<0)return null;
+ const h=low(grid[hi]),rows=[],left={};
+ const usd=s=>/^usd[a-z]?$/i.test(s)?"USD":CURS.includes(String(s).toUpperCase())?String(s).toUpperCase():"";
+ for(let i=hi+1;i<grid.length;i++){const r=grid[i];if(!r||!r.length)continue;
+  const g=k=>{const j=h.indexOf(k);return j<0||r[j]==null?"":String(r[j]).trim();};
+  const d=parseDate(g("created at"));if(!d)continue;
+  const type=g("order type").toUpperCase(),from=parseNum(g("amount from")),fee=parseNum(g("fee"))||0,fs=g("from currency symbol"),ts=g("to currency symbol"),who=g("counterparty account name"),id=g("order id");
+  const miss=k=>{left[k]=(left[k]||0)+1;};
+  if(g("status").toUpperCase()!=="COMPLETE"){miss("не завершены");continue;}
+  if(/^EXCHANGE/.test(type)&&usd(fs)&&usd(fs)===usd(ts))continue;
+  if(/ONRAMP$/.test(type)&&from>0&&usd(fs)){
+   rows.push({d,a:from,cur:usd(fs),hasCur:true,t:"Пополнение кошелька с банковского счёта · "+type,p:"",h:"",tid:id});
+   if(fee>0)rows.push({d,a:-fee,cur:usd(ts)||usd(fs),hasCur:true,t:"Комиссия за пополнение кошелька · "+type,p:"Mosta",h:"",tid:id+"-fee"});
+   continue;}
+  if(/TRANSFER$/.test(type)&&who&&from>0&&usd(fs)){
+   rows.push({d,a:-from,cur:usd(fs),hasCur:true,t:"Перевод "+g("amount to")+" "+ts+(fee>0?", комиссия "+fee:"")+" · "+type,p:who,h:"",tid:id});continue;}
+  miss(type||"без вида");
+ }
+ const said=Object.keys(left).map(k=>k+" — "+left[k]).join(", ");
+ if(!rows.length)return{error:"В этом файле кошелька нет операций, которые я умею читать"+(said?": "+said:"")+"."};
+ return{bank:"Mosta",defCur:"USD",rows,cols:h.length,left:said};
+}
 function parseGrid(grid,name){
+ const wallet=parseWallet(grid);if(wallet)return wallet;
  let hi=-1,map=null;
  for(let i=0;i<Math.min(grid.length,40);i++){const m=mapCols(grid[i]||[]);if(m.date!=null&&(m.amount!=null||m.debit!=null||m.credit!=null)){hi=i;map=m;break;}}
  if(hi<0)return{error:"Не нашла в файле колонки с датой и суммой. Нужна выписка в CSV или Excel, где каждая строка — одна операция."};
@@ -1091,7 +1124,7 @@ async function handleFiles(list){
    else grid=parseCSV(decode(buf));
    if(!p)p=parseGrid(grid,f.name);if(p.error)throw new Error(p.error);rec.pdf=!!p.pdf;rec.check=p.check;rec.acc=p.acc||"";
    const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length){S.own.push(...fresh);saveSettings();}
-   rec.bank=p.bank;rec.cur=p.defCur;rec.total=p.rows.length;rec.from=p.rows.reduce((a,r)=>r.d<a?r.d:a,"9");rec.to=p.rows.reduce((a,r)=>r.d>a?r.d:a,"0");rec.needCur=p.rows.some(r=>!r.hasCur);
+   rec.bank=p.bank;rec.cur=p.defCur;rec.total=p.rows.length;rec.from=p.rows.reduce((a,r)=>r.d<a?r.d:a,"9");rec.to=p.rows.reduce((a,r)=>r.d>a?r.d:a,"0");rec.needCur=p.rows.some(r=>!r.hasCur);rec.left=p.left||"";
    Object.assign(rec,ingest(p,rec,"file"));
   }catch(e){rec.error=e.message||"Не получилось прочитать файл.";}
   S.files.unshift(rec);
@@ -1431,7 +1464,7 @@ function renderUpload(){
  ${S.files.length?`<section class="card"><h2>Загружено в этот раз${ui.lastTr?`<span class="note">переводов между своими убрано без вашего участия: ${ui.lastTr}</span>`:""}</h2><div class="files">${S.files.map(f=>f.error?
    `<div class="file err"><div class="fn">${esc(f.name)}</div><div>${esc(f.error)}</div></div>`:
    `<div class="file"><div class="fn" title="${esc(f.name)}">${esc(f.name)}${f.demo?' <span class="pill info">пример</span>':""}</div>
-    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc?" · счёт ·"+esc(f.acc.slice(-4)):""}</div>
+    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc?" · счёт ·"+esc(f.acc.slice(-4)):""}${f.left?" · не взято: "+esc(f.left):""}</div>
     <div class="row"><span class="pill ok">новых ${f.added}</span>${f.dup?`<span class="pill">уже были ${f.dup}</span>`:""}${f.pdf?(f.check==="ok"?'<span class="pill ok">сошлось с остатками выписки</span>':f.check==null?'<span class="pill">остатки в выписке не найдены</span>':`<span class="pill dup">расходится с остатками на ${fmt(Math.abs(f.check),2)}</span>`):""}</div>
     <div class="row"><label class="lbl" for="fb-${f.id}">Банк</label><select id="fb-${f.id}" data-fbank="${f.id}">${opt(BANKS.map(b=>[b,b]),f.bank)}</select>
     ${f.needCur?`<label class="lbl" for="fc-${f.id}">Валюта</label><select id="fc-${f.id}" data-fcur="${f.id}">${opt(CURS.map(b=>[b,b]),f.cur)}</select>`:""}</div></div>`).join("")}</div></section>`:""}
@@ -5281,7 +5314,7 @@ window.addEventListener("dragover",ev=>{if(hasFiles(ev))ev.preventDefault();});
 window.addEventListener("dragleave",ev=>{if(!hasFiles(ev))return;dragN=Math.max(0,dragN-1);if(!dragN)veil().hidden=true;});
 window.addEventListener("drop",ev=>{if(!hasFiles(ev))return;ev.preventDefault();dragN=0;veil().hidden=true;const f=[...ev.dataTransfer.files];if(f.length)handleFiles(f);});
 let rsT=null;window.addEventListener("resize",()=>{clearTimeout(rsT);rsT=setTimeout(()=>{if(ui.tab==="today")Today.resize();if(ui.tab==="dashboard")renderDash();if(ui.tab==="reports")renderRepOut();if(ui.tab==="cash")Cash.resize();},200);});
-window.__tx={parsePdfLines,parseGrid,parseCSV,feed(p,name){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
+window.__tx={parsePdfLines,parseGrid,parseCSV,feed(p,name){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check,left:p.left||""};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
 window.__cash=Cash.test;
 const h=(location.hash||"").slice(1);
 if(h==="cash-days"){Cash.view("days");setTab("cash");}else if(TABS.includes(h)&&h!=="today")setTab(h);

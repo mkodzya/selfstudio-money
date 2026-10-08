@@ -4361,6 +4361,37 @@ await run('rv-tochka', 'a Tochka statement prints every sum without a sign: whic
   await pg.context().close();
 });
 
+await run('rv-mosta', 'a wallet\'s list of orders is not a statement: what an order did to the money its kind says, and the page reads each kind its own way', async () => {
+  // Mosta's «wallet-orders» export as it comes: twenty-seven columns, no sign anywhere, currencies as ids with a
+  // symbol beside them. Read as an ordinary statement it was taken for Wise in pounds and every order for a receipt —
+  // two payments to people among them, offered as revenue (8 October 2026). The header is the wallet's; the rows are made up.
+  const HEAD = ['Order ID', 'Order UUID', 'Created At', 'Updated At', 'Order Type', 'Status', 'Amount From', 'From Currency', 'From Currency Symbol', 'Amount To', 'To Currency', 'To Currency Symbol', 'Fee', 'Fee Currency',
+    'Exchange Rate', 'Billing Amount', 'Billing Currency', 'Transaction Amount', 'Transaction Currency', 'Network Fee', 'Network Fee Currency', 'Counterparty Account Name', 'Counterparty Account ID', 'Reference', 'Note', 'Workflow Status', 'Request ID'];
+  const order = (id, at, type, status, from, fs, to, ts, fee, who = '') => { const c = new Array(HEAD.length).fill(''); [c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12], c[13], c[21]] = [id, id, at, at, type, status, from, 'aaaa1111-0000-4000-8000-000000000001', fs, to, 'bbbb2222-0000-4000-8000-000000000002', ts, fee, 'aaaa1111-0000-4000-8000-000000000001', who]; return c.join(','); };
+  const csv = [HEAD.join(','),
+    order('o-pay', '2026-10-06T14:05:40.832+00:00', 'OMNIBUS_CRYPTO_TRANSFER', 'COMPLETE', '500', 'USDM', '495', 'USDT', '5', 'Lena Hartmann'),
+    order('o-in', '2026-10-06T13:52:05.171+00:00', 'BRL_WIRE_ONRAMP', 'COMPLETE', '300', 'USD', '275', 'USDM', '25'),
+    order('o-swap', '2026-10-01T14:52:58.468+00:00', 'EXCHANGE_OMNI', 'COMPLETE', '39.75', 'USDT', '39.75', 'USDM', '0'),
+    order('o-wait', '2026-10-06T15:00:00.000+00:00', 'BRL_WIRE_ONRAMP', 'PENDING', '100', 'USD', '75', 'USDM', '25'),
+    order('o-new', '2026-10-06T16:00:00.000+00:00', 'SOME_NEW_KIND', 'COMPLETE', '10', 'USDM', '10', 'USDM', '0'),
+  ].join('\n') + '\n';
+  // The other side of the on-ramp is already in the table: the transfer out of Wise, filed as one between own accounts.
+  serve(ledger([filed('w-out', '2026-10-06', -222.22, 'skip', 'Sent money to Demo Studio Ltd')]), null);
+  const pg = await open('a wallet export');
+  const read = await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'wallet-orders-made-up.csv'); return p.error ? [p.error] : [p.bank, p.defCur, p.left, p.rows.map((r) => [r.d, r.a, r.cur, r.p, r.t.split(' · ')[0]].join(' | '))]; }, csv);
+  same(read, ['Mosta', 'USD', 'не завершены — 1, SOME_NEW_KIND — 1', ['2026-10-06 | -500 | USD | Lena Hartmann | Перевод 495 USDT, комиссия 5', '2026-10-06 | 300 | USD |  | Пополнение кошелька с банковского счёта', '2026-10-06 | -25 | USD | Mosta | Комиссия за пополнение кошелька']],
+    'the file is Mosta\'s, in dollars: a transfer is a payment out to the person it names, the fee inside the sum; an on-ramp is the money in and its fee out, two rows; a swap of one dollar token for another is no row; an order not complete and a kind never met are left out and named');
+  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'wallet-orders-made-up.csv'), 'wallet-orders-made-up.csv'); }, csv);
+  for (let i = 0; i < 80 && !((store.led.doc.inbox || []).length === 2 && store.led.doc.tx.length === 2); i++) await sleep(50);
+  const inb = (store.led.doc.inbox || []).map((r) => [r.b, r.o.a, r.o.cur, r.dir, r.c === 'rev'].join(' ')).sort(), kept = store.led.doc.tx.map((r) => [r.b, r.o.a, r.o.cur, r.c, !!r.pair].join(' ')).sort(), pairs = new Set(store.led.doc.tx.map((r) => r.pair)).size;
+  same([inb, kept, pairs], [['Mosta -25 USD -1 false', 'Mosta -500 USD -1 false'], ['Mosta 300 USD skip true', 'Wise -222.22 GBP skip true'], 1],
+    '… so in «Разбор» the payment and the fee wait as payments out, in dollars, and neither is offered as revenue — and the money that came in is paired with the transfer that left Wise and taken out with it, as one move between own accounts');
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="upload"]');
+  ok(/не взято: не завершены — 1, SOME_NEW_KIND — 1/.test(await text(pg, '#view-upload .file')), '«Загрузка» says of the file what was left out of it, and of what kind', await text(pg, '#view-upload .file'));
+  await pg.context().close();
+});
+
 await run('rv-small', 'the rest of the review: a save the server did not take, the wordmark, a paid row made to repeat, a name the table knows, a tax row renamed after a founder, an unsorted receipt in «Можно вывести»', async () => {
   // A save the server fails is said out loud and tried again by itself.
   serve(ledP(), await plan2());
