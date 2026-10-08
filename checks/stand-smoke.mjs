@@ -408,7 +408,8 @@ function watch(page) {
   });
 }
 async function openContext(browser) {
-  const context = await browser.newContext({ viewport: { width: 1320, height: 900 }, locale: 'ru-RU' });
+  // (Less motion: the page then plays none of its unfolding and waits for none - a smoke presses and reads at once.)
+  const context = await browser.newContext({ viewport: { width: 1320, height: 900 }, locale: 'ru-RU', reducedMotion: 'reduce' });
   context.setDefaultTimeout(20000);
   context.setDefaultNavigationTimeout(30000);
   // A violation of the policy is reported by the browser as an event. This
