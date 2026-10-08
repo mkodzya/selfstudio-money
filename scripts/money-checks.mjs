@@ -359,8 +359,11 @@ http
 // ---- the browser ----
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox'] });
 const errs = [];
-async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null } = {}) {
+async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null, folded = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: w < 500 ? 2 : 1 });
+  // «Аналитика» on «Сегодня» is folded until a founder opens it, and the page remembers that he did. The checks read
+  // and press what is under it, so they come as that founder; `folded` is for the check of the fold itself.
+  if (!folded) await ctx.addInitScript(() => { try { localStorage.setItem('selfstudio-money-analytics', '1'); } catch (e) { /* no storage: the page copes */ } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errs.push(`${name}: PAGEERROR ${e.message}`));
   // `quiet` is for the one check that makes the server refuse a save on purpose: the browser reports the refusal itself.
@@ -2074,7 +2077,8 @@ async function addRow(pg, what, f) {
   return (await rowIds(pg)).find((id) => !before.has(id));
 }
 // The list of days at its full length, not only the next seven.
-const allDays = async (pg) => { if ((await text(pg, '#view-today [data-td-flip="all"]')).startsWith('Показать')) await pg.click('#view-today [data-td-flip="all"]'); };
+// The plan stands by weeks, the one that holds today open: «Раскрыть все недели» opens the rest.
+const allDays = async (pg) => { const b = await pg.$('#view-today [data-td-flip="all"]'); if (b && (await b.getAttribute('aria-expanded')) !== 'true') await b.click(); };
 const inDays = (id) => `#view-today .td-days .td-row[data-ed-open="${id}"]`;
 // Tap a row of the days; the list is opened to its full length if the row is further than a week.
 async function openRow(pg, id) {
@@ -2147,7 +2151,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
   same(await page.evaluate(() => [typeof window.__money.compute, typeof window.__money.model, typeof window.__money.upgrade, typeof window.__money.passed, window.__money.today, window.__money.by]), ['function', 'function', 'function', 'function', T, 'Mika'], 'window.__money: compute, model, upgrade, passed, today — the date in London — and who is signed in');
   const S = await holds(page, 'the fabricated studio, 60 days');
   same([S.M.v0, S.P.v, S.P.banks.every((b) => b.asOf === '2026-10-04' && !b.legacy)], [false, 3, true], '… whose plan is version 3, with every balance typed as of 4 Oct');
-  ok(/^вт 6 окт · выписки и остатки по 4 окт \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .kpi .lbl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && (await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября: денег хватает на 60 дней') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the sentence answers the question — «денег хватает» — and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
+  ok(/^вт 6 окт · выписки и остатки по 4 окт \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .td-at .td-tl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && (await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября: денег хватает на 60 дней') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the sentence answers the question — «денег хватает» — and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
   await calm(page, 'the fabricated studio');
   const viaDocs = await page.evaluate(async () => {
     const led = (await (await fetch('/api/founder/money')).json()).doc;
@@ -2167,7 +2171,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
   same(await page.evaluate(() => [document.querySelector('.nav .active').dataset.tab, location.hash]), ['inbox', '#inbox'], '… which goes to «Разбор»');
   await page.click('.nav [data-tab="today"]');
   // live-spec-2 §7.15, what of it this stage draws: seven days, one setting.
-  ok((await page.$$eval('#view-today .td-days .td-day', (l) => l.length)) <= 8 && /Ближайшие 7 дней/.test(await text(page, '#view-today [aria-label="Ближайшие дни"] h2')), '«Ближайшие 7 дней»: seven day headers at most (and the fold of what was closed in the month)', await texts(page, '#view-today .td-days .td-day b'));
+  ok((await page.$$eval('#view-today .td-days .td-day', (l) => l.length)) <= 8 && /^План на 60 дней/.test(await text(page, '#view-today [aria-label="Ближайшие дни"] h2')) && (await page.$$eval('#view-today .td-wk', (l) => l.map((b) => b.getAttribute('aria-expanded')).join(' '))).startsWith('true false'), '«План на 60 дней» stands by weeks, and only the week that holds today is open: seven day headers at most (and the fold of what was closed in the month)', await texts(page, '#view-today .td-days .td-day b'));
   await page.click('.nav [data-tab="settings"]');
   same(await page.$$eval('#ed-forecast input, #ed-forecast select', (l) => l.map((e) => e.dataset.edSet)), ['cushion', 'fresh', 'freshDays'], '«Настройки → Прогноз» holds the cushion and the one setting the founder asked for on 7 October — how old the balances may be — and no switch of what went with the history');
   await page.click('.nav [data-tab="today"]');
@@ -2189,15 +2193,14 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
       const tab = box('.nav [data-tab="inbox"]');
       const badge = box('#inboxBadge');
       return { wide: document.documentElement.scrollWidth, win: window.innerWidth, tab: [Math.round(tab.left), Math.round(tab.right)], badge: Math.round(badge.right), badgeW: badge.width,
-        two: k.length === 6 && k[0].top === k[1].top && k[2].top > k[0].top && k[2].top === k[3].top && k[4].top === k[5].top, need: box('#view-today .td-need').top, chart: box('#view-today #td-chart').top, chartH: Math.round(box('#view-today #td-chart').height) };
+        two: k.length === 5 && k[0].top === k[1].top && k[2].top > k[0].top && k[2].top === k[3].top && k[4].top > k[2].top, need: box('#view-today .td-need').top, chart: box('#view-today #td-chart').top, chartH: Math.round(box('#view-today #td-chart').height) };
     });
     ok(r.wide <= w && r.win === w, `${w}px: the page does not scroll sideways`, r);
     ok(r.tab[0] >= 0 && r.tab[1] <= w && r.badge <= w && r.badgeW > 0, `${w}px: «Разбор» and its counter are inside the screen`, r);
-    ok(r.two && r.need < r.chart && r.chartH <= 200, `${w}px: the six figures stand two to a row, «Нужно решить» above the chart, the chart no taller than 190`, r);
+    ok(r.two && r.need < r.chart && r.chartH <= 200, `${w}px: the five figures under «Аналитика» stand two to a row, «Нужно решить» above the chart, the chart no taller than 190`, r);
     await holds(ph, `${w}px`);
     await calm(ph, `${w}px`);
     // The widest things the screen can hold: a row's card, the sheet of balances, «Добавить».
-    await ph.click('#view-today .td-acc summary');
     await ph.click('#view-today .td-days .td-row[data-ed-open]');
     await ph.waitForSelector(K('row'));
     const a = await ph.evaluate(() => document.documentElement.scrollWidth);
@@ -2220,11 +2223,11 @@ await run('26 on screen', 'day one: an account in use without a balance, and typ
   const pg = await scene('day one', L, planW());
   let S = await holds(pg, 'day one');
   shows(S, { verdict: 'v0', now: '', low: 11000, in: 8000, out: 6120 }, 'the screen');
-  same([await text(pg, '#view-today .td-say'), S.live.now.t, (await texts(pg, '#view-today .kpi .lbl'))[3], (await texts(pg, '#view-today .kpi .hint'))[0], await pg.$eval('#view-today .td-need .op', (e) => e.dataset.tdCard)],
+  same([await text(pg, '#view-today .td-say'), S.live.now.t, (await texts(pg, '#view-today .kpi .lbl'))[2], await text(pg, '#view-today .td-at .td-tw'), await pg.$eval('#view-today .td-need .op', (e) => e.dataset.tdCard)],
     ['Нет остатка: Barclays GBP. Без него итог не посчитать. По плану за 30 дней придёт £8,000 и уйдёт £6,120.', '—', 'Нужно на счетах сегодня', 'не хватает остатка: Barclays GBP', '1'],
     'the sentence names the account and tells the flows; «Денег сейчас» is «—»; the fourth figure is «Нужно на счетах сегодня»; the first card is the balance');
-  same([await text(pg, '#view-today .td-two h2'), (await text(pg, '#view-today .td-acc summary')).includes('нет остатка — Barclays GBP')], ['Изменение кассы по днямчерез 30 дней: +£1,880', true], 'the chart is «Изменение кассы по дням», from zero; the line of accounts says which one is missing');
-  same([await texts(pg, '#view-today .td-verdict button'), (await texts(pg, '#view-today .kpi .hint'))[3], (await texts(pg, '#view-today .td-days .td-dayf')).every((t) => t.includes('от сегодняшнего: ')), await texts(pg, '#view-today .td-accs button')], [['Вписать остатки'], 'чтобы пройти 30 дней без минуса и с запасом £5,000', true, ['Вписать остаток', 'Загрузить выписки']],
+  same([await text(pg, '#view-today [aria-label$="по дням"] h2'), /Barclays GBP — нет остатка/.test(await text(pg, '#view-today .td-accs'))], ['Изменение кассы по днямчерез 30 дней: +£1,880', true], 'the chart is «Изменение кассы по дням», from zero; the line of the account in «Счета» says it has no balance');
+  same([await texts(pg, '#view-today .td-verdict button'), (await texts(pg, '#view-today .kpi .hint'))[2], (await texts(pg, '#view-today .td-days .td-dayf')).every((t) => t.includes('от сегодняшнего: ')), await texts(pg, '#view-today .td-acc button')], [['Вписать остатки'], 'чтобы пройти 30 дней без минуса и с запасом £5,000', true, ['Вписать остаток', 'Загрузить выписки']],
     'the sentence offers the one way out there is — «Вписать остатки»: a statement brings no balance yet, so «Загрузить выписки» stays under «Счета»; the fourth figure says it includes the cushion; a day reads «от сегодняшнего: +£…»');
   await calm(pg, 'day one');
   // «Вписать остатки»: Barclays, which has none, is first.
@@ -2236,7 +2239,7 @@ await run('26 on screen', 'day one: an account in use without a balance, and typ
   S = await holds(pg, 'Barclays typed');
   shows(S, { verdict: 'v1', now: 25000, 'acct.Barclays|GBP': 15000, 'acct.Wise|GBP': 10000 }, '«Вписать остаток» Barclays 15,000');
   const b = S.P.banks.find((r) => r.bank === 'Barclays');
-  same([S.P.banks.length, b.amt, b.asOf, b.by, typeof b.at, 'legacy' in b, S.P.banks[0].asOf, S.P.banks[0].amt, (await texts(pg, '#view-today .kpi .lbl'))[0]], [2, 15000, T, 'Mika', 'number', false, '2026-09-30', 10120, 'Денег сейчас'], '… one account written into the plan — the amount, today, who — and the other, which nobody touched, left as it was');
+  same([S.P.banks.length, b.amt, b.asOf, b.by, typeof b.at, 'legacy' in b, S.P.banks[0].asOf, S.P.banks[0].amt, await text(pg, '#view-today .td-at .td-tl')], [2, 15000, T, 'Mika', 'number', false, '2026-09-30', 10120, 'Денег сейчас'], '… one account written into the plan — the amount, today, who — and the other, which nobody touched, left as it was');
   same([await saved(pg), store.cash.puts, store.cash.doc.v, store.cash.doc.savedBy, store.cash.doc.banks.length, store.led.puts], [true, 1, 3, 'Mika', 2, 0], '… saved once, as version 3, signed; the ledger untouched');
   // «Касса» reads the same balances: what was typed, on which day, by whom — and beside it what it comes to now.
   await pg.click('.nav [data-tab="cash"]');
@@ -2308,7 +2311,7 @@ await run('13 on screen', 'a late inflow leaves in two steps, and the card that 
   let S = await holds(pg, 'Client E £4,000 for 22 Sep');
   shows(S, { in: 12000, late: 4000, end: base.fig('end') + 4000 }, 'typed inflow Client E £4,000, 22 Sep — 13 days late: still expected');
   const need = '#view-today .td-need .op[data-td-card="7"] ';
-  same([await text(pg, need + '.op-name'), await text(pg, need + '.op-text'), await texts(pg, need + '> .row button'), (await texts(pg, '#view-today .kpi .hint'))[4]],
+  same([await text(pg, need + '.op-name'), await text(pg, need + '.op-text'), await texts(pg, need + '> .row button'), (await texts(pg, '#view-today .kpi .hint'))[3]],
     ['Client E · £4,000', 'Ждали 22 сен, в выписках Wise GBP по 5 окт его нет · 13 дн. Из расчёта уберу через 8 дн.', ['Получено', 'Частично…', 'Перенести на…', 'Не придёт'], '1 клиент · дольше всех Client E, 13 дн.'], 'card 7 and the fifth figure say who, how long, and what happens next — with «Частично» as the third answer');
   same(await drawn(pg, id), 'td-row | none | Client E | Wise · просрочено 13 дн. | +£4,000 | сегодня, вт 6 окт', '… and the row, under today, says it in plain small words');
   await calm(pg, 'with a card of «Нужно решить»');
@@ -2326,7 +2329,7 @@ await run('13 on screen', 'a late inflow leaves in two steps, and the card that 
   await pg.click(K('row') + '[data-ed-save]');
   S = await holds(pg, 'moved to 20 Oct');
   shows(S, { in: 12000, late: 0, low: 8000, lowday: '2026-10-20' }, '«Перенести на…» 20 Oct');
-  same([await pg.$(need), (await texts(pg, '#view-today .kpi .hint'))[4]], [null, 'просрочек нет'], '… the card is gone');
+  same([await pg.$(need), (await texts(pg, '#view-today .kpi .hint'))[3]], [null, 'просрочек нет'], '… the card is gone');
   // «Получено», one tap: the money moves from the line into «сейчас», and END stays.
   const before = S.fig('end');
   await tapRow(pg, id, 'paid');
@@ -2830,7 +2833,9 @@ const freeSays = async (pg) => plain((await texts(pg, '#view-today .td-free .td-
 const freeRows = (pg) => pg.$$eval('#view-today .td-free .td-steps .td-row', (l) => l.map((r) => [r.querySelector('.td-nm').textContent, r.querySelector('.td-am').textContent].map((s) => s.replace(/ /g, ' ')).join(' → ')));
 // A period of the block «Налоги» as it is drawn: its name and due date, its words, the figure on the right.
 const taxRow = (pg, key) => pg.$eval(`#view-today .td-tax .td-row[data-td-per="${key}"]`, (r) => [r.querySelector('.td-nm').textContent, r.querySelector('.td-meta').textContent, r.querySelector('.td-am').textContent].map((s) => s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim())).catch(() => null);
-const kpi = async (pg, i, tab = 'today') => { const l = await pg.$$eval(`#view-${tab} .kpi`, (k) => k.map((e) => [e.querySelector('.lbl').textContent, e.querySelector('.val').textContent, e.querySelector('.hint').textContent].map((s) => s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim()))); return l[i]; };
+// The six figures by their place. On «Сегодня» the first — the money now — is the last line of «Счета», and the
+// other five stand under «Аналитика».
+const kpi = async (pg, i, tab = 'today') => { const tidy = (s) => s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim(); const l = await pg.$$eval(`#view-${tab} .kpi`, (k) => k.map((e) => [e.querySelector('.lbl').textContent, e.querySelector('.val').textContent, e.querySelector('.hint').textContent].map((s) => s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim()))); if (tab === 'today') l.unshift((await pg.$eval('#view-today .td-at', (e) => [e.querySelector('.td-tl').textContent, e.querySelector('[data-live="now"]').textContent, e.querySelector('.td-tw').textContent])).map(tidy)); return l[i]; };
 const undo = async (pg) => { await pg.click('#toastUndo'); await sleep(60); };
 const goToday = async (pg) => { await pg.click('.nav [data-tab="today"]'); await pg.waitForSelector('#view-today [data-live="verdict"]'); };
 const needCard = (n, k = 0) => `#view-today .td-need .op[data-td-card="${n}"] >> nth=${k}`;
@@ -2857,7 +2862,7 @@ await run('p1 on screen', 'day one, the taxes\' two questions and the helper, th
     'the sentence says what is in the bank, what of it is not the studio\'s, and that nothing is written ahead — with the two things to do');
   same([await kpi(pg, 1), await kpi(pg, 2), await kpi(pg, 3), await kpi(pg, 5)], [['Придёт за 30 дней', '—', 'план пуст'], ['Уйдёт за 30 дней', '—', 'план пуст'], ['Нижняя точка', '—', 'план пуст'], ['Можно вывести', '—', 'впишите расходы']], 'no figure of a forecast is on the screen: «—» and «план пуст» for what comes, what goes and the lowest point; «Можно вывести» names no sum');
   same([(await kpi(pg, 0))[2], S.fig('reserve')], ['выписки и остатки по 5 окт · 3 счёта · под налоги £4,800', 4800], '… while «Денег сейчас» says «под налоги £4,800»: the VAT of the quarter that has ended, from the facts');
-  same([await freeSays(pg), await texts(pg, '#view-today .td-free button'), await pg.$('#td-chart'), await text(pg, '#view-today .td-two .card:first-child .note')], ['Сколько можно вывести, скажу, когда в плане будут расходы: впереди их не вписано — заполните октябрь. На счетах £32,000, из них £4,800 — под налоги.', ['Заполнить октябрь'], null, 'План пуст — линии пока нет.'],
+  same([await freeSays(pg), await texts(pg, '#view-today .td-free button'), await pg.$('#td-chart'), await text(pg, '#view-today [aria-label$="по дням"] .note')], ['Сколько можно вывести, скажу, когда в плане будут расходы: впереди их не вписано — заполните октябрь. На счетах £32,000, из них £4,800 — под налоги.', ['Заполнить октябрь'], null, 'План пуст — линии пока нет.'],
     '«Можно вывести» says why it names no sum, and what to fill; the chart draws no line of a plan that is not there');
   same([await taxRow(pg, 'vat|2026Q3'), await taxRow(pg, 'usn|2026Q3'), await taxRow(pg, 'vat|2026Q2'), await text(pg, '#view-today .td-tsum span'), S.fig('tax.reserve')], [['UK VAT за III кв. 2026 · до 7 ноя', 'начислено £4,800 · оплачено £0', '£4,800'], ['УСН по Точке за III кв. 2026', 'начислено ₽42,480 (£360) · ответьте, платите ли его со счёта студии — пока в расчёт не входит', '—'], null, 'Из денег на счетах сегодня под налоги нужно держать', 4800],
     'the block «Налоги»: UK VAT of III кв. accrued from the facts and due 7 Nov; УСН shown as an accrual only until somebody confirms it; the quarter before the start, paid at 0.98, is not there');
@@ -3578,10 +3583,10 @@ await run('phone', 'a phone, 375 and 390 wide: nothing scrolls sideways, and the
     await ph.waitForSelector('#view-today [data-live="verdict"]');
     const r = await ph.evaluate(() => {
       const top = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top + window.scrollY) : -1; };
-      return { wide: document.documentElement.scrollWidth, order: ['.td-verdict', '.kpis', '.td-acc', '.td-need', '#td-chart', '.td-free', '[aria-label="Ближайшие дни"]', '.td-tax', '.td-month'].map((s) => top('#view-today ' + s)), bv: getComputedStyle(document.querySelector('#view-today .td-bv')).fontSize, say: getComputedStyle(document.querySelector('#view-today .td-fsay')).fontSize };
+      return { wide: document.documentElement.scrollWidth, order: ['.td-verdict', '.td-acc', '.td-month', '.td-free', '.td-need', '[aria-label="Ближайшие дни"]', '.kpis', '#td-chart', '.td-tax'].map((s) => top('#view-today ' + s)), bv: getComputedStyle(document.querySelector('#view-today .td-bv')).fontSize, say: getComputedStyle(document.querySelector('#view-today .td-fsay')).fontSize };
     });
     ok(r.wide <= w, `${w}px: «Сегодня» does not scroll sideways`, r);
-    ok(r.order.every((t, i) => t > 0 && (!i || t > r.order[i - 1])), `${w}px: the sentence, six figures, the accounts, what needs deciding, the chart, «Можно вывести», the seven days, «Налоги», the month — in that order, one under another`, r.order);
+    ok(r.order.every((t, i) => t > 0 && (!i || t > r.order[i - 1])), `${w}px: the sentence, the accounts, the month, «Можно вывести», what needs deciding, the plan by weeks, and under «Аналитика» the five figures, the chart and «Налоги» — in that order, one under another`, r.order);
     ok(parseFloat(r.bv) >= 20 && parseFloat(r.say) >= 16, `${w}px: the type is not shrunk to fit — the month's figures are ${r.bv}, the answer of «Можно вывести» ${r.say}`);
     await holds(ph, `${w}px, the plan of test 2`);
     await calm(ph, `${w}px, the plan of test 2`);
@@ -4196,7 +4201,6 @@ await run('rv-day', 'the balance\'s own day, the first screen with nothing writt
   // A payout of the day the balance was typed for, in a statement uploaded after it: taken off, and said in «Счета».
   let pg = await scene('same day', ledA({ tx: [filed('s', T, -1000, 'cogs', 'Person G', { at: AT3 })] }), planX({ banks: [bal('Wise', 'GBP', 9880, T, { at: ms('2026-10-06T08:00:00Z') })], team: [row('g', 'Person G', 1000, T)], inflows: [row('q', 'Client Q', 3898.31, '2026-10-04', { vat: false })] }), { H: 60 });
   let S = await holds(pg, 'a payout of the balance\'s own day, uploaded after it');
-  await pg.click('#view-today .td-acc summary');
   same([S.fig('now'), acct(S.M, 'Wise|GBP').same, /вписан 6 окт, Mika · платежи за 6 окт \(£1,000\) вычтены: считаю, что прошли после остатка/.test(await text(pg, '#view-today .td-accs'))], [8880, -1000, true],
     '«Денег сейчас» £8,880, not £9,880 — and «Счета» says why: «платежи за 6 окт (£1,000) вычтены: считаю, что прошли после остатка»');
   // A line that stands under «сегодня» says when it was expected; a row's sum is whole pounds.
@@ -4447,8 +4451,7 @@ await run('rv-account', 'an account the plan does not hold is added by hand, in 
   const pg = await scene('a second account', ledA(), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), bal('Barclays', 'GBP', 1000, '2026-10-05')] }), { H: 60 });
   let S = await holds(pg, 'two accounts');
   const now0 = S.fig('now'), NEW = K('bal') + '[data-ed-newacct] ';
-  await pg.click('#view-today .td-acc summary');
-  await pg.click('#view-today .td-accs [data-ed-bal]');
+  await pg.click('#view-today .td-acc button[data-ed-bal]');
   // The same bank and currency again, and no name to tell the two apart: said, and nothing saved.
   await pg.selectOption(NEW + '[data-ed-nbank]', 'Barclays');
   await pg.fill(NEW + '[data-ed-namt]', '2500');
@@ -4492,8 +4495,7 @@ await run('rv-acctnum', 'a statement row moves the account whose number it carri
   S = await holds(pg, 'a statement of the second account');
   same(ests(), [['0001', 893], ['0002', 2400]], 'a payment that arrives in a statement of …0002 moves the second account and leaves the first where it was');
   // A founder writes the number in «Вписать остаток» — with or without a balance typed beside it.
-  await pg.click('#view-today .td-acc summary');
-  await pg.click('#view-today .td-accs [data-ed-bal]');
+  await pg.click('#view-today .td-acc button[data-ed-bal]');
   await pg.fill(K('bal') + '[data-ed-acct="Wise|GBP"] [data-ed-bac]', '…5412');
   await pg.click(K('bal') + '[data-ed-save]');
   await saved(pg);
@@ -4642,6 +4644,60 @@ await run('rv-taxrow', 'a tax row the bank closed before it was tied to its quar
     [{ r: 'vat', p: '2026Q2', part: true }, 'done', 3450, 0, null, 'parts', 'HMRC — долг: часть UK VAT за II кв. 2026'],
     'said to be a part of the quarter: the quarter has had 3,450 — the 1,150 the bank shows for it, not the 1,100 the row was written with — and what is left of it is the part of November and nothing more');
   await finish(pg);
+});
+
+await run('rv-layout', '«Сегодня» from the top: where the money is, the month and what may be taken out, the plan by weeks — and what is only read, folded', async () => {
+  // Mika, 8 October 2026: «счета я бы сделал виднее и наверху, чтобы четко было видно где и сколько», the month and the
+  // withdrawals in the upper part, «остальные аналитические штуки внизу» — chosen among lay-outs built in HTML first.
+  serve(demoLedger(T), demoPlan(T));
+  const pg = await open('the lay-out', undefined, { folded: true });
+  await pg.waitForSelector('#view-today [data-live="verdict"]');
+  await pg.click('#view-today [data-td-h="30"]');
+  let S = await holds(pg, 'the made-up studio, as it opens');
+  const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
+  const order = [];
+  for (const sel of ['.td-verdict', '.td-acc', '.td-month', '[aria-label="Ближайшие дни"]', '.td-anl']) order.push(await top(sel));
+  ok(order.every((t, i) => !i || t > order[i - 1]) && (await top('.td-free')) === (await top('.td-month')) && (await top('.td-need')) === (await top('[aria-label="Ближайшие дни"]')), 'from the top: the sentence, «Счета», then the month beside «Можно вывести», then the plan beside «Нужно решить», then «Аналитика»', order);
+  // «Счета»: one account to a line — what is on it, in pounds, and what the figure rests on; the last line is the money now
+  const rows = await pg.$$eval('#view-today .td-accs .td-ar', (l) => l.map((r) => [...r.children].map((c) => c.textContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())));
+  same([rows[0], rows[1], rows[2], rows[4], rows[rows.length - 1].slice(0, 3), rows.length], [['Счёт', 'На счёте', 'В фунтах', 'На чём стоит цифра'], ['Wise GBP', '£21,480', '£21,480', 'вписан 4 окт, Mika'], ['Wise USD', '$6,620', '£4,904', 'вписан 4 окт, Mika'], ['Tochka RUB', '₽654,000', '£5,542', 'вписан 4 окт, Mika'], ['Денег на 4 окт', '', '£54,230'], 7],
+    '«Счета» stands open at the top: each account with what is on it and what that is in pounds — and under a line, «Денег на 4 окт £54,230», the first of the six figures');
+  same([await pg.$$eval('#view-today .td-accs .td-an .sw', (l) => l.length), await texts(pg, '#view-today .td-acc > .row button'), /^выписки и остатки по 4 окт · 5 счетов · под налоги £/.test(rows[rows.length - 1][3])], [5, ['Вписать остаток', 'Загрузить выписки'], true],
+    '… each with its bank\'s square; the two buttons under the table; and the money now says what it rests on and how much of it is the taxes\'');
+  await pg.click('#view-today .td-at');
+  same(!!(await pg.$(K('bal'))), true, 'a press on the money now opens «Вписать остаток», as a press on that figure always did');
+  await pg.click(K('bal') + '[data-ed-x]');
+  // the plan by weeks
+  const weeks = () => pg.$$eval('#view-today .td-wk', (l) => l.map((b) => [b.getAttribute('aria-expanded'), b.querySelector('.td-wkn').textContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(), b.querySelector('.td-wkf').textContent.replace(/\s+/g, ' ').trim()].join(' | ')));
+  const days = () => pg.$$eval('#view-today .td-days .td-day b', (l) => l.map((b) => b.textContent.replace(/\u00a0/g, ' ')).filter((t) => !t.startsWith('Закрыто')));
+  const W = await weeks();
+  const D = S.M.days, sum = (a, b, k) => Math.round(D.filter((x) => x.d >= a && x.d <= b).reduce((n, x) => n + x[k], 0));
+  const end = (b) => Math.round(D.find((x) => x.d === b).e).toLocaleString('en-GB');
+  same([W.length, W[0], W[1].split(' | ').slice(0, 2).join(' | '), await days()],
+    [5, `true | Эта неделя 6–11 окт · 8 строк | придёт +£${sum('2026-10-06', '2026-10-11', 'in').toLocaleString('en-GB')} · уйдёт −£${sum('2026-10-06', '2026-10-11', 'out').toLocaleString('en-GB')} · останется £${end('2026-10-11')}`, 'false | Следующая неделя 12–18 окт · 8 строк', ['сегодня, вт 6 окт', 'ср 7 окт', 'сб 10 окт', 'вс 11 окт']],
+    '«План на 30 дней» stands by weeks, Monday to Sunday: each says what comes, what goes and what is left when it ends — the model\'s own sums — and only the week that holds today shows its days');
+  await pg.click('#view-today .td-wk[data-td-wk="2026-10-12"]');
+  same([(await weeks()).map((w) => w.split(' | ')[0]).join(' '), (await days()).slice(4, 6), !!(await pg.$(inDays('t-greta@2026-10')))], ['true true false false false', ['вт 13 окт', 'ср 14 окт'], true], 'a press on «Следующая неделя» opens it under its own line, and the first stays as it was');
+  await pg.click('#view-today .td-wk[data-td-wk="2026-10-05"]');
+  same([(await weeks()).map((w) => w.split(' | ')[0]).join(' '), (await days())[0]], ['false true false false false', 'вт 13 окт'], '… and a press on an open week shuts it');
+  await pg.click('#view-today [data-td-flip="all"]');
+  same([(await weeks()).map((w) => w.split(' | ')[0]).join(' '), await text(pg, '#view-today [data-td-flip="all"]'), (await days()).length], ['true true true true true', 'Свернуть недели', S.M.days.filter((x) => x.items.length || (S.M.doneDays[x.d] || []).length).length], '«Раскрыть все недели» opens every one — every day of the plan that holds a row');
+  await pg.click('#view-today [data-td-flip="all"]');
+  same((await weeks()).map((w) => w.split(' | ')[0]).join(' '), 'true false false false false', '… and «Свернуть недели» is the page as it opens');
+  // «Аналитика»: folded until asked for, and remembered
+  same([await pg.$eval('#view-today .td-anl', (e) => e.open), await text(pg, '#view-today .td-anl > summary'), await pg.isVisible('#td-chart'), await pg.$$eval('#view-today .td-anl .kpi .lbl', (l) => l.map((e) => e.textContent.replace(/\u00a0/g, ' ')))],
+    [false, 'Аналитикапять цифр · остаток по дням · налоги', false, ['Придёт за 30 дней', 'Уйдёт за 30 дней', 'Нижняя точка', 'Ждём и не пришло', 'Можно вывести · на 4 окт']],
+    '«Аналитика» is one line at the foot of the page — the five other figures, the chart and the taxes are under it, out of the way');
+  await pg.click('#view-today .td-anl > summary');
+  await pg.waitForSelector('#td-chart path, #td-chart polyline');
+  await pg.waitForFunction(() => localStorage.getItem('selfstudio-money-analytics') === '1');
+  const drawn = await pg.$eval('#td-chart', (e) => [Math.round(e.getBoundingClientRect().width) > 600, e.querySelectorAll('[data-td-i]').length > 20]);
+  same([drawn, await pg.isVisible('#view-today .td-tax'), await pg.evaluate(() => localStorage.getItem('selfstudio-money-analytics'))], [[true, true], true, '1'], 'opened, it shows the chart drawn to the width it now has, and «Налоги» — and the page remembers that it was opened');
+  await pg.reload();
+  await pg.waitForSelector('#view-today [data-live="verdict"]');
+  same(await pg.$eval('#view-today .td-anl', (e) => e.open), true, '… so after a reload it stands open');
+  await shot(pg, 'rv-layout');
+  await pg.context().close();
 });
 
 await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {

@@ -533,11 +533,38 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .td-kpi:focus-visible{outline:2px solid var(--text-primary);outline-offset:-2px}
 .kpi .val.td-amber{color:var(--warn)}
 .kpi .hint span{white-space:nowrap}
-.td-acc{border-bottom:1px solid var(--border);padding:0 2px 12px}
-.td-acc>summary{font-size:13.5px;font-weight:400;list-style-position:inside}
-.td-acc>summary .lbl{display:inline;margin-right:10px}
-.td-accs{display:grid;grid-template-columns:minmax(0,auto) auto minmax(0,1fr);gap:7px 18px;align-items:baseline;margin:12px 0 0;font-size:13px}
-.td-accs>.row{grid-column:1/-1;margin-top:6px}
+/* «Счета»: where the money is and how much, one account to a line, at the top of the page (Mika, 8 October 2026:
+   «чтобы четко было видно где и сколько»). They were one folded line under the six figures. */
+.td-accs{margin-top:8px}
+.td-ar{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.5fr);gap:4px 14px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--border)}
+.td-ar>:nth-child(2),.td-ar>:nth-child(3){text-align:right;white-space:nowrap}
+.td-ah{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);padding:4px 0 8px;border-bottom-color:var(--border-strong)}
+.td-an{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}
+.td-av{font-size:18px;font-weight:500}
+.td-at{border-bottom:0;border-top:1px solid var(--text-primary);margin-top:-1px;font-weight:600}
+.td-at .td-meta{font-weight:400}
+.td-acc>.row{margin-top:14px}
+@media (max-width:620px){.td-ar{grid-template-columns:minmax(0,1fr) auto}.td-ar>:nth-child(3),.td-ar>:nth-child(4){grid-column:1/-1;text-align:left}.td-ah>:nth-child(3),.td-ah>:nth-child(4),.td-ar>.td-same,.td-ar>:empty{display:none}}
+/* The plan by weeks: what comes and goes in a week and what is left after it. A week opens on a press. */
+button.td-wk{display:flex;justify-content:space-between;align-items:baseline;gap:4px 18px;flex-wrap:wrap;width:100%;height:auto;padding:14px 0;border:0;border-bottom:1px solid var(--border-strong);border-radius:0;font-family:var(--sans);font-size:14px;font-weight:400;text-transform:none;letter-spacing:0;text-align:left}
+button.td-wk::before{content:"+";font-family:var(--mono);width:14px;flex:none;color:var(--text-muted)}
+button.td-wk[aria-expanded="true"]::before{content:"−"}
+button.td-wk:hover{background:var(--panel-raised)}
+button.td-wk:active{transform:none}
+button.td-wk:focus-visible{outline-offset:-2px}
+.td-wkn{flex:1;min-width:0}
+.td-wkf{font-size:13px;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.td-wkf b{color:var(--text-primary);font-weight:600}
+.td-wkd{padding:0 0 10px 20px}
+@media (max-width:620px){.td-wkd{padding-left:0}}
+/* «Аналитика»: the five figures, the chart and the taxes, folded into one line under everything a founder acts on. */
+.td-anl{border-top:1px solid var(--text-primary);margin-top:8px}
+.td-anl>summary{display:flex;gap:6px 14px;align-items:baseline;flex-wrap:wrap;padding:16px 2px;font-size:17px;list-style:none}
+.td-anl>summary::-webkit-details-marker{display:none}
+.td-anl>summary::before{content:"+";font-family:var(--mono);font-weight:400;width:14px;flex:none;color:var(--text-muted)}
+.td-anl[open]>summary::before{content:"−"}
+.td-anl>summary .td-meta{font-weight:400}
+@media (min-width:1101px){.kpis.td-k5{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .td-meta{color:var(--text-muted);font-size:12px}
 .td-two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
 @media (max-width:820px){.td-two{grid-template-columns:minmax(0,1fr)}.td-need{order:-1}}
@@ -1623,11 +1650,13 @@ function renderLedger(){
 // What an account is called on the page. Two accounts in one bank and one currency share «Barclays GBP»: the one
 // that was added second goes by the name a founder gave it.
 const acName=a=>a.key.split("|").length>2&&a.title?a.title:a.name;
+// A bank's colour and its square: in «Касса», and beside each account on «Сегодня».
+const BCOL={Wise:"--s1",Tochka:"--s2",Mosta:"--s5",Revolut:"--s4",Barclays:"--s6",Nebeus:"--s3",Cash:"--text-muted"};
+const bcol=b=>`var(${BCOL[b]||"--text-muted"})`,dot=b=>`<i class="sw" style="background:${bcol(b)}"></i>`;
 const Cash=(()=>{
  const root=$("#view-cash"),q=s=>root.querySelector(s);
  const LISTS=["banks","inflows","team","taxes","other","div"],ROWS=["inflows","team","taxes","other","div"];
  const STORE="selfstudio-money-cash-v1";
- const BCOL={Wise:"--s1",Tochka:"--s2",Mosta:"--s5",Revolut:"--s4",Barclays:"--s6",Nebeus:"--s3",Cash:"--text-muted"};
  // A list of the constructor: its heading, what its first column asks, and the word for a row of it that is done.
  const SEC={inflows:{title:"Поступления",who:"От кого",done:"получено"},team:{title:"Команда",who:"Кому",done:"оплачено"},
   taxes:{title:"Налоги",who:"Какой налог",done:"оплачено"},other:{title:"Прочие расходы",who:"На что",done:"оплачено"},div:{title:"Дивиденды",who:"Что",done:"взято"}};
@@ -1652,7 +1681,7 @@ const Cash=(()=>{
  const mLast=ym=>ym+"-"+String(new Date(Date.UTC(+ym.slice(0,4),+ym.slice(5,7),0)).getUTCDate()).padStart(2,"0");
  const num=v=>typeof v==="number"?v.toFixed(2):"",lv=(k,v,text)=>`<span data-live="${k}" data-v="${num(v)}">${text}</span>`;
  const nat=(v,c)=>fmt(v,v%1?2:0,SYM[c]||""),count=(n,a,b,c)=>`${n} ${plural(n,a,b,c)}`;
- const bcol=b=>`var(${BCOL[b]||"--text-muted"})`,dot=b=>`<i class="sw" style="background:${bcol(b)}"></i>`;
+
  const rowOf=(k,id)=>plan[k].find(x=>String(x.id)===id)||null,anyRow=id=>ROWS.reduce((r,k)=>r||rowOf(k,id),null);
 
  // ---- where the plan lives ----
@@ -4985,7 +5014,10 @@ function dayChart(svg,D,o){
 const Today=(()=>{
  const root=$("#view-today"),LISTS=Live.LISTS;
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
- const st={all:false,past:false,more:false,acc:false,day:"",undated:false};
+ // `wk` holds the weeks a founder opened or shut by hand (the week's Monday → open); `anl` is «Аналитика», and is
+ // remembered in this browser like the choice of 30 or 60 days: whoever reads the chart every morning opens it once.
+ const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false};
+ try{st.anl=localStorage.getItem(ANL)==="1";}catch(e){}
  let M=null,by={},chartW=0;
  const num=v=>typeof v==="number"?v.toFixed(2):esc(v==null?"":v);
  const lv=(k,v,text)=>`<span data-live="${k}" data-v="${num(v)}">${text}</span>`;
@@ -5087,8 +5119,9 @@ const Today=(()=>{
  // ---- six figures ----
  // They are the head of «Касса» as well, from the same model: the two tabs cannot disagree about a figure they both
  // print. `cls` is a class for the row itself («Касса» makes it stick under the top bar). The sixth is «Можно
- // вывести»; the month's result lives in the month's own block.
- function kpis(M,cls){
+ // вывести»; the month's result lives in the month's own block. With `five` the first — the money now — is left
+ // out: on «Сегодня» it is the last line of «Счета», above.
+ function kpis(M,cls,five){
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
   const H=M.H,kp=(label,val,hint,o)=>`<div class="kpi${o&&o.hot?" hot":""}${o&&o.tap?" td-kpi":""}"${o&&o.tap?' data-ed-bal role="button" tabindex="0" title="Вписать остаток"':""}><div class="lbl">${label}</div><div class="val${o&&o.cls?" "+o.cls:""}">${val}</div><div class="hint">${hint}</div></div>`;
   // With nothing written ahead no figure of the forecast is shown — whether the balances are typed (vE) or not
@@ -5104,7 +5137,7 @@ const Today=(()=>{
   const fh=p.state==="v0"?"нужны остатки":p.state==="stale"?`остатки от ${dRu(M.nowDate)}`:p.state==="noout"?"впишите расходы":p.state==="thin"?`в плане расходов ${fmtK(F.thin.plan)} из обычных ${fmtK(F.thin.usual)}`
    :(st0?`${esc(st0.label.replace(/ \(.*\)$/,""))} — ${st0.amt}`:`тесный день ${dRu(F.tight.d)}`)+(F.wd.gbp>0.5?` · сверх выводов в плане ${fmtK(F.wd.gbp)}`:"");
   const free=kp(p.sum&&F.asOf?`Можно вывести · на ${dRu(F.asOf)}`:"Можно вывести",p.sum?lv("free",F.now,fmt(p.v)):lv("free","","—"),fh);
-  return `<section class="kpis${cls?" "+cls:""}" aria-label="Шесть цифр">${now}
+  return `<section class="kpis${cls?" "+cls:""}" aria-label="${five?"Пять цифр":"Шесть цифр"}">${five?"":now}
    ${vE?none("in",`Придёт за ${H} дней`):kp(`Придёт за ${H} дней`,lv("in",M.IN,fmt(M.IN)),`по плану · ${lv("in.n",M.inParts.n,count(M.inParts.n,"поступление","поступления","поступлений"))}${M.inParts.vat>0.5?` · в т.ч. VAT ${lv("in.vat",M.inParts.vat,fmtK(M.inParts.vat))}`:""}`)}
    ${vE?none("out",`Уйдёт за ${H} дней`):kp(`Уйдёт за ${H} дней`,lv("out",M.OUT,fmt(M.OUT)),`команда ${lv("out.team",M.outParts.team,fmtK(M.outParts.team))} · прочее ${lv("out.other",M.outParts.other,fmtK(M.outParts.other))} · налоги ${lv("out.taxes",M.outParts.taxes,fmtK(M.outParts.taxes))} · дивиденды ${lv("out.div",M.outParts.div,fmtK(M.outParts.div))}${M.outParts.ptax>0.5?` (личные налоги ${lv("out.ptax",M.outParts.ptax,fmtK(M.outParts.ptax))})`:""}`)}
    ${low}
@@ -5113,19 +5146,26 @@ const Today=(()=>{
   </section>`;
  }
 
- // ---- the accounts, in one line ----
+ // ---- the accounts: where the money is, and how much ----
+ // One account to a line, in the plan's own order: what is on it, what that is in pounds, and what the figure rests
+ // on. The last line is the money now — the first of the six figures of «Касса» — and a press on it opens
+ // «Вписать остаток», as a press on that figure did.
  function accounts(){
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
-  const A=M.accounts.filter(a=>a.inPlan||a.active).sort((a,b)=>Math.abs(b.gbp||0)-Math.abs(a.gbp||0)),top=A.find(a=>a.anchor),miss=M.missing.map(k=>acc(k).name);
-  const head=miss.length?`нет остатка — ${esc(miss.join(", "))}`:top?`${esc(top.name)} ${natv(Math.round(top.est),top.cur)} по ${dRu(top.through)}${A.length>1?` · ещё ${A.length-1}`:""}`:"остатки не вписаны";
+  const A=M.accounts.filter(a=>a.inPlan||a.active),known=M.accounts.filter(a=>a.anchor).length,miss=M.missing.map(k=>acc(k).name);
   const row=a=>{const A0=a.anchor,words=[];
    if(A0){words.push(`вписан ${dRu(A0.asOf)}${A0.by?", "+A0.by:""}`);if(a.cov&&a.cov>A0.asOf)words.push(`выписки по ${dRu(a.cov)}`);
     // Payments of the balance's own day that came with a later statement are taken to have left after it was typed.
     if(a.same<-0.005)words.push(`платежи за ${dRu(A0.asOf)} (${natv(round2(-a.same),a.cur)}) вычтены: считаю, что прошли после остатка`);
     if(a.stale)words.push(a.stale==="old"?`устарел · ${a.age} дн. без выписки`:`${a.age} дн. без выписки`);else if(a.handOld)words.push(`вписан ${a.handDays} дн. назад — сверьте с банком`);}
    else words.push(a.active?(a.legacy&&a.old?`нет остатка · в старой Кассе было ${natv(a.old,a.cur)}`:"нет остатка"):"не используется");
-   return `<span>${esc(acName(a))}</span><span class="mono" data-live="acct.${esc(a.key)}" data-v="${num(a.est)}">${A0?natv(round2(a.est),a.cur)+(a.cur!=="GBP"?` <span class="td-meta">${fmt(a.gbp)}</span>`:""):"—"}</span><span class="td-meta">${esc(words.join(" · "))}</span>`;};
-  return `<details class="td-acc"${st.acc?" open":""}><summary><span class="lbl">Счета</span>${head}</summary><div class="td-accs">${A.map(row).join("")}<div class="row"><button class="sm" data-ed-bal>Вписать остаток</button><button class="sm ghost" data-tabgo="upload">Загрузить выписки</button></div></div></details>`;
+   return `<div class="td-ar"><span class="td-an">${dot(a.bank)}${esc(acName(a))}</span><span class="mono td-av" data-live="acct.${esc(a.key)}" data-v="${num(a.est)}">${A0?natv(round2(a.est),a.cur):"—"}</span><span class="mono${a.cur==="GBP"?" td-same":""}">${A0?fmt(a.gbp):""}</span><span class="td-meta">${esc(words.join(" · "))}</span></div>`;};
+  const sum=M.v0?`не хватает остатка: ${esc(miss.join(", "))}`
+   :`выписки и остатки по ${dRu(M.nowDate)} · ${count(known,"счёт","счёта","счетов")}${M.taxes.reserve>0.5?` · под налоги ${lv("reserve",M.taxes.reserve,fmt(M.taxes.reserve))}`:""}${M.marksGbp?` · в т.ч. отмечено вручную ${lv("marks",M.marksGbp,(M.marksGbp>0?"+":"")+fmt(M.marksGbp))}`:""}`;
+  const total=`<div class="td-ar td-at td-kpi" data-ed-bal role="button" tabindex="0" title="Вписать остаток"><span class="td-tl">${M.v0||M.nowIsToday?"Денег сейчас":`Денег на ${dRu(M.nowDate)}`}</span><span></span><span class="mono">${M.v0?lv("now","","—"):lv("now",M.now,fmt(M.now))}</span><span class="td-meta td-tw">${sum}</span></div>`;
+  return `<section class="card td-acc" aria-label="Счета"><h2>Счета<span class="note">где и сколько</span></h2>
+   <div class="td-accs"><div class="td-ar td-ah"><span>Счёт</span><span>На счёте</span><span>В фунтах</span><span>На чём стоит цифра</span></div>${A.map(row).join("")}${total}</div>
+   <div class="row"><button class="sm" data-ed-bal>Вписать остаток</button><button class="sm ghost" data-tabgo="upload">Загрузить выписки</button></div></section>`;
  }
 
  // ---- what needs a decision ----
@@ -5174,10 +5214,16 @@ const Today=(()=>{
  const rowH=(it,at)=>{const done=it.state==="done",meta=[it.bank,it.cur!=="GBP"&&!done?natv(Math.round(it.amt*(it.factor||1)),it.cur):"",done?"":Ed.vatWords(it),Ed.remark(it)].filter(Boolean).join(" · ");
   return `<div class="td-row${done?" td-done":it.kind!=="typed"?" td-hist":""}" data-ed-open="${esc(it.id)}"${at?` data-ed-at="${at}"`:""} role="button" tabindex="0"><span><span class="td-nm">${esc(it.name||"(без названия)")}</span><span class="td-meta">${esc(meta)}</span></span><span class="td-am"${done?"":` data-live="it.${esc(it.id)}" data-v="${num(it.cash)}"`}>${Ed.sum(it)}</span></div>${Ed.under(it.id,at||"")}`;};
  const sortRows=l=>l.sort((a,b)=>(b.dir-a.dir)||Math.abs(b.cash||b.full)-Math.abs(a.cash||a.full));
+ // The plan of the days ahead, a week to a line: what comes in it, what goes, and what is left when it ends. The
+ // week that holds today stands open; any other opens on a press, and its rows are drawn only then. (It was a list
+ // of the next seven days with a button for the rest: Mika, 8 October 2026, chose the weeks.)
+ const monday=d=>dAdd(d,-((new Date(dUTC(d)).getUTCDay()+6)%7));
  function days(){
-  const T=M.T,H=M.H,to=st.all?M.end:dAdd(T,6),blocks=[];
-  M.days.forEach(D=>{if(D.d>to)return;const live=D.items.map(id=>by[id]).filter(Boolean),done=(M.doneDays[D.d]||[]).map(id=>by[id]).filter(Boolean);if(!live.length&&!done.length)return;
-   const i=D.in,o=D.out;
+  const T=M.T,H=M.H,W={},order=[];
+  M.days.forEach(D=>{const k=monday(D.d);if(!W[k]){W[k]={k,from:D.d,to:D.d,in:0,out:0,e:D.e,n:0,blocks:[]};order.push(k);}
+   const w=W[k],live=D.items.map(id=>by[id]).filter(Boolean),done=(M.doneDays[D.d]||[]).map(id=>by[id]).filter(Boolean);w.to=D.d;w.in+=D.in;w.out+=D.out;w.e=D.e;w.n+=live.length+done.length;
+   if(!live.length&&!done.length)return;
+   const i=D.in,o=D.out,blocks=w.blocks;
    // With nothing written ahead a balance by day would be a forecast of a plan that is not there: the day says
    // what leaves, and stops at that.
    const left=M.empty?"":(i||o?" · ":"")+(M.v0?"от сегодняшнего: ":"останется ")+lv(`day.${D.d}.e`,D.e,(M.v0&&D.e>0?"+":"")+fmt(D.e));
@@ -5186,9 +5232,20 @@ const Today=(()=>{
   // a month of paid rows above today would bury today.
   const past=Object.keys(M.doneDays).filter(d=>d<T).sort(),pn=past.reduce((a,d)=>a+M.doneDays[d].length,0);
   const before=pn?`<div class="td-day"><b>${st.past?"Закрыто за месяц":`Закрыто за месяц: ${count(pn,"строка","строки","строк")}`}</b><button class="sm ghost" data-td-flip="past" aria-expanded="${st.past}">${st.past?"Свернуть":"Показать"}</button></div>${st.past?past.map(d=>`<div class="td-day"><b>${dRuW(d)}</b></div>${sortRows(M.doneDays[d].map(id=>by[id]).filter(Boolean)).map(it=>rowH(it)).join("")}`).join(""):""}`:"";
-  return `<section class="card" aria-label="Ближайшие дни"><h2>${st.all?`Все ${H} дней`:"Ближайшие 7 дней"}<span class="note">нажмите на строку, чтобы поправить</span></h2>
-   <div class="td-days">${before}${blocks.join("")||`<p class="note" style="margin:8px 0 0">${M.empty?"План пуст: в эти дни ничего не вписано.":"В эти дни строк нет."}</p>`}</div>
-   <div class="td-foot"><span></span><button class="sm ghost" data-td-flip="all" aria-expanded="${st.all}">${st.all?"Только 7 дней":`Показать все ${H} дней`}</button></div></section>`;
+  const isOpen=k=>k in st.wk?st.wk[k]:st.all||k===order[0];
+  const span=w=>w.from.slice(0,7)===w.to.slice(0,7)?(w.from===w.to?dRu(w.to):`${+w.from.slice(8)}–${dRu(w.to)}`):`${dRu(w.from)} – ${dRu(w.to)}`;
+  const weeks=order.map((k,i)=>{const w=W[k],open=isOpen(k);
+   // With nothing written ahead, or without every balance, there is no «останется» to say of a week.
+   const figs=[w.in?`придёт <b>+${fmt(w.in)}</b>`:"",w.out?`уйдёт <b>−${fmt(w.out)}</b>`:"",M.empty||M.v0?"":`останется <b>${fmt(w.e)}</b>`].filter(Boolean).join(" · ");
+   return `<button class="td-wk" data-td-wk="${k}" aria-expanded="${open}"><span class="td-wkn"><b>${i===0?"Эта неделя":i===1?"Следующая неделя":"Неделя"}</b> <span class="td-meta">${span(w)} · ${w.n?count(w.n,"строка","строки","строк"):"строк нет"}</span></span><span class="td-wkf">${figs}</span></button>${open?`<div class="td-wkd">${w.blocks.join("")||'<p class="note" style="margin:8px 0 0">В эти дни строк нет.</p>'}</div>`:""}`;}).join("");
+  const none=!order.some(k=>W[k].n);
+  return `<section class="card" aria-label="Ближайшие дни"><h2>План на ${H} дней<span class="note">по неделям · нажмите на строку, чтобы поправить</span></h2>
+   <div class="td-days">${before}${none?`<p class="note" style="margin:8px 0 0">${M.empty?"План пуст: в эти дни ничего не вписано.":"В эти дни строк нет."}</p>`:weeks}</div>
+   ${none?"":`<div class="td-foot"><span></span><button class="sm ghost" data-td-flip="all" aria-expanded="${st.all}">${st.all?"Свернуть недели":"Раскрыть все недели"}</button></div>`}</section>`;
+ }
+ // «Аналитика»: what a founder reads rather than acts on — the five figures, the balance by day, the taxes.
+ function analytics(){
+  return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">пять цифр · ${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${kpis(M,"td-k5",true)}${chartCard()}${taxCard()}</div></details>`;
  }
 
  // ---- the studio's taxes ----
@@ -5312,7 +5369,9 @@ const Today=(()=>{
    <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-td-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span><button class="primary" data-ed-add>Добавить</button></div></div>`;
   const nothing=!S.tx.some(real)&&!S.inbox.some(real)&&!LISTS.some(k=>P[k].length)&&!M.accounts.some(a=>a.anchor);
   root.innerHTML=nothing?head+Ed.sheet("add")+Ed.sheet("bal")+`<div class="empty"><b>Пока считать не из чего</b>Загрузите выписки и впишите остатки на счетах — здесь появится, хватит ли денег на ближайшие недели.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-ed-bal>Вписать остатки</button><button data-demo class="ghost">Показать на примере</button></div></div>`
-   :head+Ed.sheet("add")+verdict()+kpis(M)+Ed.sheet("bal")+accounts()+`<div class="td-two">${chartCard()}${need()}</div><div class="two td-cols"><div class="stack">${freeCard()}${days()}</div><div class="stack">${taxCard()}${month()}</div></div>`;
+   // From the top: the verdict; where the money is; the month and what may be taken out; the plan by weeks beside
+   // what has to be decided; and, folded, what is only read (Mika's choice of 8 October 2026 among three lay-outs).
+   :head+Ed.sheet("add")+verdict()+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+analytics();
   chart();Ed.after(root);
  }
  // Only the chart depends on the width; redrawing the whole tab on a resize would take the keyboard away on a
@@ -5323,7 +5382,9 @@ const Today=(()=>{
   const c=s=>e.target.closest(s);let x;
   if(c("[data-td-reload]"))return location.reload();
   if((x=c("[data-td-h]")))return Plan.setH(+x.dataset.tdH);
-  if((x=c("[data-td-flip]"))){const k=x.dataset.tdFlip;st[k]=!st[k];return render();}
+  // «Раскрыть все недели» and back: either way the weeks opened or shut by hand are forgotten.
+  if((x=c("[data-td-flip]"))){const k=x.dataset.tdFlip;st[k]=!st[k];if(k==="all")st.wk={};return render();}
+  if((x=c("[data-td-wk]"))){st.wk[x.dataset.tdWk]=x.getAttribute("aria-expanded")!=="true";return render();}
   if((x=c("[data-td-day]"))){st.day=x.dataset.tdDay;root.querySelector("#td-dayinfo").innerHTML=st.day?dayInfo(st.day):"";return;}
   if((x=c("[data-td-days]"))){Cash.day(x.dataset.tdDays,x.hasAttribute("data-td-why"));return setTab("cash");}
   // The two things to do about an empty plan: open the month to type it in, or the list of who is paid every month.
@@ -5334,7 +5395,8 @@ const Today=(()=>{
   // hears the same click after this, writes the mark.)
   if((x=c('[data-ed-do="paid"]'))){const it=by[x.dataset.edId];if(it&&it.date&&it.date<M.T)st.past=true;}
  });
- root.addEventListener("toggle",e=>{if(e.target.matches&&e.target.matches(".td-acc"))st.acc=e.target.open;},true);
+ // «Аналитика» opened: the chart was drawn while it had no width, so it is drawn again.
+ root.addEventListener("toggle",e=>{if(!e.target.matches||!e.target.matches(".td-anl"))return;st.anl=e.target.open;try{localStorage.setItem(ANL,st.anl?"1":"0");}catch(x){}if(st.anl)chart();},true);
  Plan.watch(render);
  return{render,resize,kpis,freeParts};
 })();
