@@ -4459,6 +4459,35 @@ await run('rv-acctnum', 'a statement row moves the account whose number it carri
   await finish(pg);
 });
 
+await run('rv-dup', 'a list of the month can be written again from the month before: «Продублировать с октября» under each list, for what this month does not hold yet', async () => {
+  // Mika, 8 October 2026, looking at an empty «Команда» of November: the rows of October, once more — each list by
+  // itself. October here holds two rows marked «каждый месяц» (Client A, Person B), which November has already, and
+  // two of its own: Person G on the 31st, marked paid, and Client Q, whose invoice carries VAT.
+  const pg = await scene('the month before, once more', ledA(), planW({ team: [row('g', 'Person G', 1000, '2026-10-31', { paid: paid('2026-10-05') })], inflows: [row('q', 'Client Q', 500, '2026-10-20', { vat: true })] }), { H: 60 });
+  await pg.click('.nav [data-tab="cash"]');
+  same(await pg.$$eval('#view-cash [data-cs-dup]', (l) => l.length), 0, 'October offers nothing: the plan holds no row of September');
+  await toMonth(pg, '2026-11');
+  same(await pg.$$eval('#view-cash [data-cs-dup]', (l) => l.map((e) => [e.dataset.csDup, e.textContent.replace(/\s+/g, ' ').trim()].join(': '))), ['inflows: Продублировать с октября · 1 строка', 'team: Продублировать с октября · 1 строка'],
+    'November: «Поступления» and «Команда» each offer the one row of October they do not hold — what is marked «каждый месяц» is there already — and the lists that held nothing in October offer nothing');
+  await pg.click('#cs-sec-team [data-cs-dup]');
+  await saved(pg);
+  const said = await toastText(pg);
+  let S = await holds(pg, 'October\'s team, once more in November', 'cash');
+  const g2 = S.P.team.find((r) => r.name === 'Person G' && r.id !== 'g');
+  same([S.P.team.length, g2 && [g2.amt, g2.cur, g2.bank, g2.date, 'paid' in g2, 'rec' in g2, g2.on, g2.m.by], S.P.team.find((r) => r.id === 'g').date, await pg.$('#cs-sec-team [data-cs-dup]'), said],
+    [3, [1000, 'GBP', 'Wise', '2026-11-30', false, false, true, 'Mika'], '2026-10-31', null, 'Продублировано с октября: 1 строка'],
+    'the press writes Person G again as a row of November — the same sum, currency and bank, on the last day of the month where October had its 31st, not paid and not repeating — leaves October\'s row alone, and the button is gone: there is nothing left to bring');
+  await pg.click('#cs-sec-inflows [data-cs-dup]');
+  await saved(pg);
+  S = await holds(pg, '… and October\'s receipts', 'cash');
+  const q2 = S.P.inflows.find((r) => r.name === 'Client Q' && r.id !== 'q');
+  same(q2 && [q2.amt, q2.date, q2.vat], [500, '2026-11-20', true], 'a receipt comes on the same day of the month, with the VAT its invoice carried');
+  await pg.click('#toastUndo');
+  await saved(pg);
+  same(await pg.evaluate(() => window.__cash.state().inflows.map((r) => r.name)), ['Client A', 'Client Q'], '«Отменить» takes the copied rows back');
+  await finish(pg);
+});
+
 await run('rv-small', 'the rest of the review: a save the server did not take, the wordmark, a paid row made to repeat, a name the table knows, a tax row renamed after a founder, an unsorted receipt in «Можно вывести»', async () => {
   // A save the server fails is said out loud and tried again by itself.
   serve(ledP(), await plan2());
