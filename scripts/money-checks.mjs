@@ -4973,6 +4973,21 @@ await run('rv-kassa2', '«Касса · По месяцам» in two columns: a 
   await rowCard(pg, 'team', 'rB@2026-10');
   same(await pg.$(K('row') + '[data-ed-f="sub"]'), null, 'a row of the team has no such tick');
   await pg.click(K('row') + '[data-ed-x]');
+  // A card that opens in sight leaves the page where it stands; one that opens below the edge of the window is
+  // brought up by just enough to be seen. (Until 9 October 2026 every card was thrown to the middle of the window:
+  // Mika, of the page with the new rows, «при открытии страница скачет».)
+  await pg.evaluate(() => window.scrollTo(0, 0));
+  await rowCard(pg, 'inflows', 'rA@2026-10');
+  same(await pg.evaluate(() => { const r = document.querySelector('[data-ed-card="row"]').getBoundingClientRect(); return [window.scrollY, r.top > 0 && r.bottom < innerHeight]; }), [0, true], 'a row near the top is pressed: its card is whole in the window, and the page has not moved');
+  await pg.click(K('row') + '[data-ed-x]');
+  const low = cs('div', (await listed(pg, 'div'))[0] || 'none'), lowRow = (await pg.$(low)) ? low : cs('other', 'o1');
+  const y0 = await pg.evaluate((sel) => { const tr = document.querySelector(sel); window.scrollTo(0, Math.max(0, tr.getBoundingClientRect().bottom + window.scrollY - window.innerHeight + 6)); return window.scrollY; }, lowRow);
+  await pg.click(lowRow + ' .cs-nt');
+  await pg.waitForSelector('#view-cash tr.cs-edrow ' + K('row'));
+  const at = await pg.evaluate((sel) => { const c = document.querySelector('#view-cash tr.cs-edrow [data-ed-card="row"]').getBoundingClientRect(), r = document.querySelector(sel).getBoundingClientRect(), bar = document.querySelector('.topbar').getBoundingClientRect();
+    return [window.scrollY, Math.round(c.height), Math.round(window.innerHeight - c.bottom), r.top >= bar.bottom - 1]; }, lowRow);
+  ok(y0 > 0 && at[0] > y0 && at[0] - y0 <= at[1] + 40 && at[2] >= 0 && at[2] <= 40 && at[3], 'a row at the very foot of the window is pressed: the page comes up by the height of the card and no more — the card ends at the foot of the window, and the row is still above it, in sight', [y0, at]);
+  await pg.click(K('row') + '[data-ed-x]');
   // «Свернуть», and a narrow window
   await pg.click('#cs-sec-subs .cs-addrow [data-cs-fold]');
   same((await subs()).slice(0, 2), [true, false], '«Свернуть» folds the section back into its line');
@@ -4985,7 +5000,7 @@ await run('rv-motion', 'what unfolds, unfolds with one motion — a row\'s card,
   // Mika, 8 October 2026: «на все раскрывания сделай приятную плавную анимацию». The page is drawn afresh at every
   // change, so the motion is played on what has just been drawn; what is shut by its own button folds first and is
   // drawn away when the fold ends. Every other check asks the page for less motion; this one does not.
-  const P = planW({ other: [every('s1', 'Tool A', 20, 10, '2026-10', { sub: true }), every('s2', 'Tool B', 30, 25, '2026-10', { sub: true })] });
+  const P = planW({ other: [every('s1', 'Tool A', 20, 10, '2026-10', { sub: true }), every('s2', 'Tool B', 30, 25, '2026-10', { sub: true }), row('o9', 'Office', 600, '2026-10-20')] });
   serve(ledA(), P);
   const pg = await open('motion', undefined, { motion: true, folded: true });
   await pg.waitForSelector('#view-today [data-live="verdict"]');
@@ -5033,6 +5048,23 @@ await run('rv-motion', 'what unfolds, unfolds with one motion — a row\'s card,
   await pg.click(cs('team', 'rB@2026-10') + ' .cs-dd');
   await pg.waitForSelector(card, { state: 'detached' });
   ok(!(await pg.$('[data-ed-card]')), '… and so it does when the row is pressed a second time');
+  // One card goes while another comes: the first is not simply left out of the page as it is drawn afresh — a copy
+  // of it folds away where it stood, so the row that was pressed does not leap up by the height of that card.
+  // (Mika, 9 October 2026: «при открытии страница скачет».)
+  await pg.click(cs('team', 'rB@2026-10') + ' .cs-nt');
+  await still(card);
+  // (pressed and measured in one breath: a moment later the copy is already folding and the row is on its way up)
+  const leap = await pg.evaluate((sel) => { const top = () => Math.round(document.querySelector(sel).getBoundingClientRect().top), y0 = top(), s0 = window.scrollY; document.querySelector(sel + ' .cs-nt').click(); return [top() - y0, window.scrollY - s0]; }, cs('other', 'o9'));
+  const mid = await pg.evaluate(() => { const g = document.querySelector('#cs-sec-team tr.cs-edrow'), c = document.querySelectorAll('[data-ed-card]');
+    return [c.length, c[0].closest('section').id, !!g && !g.querySelector('[data-ed-card], [id], [data-ed-f]') && g.querySelector('.ed-card').getAnimations().length, !!g && g.inert]; });
+  same([mid, Math.abs(leap[0]) <= 2, leap[1]], [[1, 'cs-sec-other', 1, true], true, 0],
+    'a row lower down is pressed while a card is open above it: there is one card, the new one; what is left of the old one is a copy that is folding and that nothing can press or read; and at the press the row has not leapt, nor has the page');
+  await pg.waitForSelector('#cs-sec-team tr.cs-edrow', { state: 'detached' });
+  await still('#cs-sec-other tr.cs-edrow ' + K('row').trim());
+  ok((await pg.$eval('#cs-sec-other tr.cs-edrow ' + K('row').trim(), (e) => { const r = e.getBoundingClientRect(); return r.top > 0 && r.bottom <= innerHeight; })), '… when the copy has folded away the new card is whole in the window');
+  await pg.click(K('row') + '[data-ed-do="paid"]');
+  same([await pg.$('[data-ed-card]'), await pg.$eval('#cs-sec-other tr.cs-edrow .ed-card', (e) => e.getAnimations().length)], [null, 1], '«Оплачено» in a card: the row is marked at once, and the card folds away under it instead of vanishing');
+  await pg.waitForSelector('#cs-sec-other tr.cs-edrow', { state: 'detached' });
   // «Подписки», and a day of «По дням»
   await pg.click('#cs-sec-subs [data-cs-fold]');
   const s0 = await moving('#cs-sec-subs .tbl');
