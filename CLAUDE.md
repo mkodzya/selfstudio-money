@@ -31,8 +31,9 @@ and so is every text a person sees on Money's pages.
 
 1. **The folder on the owner's Mac that holds `data/` is not a work checkout.**
    See "The laptop folder" below.
-2. **The real ledger never enters git and never reaches the test stand.** See
-   "Data rules".
+2. **The real ledger never enters git.** Since the owner's decision of
+   8 October 2026 the test stand holds it, for the rehearsal before prod, and
+   nothing may return that stand to the fabricated studio. See "Data rules".
 3. **Prod only on the owner's word.** That includes the edge proxy, which is
    read from the platform's prod checkout. A word for test is not a word for
    prod.
@@ -71,9 +72,27 @@ stops the run when `<checkout>/data` exists.
 
 - `data/` is in `.gitignore` on purpose. Nothing from it is ever committed,
   quoted in a commit message, pasted into a document or used as a fixture.
-- The test stand holds a fabricated studio and nothing else. It is filled only
-  from `scripts/money-demo.mjs` and goes back to that studio every night. No
-  real statement is uploaded to it, by a person or by a session.
+- **Since 8 October 2026 the test stand holds the studio's real ledger**, by
+  the owner's decision, for the rehearsal before prod: the history as the
+  founders' sheet has it up to 1 October 2026, and what the owner enters after
+  that. Until that day it held a fabricated studio and nothing else, and it
+  goes back to one only on the owner's word, once prod is live.
+  - The owner uploads the real file, through the page. A session never
+    uploads one, never carries one and never asks for one in a chat.
+  - Nothing returns the stand to the fabricated studio: the nightly timer
+    (`money-test-reseed.timer`) is switched off and stays off, and nobody runs
+    `money-seed-test`, `money-deploy-test --reseed`, `ctl seed` or
+    `ctl purge-snapshots` there. Each of them replaces or deletes the real
+    documents. `money-deploy-test` without `--reseed` leaves a stand that
+    holds something alone.
+  - The fabricated studio (`scripts/money-demo.mjs`) lives in CI and on dev
+    stands.
+  - What this decision accepts, and what still protects the data on that
+    stand, is in `docs/handoff.md`, «Настоящие данные на тестовом стенде».
+- The owner asked a session to compare that stand with the founders' sheet
+  (8 October 2026). A real figure seen in such a comparison stays in the
+  conversation and in scratch files outside every repository: none goes into a
+  commit, a document, a test, a fixture or a memory note.
 - Design notes that quote figures taken from real statements stay out of git
   (`design/` is ignored). A note is committed only after the figures are gone.
   The same holds for a document: no sum, no total and no row count of the real
@@ -82,7 +101,8 @@ stops the run when `<checkout>/data` exists.
   build themselves or the fabricated studio.
 - On a server, `ctl verify` and `ctl doctor` print counts, revisions and sizes,
   never contents. A session with root ssh does not open the files under
-  `/var/lib/money/prod`.
+  `/var/lib/money/prod` - nor, while the test stand holds real data, under
+  `/var/lib/money/test`.
 - A file exported from a prod stand lives outside every repository and is never
   copied onto a server's disk.
 
@@ -265,11 +285,12 @@ The two server stands share a host and nothing else: separate checkout, compose
 project, data directory, loopback port and accounts. A password set on test is
 not a password on prod.
 
-The test stand forgets. It is seeded with the fabricated studio when it is
-empty, and every night at 00:10 UTC it is reseeded and every snapshot it holds
-is purged. Whatever was typed there is gone within a day — out of the document
-and out of every copy — as long as the nights succeed; a night that fails is
-said at the next deploy and at login on the server.
+The test stand was built to forget: seeded with the fabricated studio when it
+is empty, reseeded every night at 00:10 UTC, every snapshot purged. **Since
+8 October 2026 it does not forget**: it holds real data (see "Data rules"), so
+the nightly timer is switched off on the server, and `money-deploy-test` says
+so in a `WARNING` line at every deploy until the deploy commands learn of it.
+That warning is expected; switching the timer back on is not the answer to it.
 
 ## Before a change lands
 

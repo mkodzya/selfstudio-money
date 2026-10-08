@@ -55,7 +55,7 @@ prod anywhere but where the step says.
 | what its containers said | `/var/log/money/prod` | `/var/log/money/test` | standard output |
 | stand file | `deploy/stands/prod.env` | `deploy/stands/test.env` | — |
 | updated by | `money-deploy` **[owner's word]** | `money-deploy-test` | — |
-| holds | the studio's real money | a fabricated studio, reseeded nightly | whatever a test puts there |
+| holds | the studio's real money | a fabricated studio, reseeded nightly — **since 8 October 2026 the studio's real ledger, and nothing reseeds it** ("The test stand's data") | whatever a test puts there |
 
 One compose file, `deploy/compose.yml`, serves both server stands under an
 explicit project name. `deploy/stand.sh <prod|test> <up|ctl ...|down|logs>`
@@ -633,6 +633,24 @@ restore the directory that was moved aside holds its lines for the days since
 the backup.
 
 ## The test stand's data
+
+**Since 8 October 2026 this stand holds the studio's real ledger** — the
+owner's decision, for the rehearsal before prod (`CLAUDE.md`, "Data rules";
+`docs/handoff.md`, «Настоящие данные на тестовом стенде»). What follows is how
+the stand is filled with the fabricated studio, and so it is the list of what
+must not run there now:
+
+- the timer is switched off on the server
+  (`systemctl disable --now money-test-reseed.timer`) and stays off;
+- nobody runs `money-seed-test`, `money-deploy-test --reseed`, `ctl seed` or
+  `ctl purge-snapshots` on it. No command refuses them yet: only the rule
+  holds them back. A lock and a daily backup of this stand are being built;
+- `money-deploy-test` without `--reseed` leaves a stand that holds something
+  alone, and warns at every run that the timer is not switched on. That
+  warning is expected.
+
+The rest of this section describes the stand as it was until that day and as
+it is again once the owner returns it to the fabricated studio.
 
 - Only the fabricated studio, from `scripts/money-demo.mjs`, which runs as it
   is in a throwaway container with no network:
