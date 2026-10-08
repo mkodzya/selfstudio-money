@@ -4353,6 +4353,7 @@ await run('rv-tochka', 'a Tochka statement prints every sum without a sign: whic
   const read = await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv'); return p.error ? [p.error] : [p.bank, p.defCur, p.rows.map((r) => [r.d, r.a, !!r.own, r.p].join(' | '))]; }, csv);
   same(read, ['Tochka', 'RUB', ['2026-10-02 | 120000 | false | ООО "ВЫДУМКА"', '2026-10-02 | -4200 | false | ', `2026-10-02 | -7528 | true | ${US}`, '2026-10-02 | -16.11 | false | EXAMPLE*77*CLOUD']],
     '«Входящий» is money in, «Исходящий» money out; payer and recipient under one tax number are the holder\'s own accounts; a payment to the bank itself is named by its terminal, or by nobody');
+  same(await pg.evaluate((c) => window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv').acn, csv), '40802810000000000011', '… and the statement is of the account that pays what goes out and receives what comes in: its number is read off the rows');
   await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv'), 'tochka.csv'); }, csv);
   for (let i = 0; i < 80 && !((store.led.doc.inbox || []).length === 3 && store.led.doc.tx.length === 1); i++) await sleep(50);
   const inb = (store.led.doc.inbox || []).map((r) => [r.o.a, r.dir, r.c === 'rev', r.o.cur].join(' ')).sort(), kept = store.led.doc.tx.map((r) => [r.o.a, r.c, r.s].join(' '));
@@ -4427,6 +4428,34 @@ await run('rv-account', 'an account the plan does not hold is added by hand, in 
   await pg.click('.nav [data-tab="today"]');
   S = await holds(pg, 'a Barclays statement after the two balances');
   same(S.M.accounts.filter((a) => a.bank === 'Barclays').map((a) => a.est), [900, 2500], 'a payment in a Barclays statement comes off the first Barclays account; the second keeps its typed balance');
+  await finish(pg);
+});
+
+await run('rv-acctnum', 'a statement row moves the account whose number it carries: two accounts in one bank and currency are told apart by the last digits of their numbers', async () => {
+  // Mika, 8 October 2026: a second Barclays account and Tochka's tax account, each with a statement of its own. The
+  // plan told accounts apart by bank and currency alone, so every row of either statement moved the first of them:
+  // the total was right and the split between the two was not.
+  const MAIN = { ...bal('Barclays', 'GBP', 1000, '2026-10-05'), ac: '4159' }, VAT = { ...bal('Barclays', 'GBP', 2500, '2026-10-05'), id: 'b-vat', name: 'Barclays — VAT', ac: '8457' };
+  const rowOf = (id, amt, ac) => ({ ...filed(id, '2026-10-06', amt, 'fixed', 'Example', { b: 'Barclays' }), ...(ac ? { ac } : {}) });
+  const pg = await scene('two accounts, two numbers', ledA({ tx: [rowOf('m1', -100, '73414159'), rowOf('v1', -40, '83988457'), rowOf('n1', -7, '')] }), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), MAIN, VAT] }), { H: 60 });
+  let S = await holds(pg, 'two Barclays accounts, each with its number');
+  const ests = () => S.M.accounts.filter((a) => a.bank === 'Barclays').map((a) => [a.ac, a.est]);
+  same(ests(), [['4159', 893], ['8457', 2460]], '£100 on a row of account …4159 and £7 on a row that carries no number come off the first account; £40 on a row of …8457 comes off the second');
+  // The readers say whose statement a file is — Barclays in a column of its own — and the number goes with every row.
+  const BARC = 'Number,Date,Account,Amount,Subcategory,Memo\n ,06/10/2026,20-41-50 83988457,-60.00,PAYMENT,EXAMPLE SHOP\n';
+  same(await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'data barc.csv'); return [p.bank, p.acn]; }, BARC), ['Barclays', '20415083988457'], 'a Barclays file names its account in the column «Account», and the page reads the number off it');
+  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'data barc.csv'), 'data barc.csv'); }, BARC);
+  await pg.click('.nav [data-tab="today"]');
+  S = await holds(pg, 'a statement of the second account');
+  same(ests(), [['4159', 893], ['8457', 2400]], 'a payment that arrives in a statement of …8457 moves the second account and leaves the first where it was');
+  // A founder writes the number in «Вписать остаток» — with or without a balance typed beside it.
+  await pg.click('#view-today .td-acc summary');
+  await pg.click('#view-today .td-accs [data-ed-bal]');
+  await pg.fill(K('bal') + '[data-ed-acct="Wise|GBP"] [data-ed-bac]', '…5412');
+  await pg.click(K('bal') + '[data-ed-save]');
+  await saved(pg);
+  same([await toastText(pg), await pg.evaluate(() => { const b = window.__cash.state().banks.find((x) => x.bank === 'Wise'); return [b.ac, b.amt, b.asOf]; })], ['Номер счёта записан: Wise GBP', ['5412', 9000, '2026-10-05']],
+    'the number alone is saved — its digits, nothing else — and the balance beside it stays as it was typed');
   await finish(pg);
 });
 
