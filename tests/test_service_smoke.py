@@ -1313,9 +1313,11 @@ class RefusalTests(StandCase):
         self.assertEqual(self.status(stand.raw(b"GET /login HTTP/1.1\r\n" + host + big * 5 + b"\r\n", half_close=True)), 431)
         self.assertEqual(stand.raw(b"", half_close=True), b"", "nothing asked, nothing answered")
         self.assertEqual(stand.get("/login").status, 200)
-        # None of it is echoed into the log.
+        # None of it is echoed into the log. The run of the letter looked for is longer than a request id: an id
+        # is twelve hex digits drawn at random, and on 8 October 2026 one of them held "aaaa" - the test failed
+        # for it on a tree that had passed an hour before.
         self.assertNotIn("Broken", stand.log_text())
-        self.assertNotIn("aaaa", stand.log_text())
+        self.assertNotIn("a" * 16, stand.log_text())
 
     def test_one_request_per_connection(self):
         stand = self.stand
