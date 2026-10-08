@@ -1,0 +1,59 @@
+#!/bin/sh
+# One check of the page, on the Mac:
+#
+#   scripts/check-one rv-inbal          the check of that key
+#   scripts/check-one repeat cards      two of them, one after the other
+#   SHOTS=/some/folder scripts/check-one looks     ... and its pictures
+#
+# A key is what ONLY takes in scripts/money-checks.mjs: the key of a check, or a
+# word of its name. The whole file is CI's to run, in four parts side by side;
+# this is for the check being written, so that a slip in it is seen in seconds
+# and not after a round of CI (the owner's decision of 8 October 2026 - until
+# then no browser ran on the Mac at all).
+#
+# What it needs is outside the repository and is set up once, by hand
+# (docs/handoff.md, the section on the page's checks): node, and Playwright at the version
+# package.json names, under ~/Developer/_tools/money-checks. Nothing is
+# installed from here. The page and the checks are copied beside those tools
+# for the run - `import 'playwright'` is found from there - and the copy is
+# removed afterwards; the checkout itself is read and never written.
+set -eu
+
+[ $# -ge 1 ] || { echo "usage: scripts/check-one <key> [<key> ...]   - never the whole file: that is CI's" >&2; exit 2; }
+for key in "$@"; do
+  case "$key" in
+    ""|*[!A-Za-z0-9._\ -]*) echo "check-one: a key is letters, digits, spaces, dots and dashes - the key of a check, or a word of its name" >&2; exit 2 ;;
+  esac
+done
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The same refusal as tests/_safety.py: beside a ledger nothing is run.
+[ ! -e "$ROOT/data" ] || { echo "check-one: $ROOT holds data/ - checks are not run beside a ledger" >&2; exit 2; }
+
+TOOLS=${MONEY_TOOLS:-$HOME/Developer/_tools/money-checks}
+NODE=$TOOLS/node/bin/node
+if [ ! -x "$NODE" ] || [ ! -f "$TOOLS/node_modules/playwright/package.json" ]; then
+  echo "check-one: node and Playwright are not set up under $TOOLS (docs/handoff.md says how)" >&2
+  exit 2
+fi
+version() { sed -n 's/^ *"'"$1"'": *"\([^"]*\)".*/\1/p' "$2" | head -n 1; }
+want=$(version playwright "$ROOT/package.json")
+have=$(version version "$TOOLS/node_modules/playwright/package.json")
+[ -n "$want" ] && [ "$want" = "$have" ] || { echo "check-one: Playwright under $TOOLS is $have; package.json names $want" >&2; exit 2; }
+
+# One run at a time: the checks listen on one port, and one browser is what the Mac was promised.
+if pgrep -f "scripts/money-checks\.mjs" >/dev/null 2>&1; then
+  echo "check-one: a run of the checks is already going" >&2
+  exit 2
+fi
+
+RUN=$(mktemp -d "$TOOLS/run.XXXXXX")
+trap 'rm -r "$RUN"' EXIT
+trap 'exit 130' INT TERM
+mkdir -p "$RUN/scripts" "$RUN/pub/money"
+cp "$ROOT/scripts/money-checks.mjs" "$ROOT/scripts/money-demo.mjs" "$RUN/scripts/"
+cp "$ROOT/index.html" "$RUN/pub/money/index.html"
+cp -R "$ROOT/vendor" "$RUN/pub/money/vendor"
+
+keys=$(IFS=,; echo "$*")
+PUB="$RUN/pub" ONLY="$keys" "$NODE" "$RUN/scripts/money-checks.mjs"

@@ -2,7 +2,7 @@
   "name": "selfstudio-money-checks",
   "version": "0.0.0",
   "private": true,
-  "description": "Browser checks for Money. Playwright is the only package here and only CI installs it; the service itself is Python standard library and needs none of this. deploy-checks needs no package at all: python3 and a POSIX shell.",
+  "description": "Browser checks for Money. Playwright is the only package here. CI installs it; on the Mac it lives outside the checkout, for scripts/check-one, and is never installed into one. The service itself is Python standard library and needs none of this. deploy-checks needs no package at all: python3 and a POSIX shell.",
   "engines": {
     "node": ">=22"
   },
