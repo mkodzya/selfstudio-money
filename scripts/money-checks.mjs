@@ -4303,7 +4303,7 @@ await run('rv-tax', 'taxes on screen: a founder\'s own tax row is in the block; 
   let pg = await scene('a typed tax row', ledP(), withCT, { H: 60 });
   let S = await holds(pg, 'a tax row a founder wrote');
   same([await text(pg, '#view-today .td-tax h2 .note'), (await pg.$eval('#view-today .td-tax [data-td-own="ct"]', (r) => [r.querySelector('.td-nm').textContent, r.querySelector('.td-meta').textContent, r.querySelector('.td-am').textContent])).map(plain)],
-    ['ближайший платёж: 20 окт, £2,400', ['Corporation tax — первый взнос · до 20 окт', 'ваша строка · £2,400', '—']], 'the head says «ближайший платёж: 20 окт, £2,400» — and that payment is a row of the block: «Corporation tax — первый взнос · до 20 окт · ваша строка · £2,400», with nothing held for it on the right');
+    ['ближайший платёж: 20 окт, £2,400', ['Corporation tax — первый взнос · до 20 окт', 'ваша строка · £2,400', 'в плане']], 'the head says «ближайший платёж: 20 окт, £2,400» — and that payment is a row of the block: «Corporation tax — первый взнос · до 20 окт · ваша строка · £2,400»; nothing is held for it on the right, and the column says why in a word, «в плане» — not a dash, which read as a figure that is missing');
   same(plain(await pg.$eval('#view-today .td-tax [data-td-own="old"]', (r) => r.querySelector('.td-meta').textContent)), 'ваша строка · часть UK VAT за III кв. 2026 · £1,200', 'an instalment is there too, and says of which tax it is a part');
   // Card 13 on a row read as a PART says what is counted.
   const c13 = '#view-today .td-need .op[data-td-card="13"]';
