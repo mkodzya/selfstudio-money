@@ -4358,6 +4358,11 @@ await run('rv-tochka', 'a Tochka statement prints every sum without a sign: whic
   const inb = (store.led.doc.inbox || []).map((r) => [r.o.a, r.dir, r.c === 'rev', r.o.cur].join(' ')).sort(), kept = store.led.doc.tx.map((r) => [r.o.a, r.c, r.s].join(' '));
   same([inb, kept], [['-16.11 -1 false RUB', '-4200 -1 false RUB', '120000 1 true RUB'], ['-7528 skip file']],
     '… so in «Разбор» the one receipt is offered as revenue, the tariff and the card purchase are payments out and are not, and the move to the holder\'s own tax account is taken out as a transfer between own accounts');
+  // The card of the rouble receipt: UK VAT is not asked of it, and the name it needs may be a new one — the field
+  // used to say «как в таблице» on every row, the ones that need no name among them (Mika, 8 October 2026).
+  await pg.click('.nav [data-tab="inbox"]');
+  same(await pg.$$eval('#view-inbox .op', (l) => l.filter((e) => /ВЫДУМКА/.test(e.textContent)).map((e) => [!!e.querySelector('input.vat'), (e.querySelector('input.lab') || {}).placeholder || ''])), [[false, 'новое название или из списка']],
+    '… and on its card there is no «VAT, £» — a receipt in roubles carries none — and «Проект» asks for «новое название или из списка»');
   await pg.context().close();
 });
 
@@ -4390,6 +4395,39 @@ await run('rv-mosta', 'a wallet\'s list of orders is not a statement: what an or
   await pg.click('#view-settings .set-nav [data-tabgo="upload"]');
   ok(/не взято: не завершены — 1, SOME_NEW_KIND — 1/.test(await text(pg, '#view-upload .file')), '«Загрузка» says of the file what was left out of it, and of what kind', await text(pg, '#view-upload .file'));
   await pg.context().close();
+});
+
+await run('rv-account', 'an account the plan does not hold is added by hand, in «Вписать остаток» — a second one in the same bank and currency too', async () => {
+  // Mika, 8 October 2026: a second Barclays account and Tochka's tax account had nowhere to be written — accounts
+  // came only with a plan from the old artifact or with a statement.
+  const pg = await scene('a second account', ledA(), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), bal('Barclays', 'GBP', 1000, '2026-10-05')] }), { H: 60 });
+  let S = await holds(pg, 'two accounts');
+  const now0 = S.fig('now'), NEW = K('bal') + '[data-ed-newacct] ';
+  await pg.click('#view-today .td-acc summary');
+  await pg.click('#view-today .td-accs [data-ed-bal]');
+  // The same bank and currency again, and no name to tell the two apart: said, and nothing saved.
+  await pg.selectOption(NEW + '[data-ed-nbank]', 'Barclays');
+  await pg.fill(NEW + '[data-ed-namt]', '2500');
+  await pg.click(K('bal') + '[data-ed-save]');
+  same([await pg.evaluate(() => window.__cash.state().banks.length), /Barclays GBP уже есть в списке — дайте второму счёту название/.test(await toastText(pg)), store.cash.puts], [2, true, 0],
+    'a second account in a bank and currency the plan already has must be given a name: without one the page says so and saves nothing');
+  await pg.fill(NEW + '[data-ed-nname]', 'Barclays — второй');
+  await pg.click(K('bal') + '[data-ed-save]');
+  await saved(pg);
+  const said = await toastText(pg);
+  S = await holds(pg, 'a second Barclays account, added by hand');
+  const second = S.P.banks.find((b) => b.name === 'Barclays — второй');
+  same([S.P.banks.length, second && [second.bank, second.cur, second.amt, second.asOf, second.by, 'legacy' in second], S.M.accounts.filter((a) => a.bank === 'Barclays').map((a) => [a.key.split('|').length, !!a.anchor, a.est]), round2(S.fig('now') - now0)],
+    [3, ['Barclays', 'GBP', 2500, T, 'Mika', false], [[2, true, 1000], [3, true, 2500]], 2500],
+    'with a name it is saved as a row of the plan — bank, currency, the balance and the day it is true for, and who typed it — and «Денег сейчас» is larger by exactly that balance');
+  ok(/Barclays — второй/.test(await text(pg, '#view-today .td-accs')) && /Счёт добавлен: Barclays — второй/.test(said), '«Счета» lists it under the name it was given, and the page says what it did', await text(pg, '#view-today .td-accs'));
+  // A statement of that bank moves the first account of the bank and currency, as the sheet says; the second stands
+  // at what was typed until it is typed again.
+  await pg.evaluate(() => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV('Date,Amount,Currency,Description\n06-10-2026,-100.00,GBP,Card payment to Example Shop\n'), 'barclays.csv'), 'barclays.csv'); });
+  await pg.click('.nav [data-tab="today"]');
+  S = await holds(pg, 'a Barclays statement after the two balances');
+  same(S.M.accounts.filter((a) => a.bank === 'Barclays').map((a) => a.est), [900, 2500], 'a payment in a Barclays statement comes off the first Barclays account; the second keeps its typed balance');
+  await finish(pg);
 });
 
 await run('rv-small', 'the rest of the review: a save the server did not take, the wordmark, a paid row made to repeat, a name the table knows, a tax row renamed after a founder, an unsorted receipt in «Можно вывести»', async () => {

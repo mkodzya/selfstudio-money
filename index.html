@@ -1521,8 +1521,8 @@ function opCard(r,st){
   <div class="op-chips" role="group" aria-label="Блок">${CHIPS.map(([k,n])=>`<button class="chip${r.c===k?" active":""}" data-setc="${k}" aria-pressed="${r.c===k}">${n}</button>`).join("")}</div>
   ${r.c==="tax"?`<div class="op-chips" role="group" aria-label="Чей налог"><span class="lbl" style="align-self:center">Чей налог</span>${[["","Студии"],["mika","Mika"],["misha","Misha"],["vanya","Vanya"]].map(([k,nm])=>`<button class="chip${owner(r)===k?" active":""}" data-taxowner="${k}" aria-pressed="${owner(r)===k}">${nm}</button>`).join("")}</div>`:""}
   <div class="op-foot">
-   ${lab?`<label class="fld" for="l-${r.id}"><span>${lab}</span><input class="lab" id="l-${r.id}" data-f="l" list="labs-${r.c}" value="${esc(r.l||"")}" placeholder="${FOUNDERS.includes(r.c)?"можно оставить пустым":"как в таблице"}" autocomplete="off"></label>`:""}
-   ${r.c==="rev"?`<label class="fld vat" for="v-${r.id}"><span>VAT, £</span><input class="vat" id="v-${r.id}" data-f="v" type="number" step="any" value="${r.v||""}" placeholder="0"></label>`:""}
+   ${lab?`<label class="fld" for="l-${r.id}"><span>${lab}</span><input class="lab" id="l-${r.id}" data-f="l" list="labs-${r.c}" value="${esc(r.l||"")}" placeholder="${r.c==="rev"||r.c==="cogs"?"новое название или из списка":"можно оставить пустым"}" autocomplete="off"></label>`:""}
+   ${r.c==="rev"&&(r.o.cur==="GBP"||+r.v>0)?`<label class="fld vat" for="v-${r.id}"><span>VAT, £</span><input class="vat" id="v-${r.id}" data-f="v" type="number" step="any" value="${r.v||""}" placeholder="0"></label>`:""}
    <span class="op-actions"><button class="ghost" data-drop title="Убрать из разбора, в таблицу не попадёт">Убрать</button><button class="primary" data-accept ${r.c?"":"disabled"}>${!r.c?"Выберите блок":r.c==="skip"?"Убрать как перевод":sgn(r)<0?"В таблицу как возврат":"В таблицу"}</button></span>
   </div></article>`;
 }
@@ -1599,6 +1599,9 @@ function renderLedger(){
 // copy kept for «Отменить» and bringing a plan over from the old artifact are here; a change to a row is written
 // by the same hands that write it on «Сегодня» (Ed), so the two tabs cannot write a row two ways.
 // Every attribute and class it puts on the page starts with cs-, which no other handler of Money's matches.
+// What an account is called on the page. Two accounts in one bank and one currency share «Barclays GBP»: the one
+// that was added second goes by the name a founder gave it.
+const acName=a=>a.key.split("|").length>2&&a.title?a.title:a.name;
 const Cash=(()=>{
  const root=$("#view-cash"),q=s=>root.querySelector(s);
  const LISTS=["banks","inflows","team","taxes","other","div"],ROWS=["inflows","team","taxes","other","div"];
@@ -4557,13 +4560,19 @@ const Ed=(()=>{
   const T=M.T,rank=a=>a.active&&!a.anchor?0:a.active?1:2,list=M.accounts.filter(a=>a.inPlan||a.active).sort((a,b)=>rank(a)-rank(b));
   const rows=list.map(a=>{const sym=SYM[a.cur]||"",A=a.anchor,old=a.legacy&&a.old;
    const hint=A?`по расчёту ${nat(a.est,a.cur)} · вписан ${dRu(A.asOf)}${A.by?", "+A.by:""}`:old?`в старой Кассе было ${nat(a.old,a.cur)} — подтвердите сумму и дату`:a.active?"остатка нет":"счёт не используется";
-   return `<div class="ed-acct" data-ed-acct="${esc(a.key)}"><div class="ed-an"><b>${esc(a.name)}</b><span class="note">${esc(hint)}</span></div>
-    <label class="fld"><span>Остаток, ${esc(sym.trim()||a.cur)}</span><input type="number" step="any" inputmode="decimal" data-ed-bamt value="${A?a.est:old?a.old:""}" aria-label="Остаток ${esc(a.name)}"></label>
-    <label class="fld"><span>На дату</span><input type="date" data-ed-bdate max="${T}" value="${A||!old?T:""}" aria-label="Дата остатка ${esc(a.name)}"></label>
+   return `<div class="ed-acct" data-ed-acct="${esc(a.key)}"><div class="ed-an"><b>${esc(acName(a))}</b><span class="note">${esc(hint)}</span></div>
+    <label class="fld"><span>Остаток, ${esc(sym.trim()||a.cur)}</span><input type="number" step="any" inputmode="decimal" data-ed-bamt value="${A?a.est:old?a.old:""}" aria-label="Остаток ${esc(acName(a))}"></label>
+    <label class="fld"><span>На дату</span><input type="date" data-ed-bdate max="${T}" value="${A||!old?T:""}" aria-label="Дата остатка ${esc(acName(a))}"></label>
     <div class="ed-passed" data-ed-passed></div><div class="ed-drift" data-ed-drift></div></div>`;}).join("");
   return `<article class="ed-card" data-ed-card="bal"><div class="ed-h">Остатки на счетах</div>
    <div class="note">Впишите, сколько на счёте по банку, и на какой день это верно: сегодня — значит «на сейчас», день раньше — на конец того дня. Дальше считаю сам: по выпискам и по тому, что отмечено оплаченным.</div>
    ${rows||'<div class="note">Счетов пока нет: они появятся с первой выпиской.</div>'}
+   <div class="ed-acct" data-ed-newacct><div class="ed-an"><b>Ещё один счёт</b><span class="note">которого нет в списке — второй счёт в том же банке, копилка, новый банк. Выписки двигают первый счёт банка и валюты; остаток второго меняется, когда его вписывают заново.</span></div>
+    <label class="fld"><span>Название</span><input data-ed-nname placeholder="например, Barclays — второй счёт" autocomplete="off" aria-label="Название нового счёта"></label>
+    <label class="fld"><span>Банк</span><select data-ed-nbank aria-label="Банк нового счёта">${opt(BANKS.map(b=>[b,b]),BANKS[0])}</select></label>
+    <label class="fld"><span>Валюта</span><select data-ed-ncur aria-label="Валюта нового счёта">${opt(CURS.map(c=>[c,c]),"GBP")}</select></label>
+    <label class="fld"><span>Остаток</span><input type="number" step="any" inputmode="decimal" data-ed-namt aria-label="Остаток нового счёта"></label>
+    <label class="fld"><span>На дату</span><input type="date" data-ed-ndate max="${T}" value="${T}" aria-label="Дата остатка нового счёта"></label></div>
    <div class="ed-foot"><span></span><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button><button class="sm primary" data-ed-save>Сохранить</button></div></div></article>`;
  }
  const acctOf=box=>M.accounts.find(a=>a.key===box.dataset.edAcct);
@@ -4584,9 +4593,18 @@ const Ed=(()=>{
   const T=Live.today(),jobs=[];if(Plan.lost())return;
   card.querySelectorAll("[data-ed-acct]").forEach(box=>{const a=acctOf(box),v=q(box,"[data-ed-bamt]").value,d=q(box,"[data-ed-bdate]").value||T;if(!a||!box.dataset.dirty||v===""||!isFinite(+v)||d>T)return;
    jobs.push({a,amt:+v,asOf:d,ticks:[...box.querySelectorAll("[data-ed-pass]:checked")].map(i=>({it:item(i.dataset.edPass),on:i.dataset.edOn}))});});
-  if(!jobs.length)return toast("Ничего не изменено: впишите сумму или дату у нужного счёта");
-  const say=`Остаток вписан: ${jobs.map(j=>j.a.name).join(", ")}`;cur=null;
-  Plan.edit(say,(P,now,by)=>{jobs.forEach(j=>{
+  // An account the plan does not hold: a name, a bank, a currency and the balance it starts with. A second one in a
+  // bank and currency the plan already has needs a name of its own, or nobody could tell the two apart.
+  const nb=card.querySelector("[data-ed-newacct]"),nv=nb?q(nb,"[data-ed-namt]").value:"",nn=nb?q(nb,"[data-ed-nname]").value.trim():"";let fresh=null;
+  if(nb&&(nv!==""||nn)){const bank=q(nb,"[data-ed-nbank]").value,cc=q(nb,"[data-ed-ncur]").value,d=q(nb,"[data-ed-ndate]").value||T;
+   if(nv===""||!isFinite(+nv))return toast("У нового счёта впишите остаток — хотя бы 0");
+   if(d>T)return toast("Остаток нового счёта нельзя вписать на день, который ещё не наступил");
+   if(!nn&&M.accounts.some(a=>a.inPlan&&a.bank===bank&&a.cur===cc))return toast(`${bank} ${cc} уже есть в списке — дайте второму счёту название, чтобы их различать`);
+   fresh={bank,cur:cc,name:nn||`${bank} — ${cc}`,amt:+nv,asOf:d};}
+  if(!jobs.length&&!fresh)return toast("Ничего не изменено: впишите сумму или дату у нужного счёта");
+  const say=[jobs.length?`Остаток вписан: ${jobs.map(j=>acName(j.a)).join(", ")}`:"",fresh?`Счёт добавлен: ${fresh.name}`:""].filter(Boolean).join(" · ");cur=null;
+  Plan.edit(say,(P,now,by)=>{if(fresh)P.banks.push({id:uid(),name:fresh.name,amt:fresh.amt,cur:fresh.cur,bank:fresh.bank,on:true,tag:"",info:false,date:"",asOf:fresh.asOf,at:now,by});
+   jobs.forEach(j=>{
    let r=j.a.id!=null&&P.banks.find(x=>String(x.id)===j.a.id);
    if(!r){r={id:uid(),name:`${j.a.bank} — ${j.a.cur}`,amt:0,cur:j.a.cur,bank:j.a.bank,on:true,tag:"",info:false,date:""};P.banks.push(r);}
    r.amt=j.amt;r.asOf=j.asOf;r.at=now;r.by=by;delete r.legacy;
@@ -4989,7 +5007,7 @@ const Today=(()=>{
     if(a.same<-0.005)words.push(`платежи за ${dRu(A0.asOf)} (${natv(round2(-a.same),a.cur)}) вычтены: считаю, что прошли после остатка`);
     if(a.stale)words.push(a.stale==="old"?`устарел · ${a.age} дн. без выписки`:`${a.age} дн. без выписки`);else if(a.handOld)words.push(`вписан ${a.handDays} дн. назад — сверьте с банком`);}
    else words.push(a.active?(a.legacy&&a.old?`нет остатка · в старой Кассе было ${natv(a.old,a.cur)}`:"нет остатка"):"не используется");
-   return `<span>${esc(a.name)}</span><span class="mono" data-live="acct.${esc(a.key)}" data-v="${num(a.est)}">${A0?natv(round2(a.est),a.cur)+(a.cur!=="GBP"?` <span class="td-meta">${fmt(a.gbp)}</span>`:""):"—"}</span><span class="td-meta">${esc(words.join(" · "))}</span>`;};
+   return `<span>${esc(acName(a))}</span><span class="mono" data-live="acct.${esc(a.key)}" data-v="${num(a.est)}">${A0?natv(round2(a.est),a.cur)+(a.cur!=="GBP"?` <span class="td-meta">${fmt(a.gbp)}</span>`:""):"—"}</span><span class="td-meta">${esc(words.join(" · "))}</span>`;};
   return `<details class="td-acc"${st.acc?" open":""}><summary><span class="lbl">Счета</span>${head}</summary><div class="td-accs">${A.map(row).join("")}<div class="row"><button class="sm" data-ed-bal>Вписать остаток</button><button class="sm ghost" data-tabgo="upload">Загрузить выписки</button></div></div></details>`;
  }
 
