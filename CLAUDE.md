@@ -149,6 +149,14 @@ git merge --no-ff feature/<topic> && git push
 git worktree remove ../_worktrees/selfstudio-money-<topic> && git branch -d feature/<topic>
 ```
 
+A branch is merged when its own CI run is green, and the test stand is
+deployed in the same step: nobody waits for the run that `develop` starts
+after the merge (the owner's decision of 8 October 2026 - two rounds of CI for
+one change were half of every wait). That second run still has to come out
+green. When it does not, the fix goes before any other work, and the stand is
+deployed again. This holds for the test stand only: a release is cut from a
+`develop` whose own run is green.
+
 A session works inside its own worktree or clone only. It does not edit files
 in someone else's and does not switch branches there. In a multi-agent run the
 orchestrator commits; the agents write files and run no git command that
@@ -189,17 +197,36 @@ What the page is and the rules it works by — `docs/handoff.md`, «Страни
 устройство и правила».
 
 **How a page change is checked.** By CI, on every push to `develop`, `main`,
-`feature/*` and `hotfix/*`; never on the Mac, which has no node and no browser
-and gets neither:
+`feature/*` and `hotfix/*`. The whole file of checks is CI's to run and nobody
+else's:
 
 | CI job | What it runs | What it proves |
 |---|---|---|
-| `page-checks` | `scripts/money-checks.mjs`, on a copy of the page, with a stand-in for the server | the page: its calculation and its screens |
+| `page-checks`, in four parts side by side | `scripts/money-checks.mjs`, on a copy of the page, with a stand-in for the server | the page: its calculation and its screens |
 | `stand-smoke` | `checks/stand-smoke.mjs`: the page on a real `python -m moneyd`, in Chromium | that the page and the hosted service fit, under the enforced policy |
 
 Node 22 and Playwright at the one version `package.json` names. `ONLY=<key>`
 narrows the page checks to one scenario; `SHOTS=<folder>` saves pictures of
-the screens. A change to the page is not finished until both jobs are green.
+the screens; `SHARD=<part>/<parts>` is how CI splits the file - every fourth
+check to each of four jobs, so a change waits for the longest part and not for
+the sum. A change to the page is not finished until every part of
+`page-checks` and `stand-smoke` are green.
+
+**One check, on the Mac.** Since the owner's decision of 8 October 2026 the
+check that is being written may be run where it is written:
+
+```sh
+scripts/check-one rv-inbal        # the key of a check, or a word of its name
+```
+
+One check (or a few named ones), one browser, one run at a time - never the
+whole file, which the script refuses to run. It is there so that a slip in a
+new check is seen in seconds and not after a round of CI; it proves nothing
+that CI has not also proved. It refuses beside a `data/` folder, like the
+tests. node and Playwright for it live outside every checkout, in
+`~/Developer/_tools/money-checks` (how they got there - `docs/handoff.md`,
+«Проверки страницы»); the script installs nothing, and no `npm install` is
+ever run in a checkout.
 
 **What the hosted service assumes about the page.** The service serves
 `index.html` as it is, byte for byte, and injects nothing. A page change that
@@ -349,11 +376,14 @@ What the code has to respect:
 ## Heavy jobs
 
 The Mac has 8 GB of memory and other sessions running on it (handbook
-ADR-0010). Nothing with Docker, node, npm or Chromium is run on it for this
-repository. That work belongs to CI (`.github/workflows/ci.yml`): the image
-build and the rehearsals of the deploy commands, the page's browser checks,
-and the browser smoke of the page against the real backend. The Python tests
-above are not a heavy job. `checks/test_deploy.py` as a whole is five minutes
+ADR-0010). Nothing with Docker is run on it for this repository, no `npm
+install` in a checkout, and no whole run of the browser checks. That work
+belongs to CI (`.github/workflows/ci.yml`): the image build and the rehearsals
+of the deploy commands, the page's browser checks, and the browser smoke of
+the page against the real backend. One exception, by the owner's decision of
+8 October 2026: `scripts/check-one <key>` - one check of the page, in one
+headless browser, one run at a time (see "The page"). The Python tests above
+are not a heavy job. `checks/test_deploy.py` as a whole is five minutes
 of a busy core: on the Mac run the class you need, and leave the rest to CI.
 
 A step of the workflow is never pasted into a terminal. The rehearsal steps

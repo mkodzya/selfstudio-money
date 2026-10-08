@@ -1,5 +1,7 @@
-# Money's checks. Everything that needs a container or a browser runs here and
-# nowhere else: the Mac this is written on has 8 GB and other work to do.
+# Money's checks. Everything that needs a container runs here and nowhere
+# else, and so does every whole run of the browser checks: the Mac this is
+# written on has other work to do. (One check of the page at a time may be run
+# there while it is being written - scripts/check-one.)
 #
 #   unit         the Python tests, on 3.9 (the Mac's own Python) and 3.13 (the image);
 #                and the server's commands against stand-ins for docker and git
@@ -10,7 +12,7 @@
 #                keeps the accounts and raises the floors; shellcheck; caddy
 #                validate on the edge blocks
 #   page-checks  the page's own checks (scripts/money-checks.mjs), on a copy of
-#                the page as this commit holds it
+#                the page as this commit holds it - in four parts, side by side
 #   stand-smoke  the page as it is against the real backend, in a real browser
 #
 # Nothing here holds or needs a secret, and nothing deploys.
@@ -402,10 +404,17 @@ jobs:
             fi
           done
 
+  # In four parts, side by side: every fourth check of the file to each
+  # (SHARD in scripts/money-checks.mjs). One after another they took close to
+  # five minutes, and every change to the page waits for them.
   page-checks:
-    name: page-checks
+    name: page-checks (${{ matrix.part }} of 4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -448,7 +457,7 @@ jobs:
             /money/*) echo "::error::the copy must not live under /money/"; exit 1 ;;
           esac
           mkdir -p "$RUNNER_TEMP/shots"
-          PUB="$RUNNER_TEMP/pub" SHOTS="$RUNNER_TEMP/shots" node scripts/money-checks.mjs
+          PUB="$RUNNER_TEMP/pub" SHOTS="$RUNNER_TEMP/shots" SHARD="${{ matrix.part }}/4" node scripts/money-checks.mjs
 
       # The checks take full-page pictures of the main states of the made-up
       # studio when SHOTS is set. They are kept for three days, so that a
@@ -457,7 +466,7 @@ jobs:
         if: always() && steps.files.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: page-shots
+          name: page-shots-${{ matrix.part }}
           path: ${{ runner.temp }}/shots
           retention-days: 3
           if-no-files-found: warn

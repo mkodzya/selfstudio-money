@@ -30,6 +30,10 @@
 //     -v "$PWD/apps/web/public":/app/pub -w /app selfops-checks \
 //     node scripts/money-checks.mjs
 //
+// (That was the platform's way. In this repository CI runs the file in four
+// parts side by side - SHARD=1/4 … 4/4 - and `scripts/check-one <key>` runs one
+// check on the Mac.)
+//
 // `-e ONLY=p8` or `-e ONLY=late` narrows a run to the checks whose key or
 // name matches. `-e SHOTS=/app/shots` (with a folder mounted there) also saves
 // full-page pictures of «Сегодня» and «Касса» in their main states, for
@@ -182,6 +186,18 @@ const PUB = process.env.PUB || '/app/pub';
 const PORT = 8097;
 const BASE = `http://localhost:${PORT}`;
 const ONLY = (process.env.ONLY || '').toLowerCase();
+// SHARD=2/4 runs every fourth check, beginning with the second: CI runs the four parts side by side, and the wait for
+// a change is the longest part and not the sum of them. A check belongs to a part by its place in this file, whatever
+// ONLY says.
+const SHARD = (() => {
+  if (!process.env.SHARD) return null;
+  const m = /^(\d+)\/(\d+)$/.exec(process.env.SHARD);
+  const k = m ? +m[1] : 0;
+  const of = m ? +m[2] : 0;
+  if (!(k >= 1 && k <= of)) { console.error(`SHARD is "<part>/<parts>", 1 to <parts>; got "${process.env.SHARD}"`); process.exit(2); }
+  return { k, of };
+})();
+let place = 0;
 
 // ---- saying what happened ----
 let n = 0;
@@ -588,6 +604,7 @@ const card = (M, k) => M.cards.filter((c) => c.n === k);
 const acct = (M, key) => M.accounts.find((a) => a.key === key) || null;
 const per = (M, key) => M.taxes.periods.find((p) => p.key === key) || null;
 const run = async (key, title, fn) => {
+  if (SHARD && place++ % SHARD.of !== SHARD.k - 1) return;
   // A key picks the check of that key; a word, every check with it in its key or its name.
   if (ONLY && !ONLY.split(',').some((k) => String(key) === k || String(key).includes(k) || title.toLowerCase().includes(k))) return;
   console.log(`\n— ${key}. ${title}`);
@@ -4826,6 +4843,8 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
-console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : ''));
+console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : '') + (SHARD ? ` (part ${SHARD.k} of ${SHARD.of})` : ''));
 await browser.close();
-process.exit(failed || errs.length ? 1 : 0);
+// A run that checked nothing has proved nothing: a key that names no check, or a part that holds none, is not a pass.
+if (!n) console.log('NOTHING WAS CHECKED' + (ONLY ? `: no check is named «${ONLY}»` : ''));
+process.exit(failed || errs.length || !n ? 1 : 0);
