@@ -1842,14 +1842,20 @@ const Cash=(()=>{
   if(l.kind==="only"&&it.occ&&it.occ.exc)t=`Изменено только в ${monP(it.occ.ym)}. <button class="sm ghost" data-cs-onward>И дальше так же</button>`;
   return t?`<tr class="cs-line" data-cs-line="${esc(it.id)}"><td></td><td colspan="9" class="note">${t}</td></tr>`:"";
  }
+ // «Продублировать с {октября}» stands under a list for what that list held the month before and this month does
+ // not, by name: a row marked «каждый месяц» is here already, a tax the page works out comes by itself, and what
+ // was left of a line paid in part belongs to the month it was owed in.
+ const prevYm=ym=>{const n=(+ym.slice(0,4))*12+(+ym.slice(5,7))-2;return Math.floor(n/12)+"-"+String(n%12+1).padStart(2,"0");};
+ const dupOf=k=>{const have=new Set(mon(k).rows.map(id=>by[id]).filter(Boolean).map(it=>norm(it.name)));
+  return ((((M.months.by[prevYm(cu.month)]||{})[k]||{}).rows)||[]).map(id=>by[id]).filter(it=>it&&it.src!=="tax"&&!it.carry&&it.on!==false&&it.amt>0&&!have.has(norm(it.name)));};
  function section(k,adding){
-  const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null;
+  const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k);
   const body=rows.map(it=>{const card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td colspan="10">${card}</td></tr>`:"");}).join("")||'<tr class="cs-none"><td colspan="10" class="note">В этом месяце строк нет.</td></tr>';
   // Under «Налоги»: what the month itself accrues, which is not what is paid in it.
   const foot=tax&&tax.gbp>0.5?`<p class="note cs-secfoot" id="cs-taxfoot">За ${monL(cu.month)} начислено ${lv("mon.tax.accrued",tax.gbp,fmt(Math.round(tax.gbp)))} — срок позже: ${esc(tax.rules.map(x=>`${x.name} ${dRu(x.due)}`).join(" · "))}.</p>`:"";
   return `<section class="card cs-rows" id="cs-sec-${k}"><h2>${SEC[k].title}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
    <div class="tbl"><table><thead><tr><th class="cs-c"></th><th>${SEC[k].who}</th><th class="r">Сумма</th><th>Валюта</th><th>Дата</th><th>Банк</th><th class="r">в £</th><th class="cs-rc">каждый месяц</th><th></th><th></th></tr></thead><tbody>${body}</tbody></table></div>${foot}
-   <div class="row cs-addrow"><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">+ новая строка</button></div>${adding?Ed.sheet("add"):""}</section>`;
+   <div class="row cs-addrow"><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">+ новая строка</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}</div>${adding?Ed.sheet("add"):""}</section>`;
  }
  // ---- «Подставить по прошлым месяцам» ----
  // The one helper, opened by a founder and never run by the page: who was paid, or paid, in four of the last six
@@ -2404,6 +2410,9 @@ const Cash=(()=>{
   if(c("[data-cs-hx]")){cu.helper=null;return draw();}
   if((x=c("[data-cs-hall]"))&&cu.helper){const ls=M.helper.lines.filter(l=>l.list===x.dataset.csHall),on=!ls.every(l=>cu.helper.tick[l.id]);ls.forEach(l=>{cu.helper.tick[l.id]=on;});return draw();}
   if(c("[data-cs-hadd]"))return helperAdd();
+  if((x=c("[data-cs-dup]"))){const its=dupOf(x.dataset.csDup),ym=cu.month;if(!its.length||Plan.lost())return;
+   const say=`Продублировано с ${monG(prevYm(ym))}: ${its.length} ${plural(its.length,"строка","строки","строк")}`;
+   Plan.edit(say,(P,now,who)=>{Live.write.dup(P,its,ym,its.map(()=>uid()),now,who);})&&toast(say,()=>popUndo());return;}
   // The buttons of the line under a row: each takes the tick one step further, or back.
   if((x=c("[data-cs-twin],[data-cs-resume],[data-cs-onward]"))){it=by[x.closest("[data-cs-line]").dataset.csLine];if(!it||Plan.lost())return;const ym=x.dataset.csTwin;
    if(ym)Plan.edit(`${it.name}: повтор в ${monP(ym)} включён`,P=>{Live.write.on(P,{src:"occ",row:it.row,occ:{ym}});})&&toast(`В ${monP(ym)} теперь две строки: ваша и повтор`,()=>popUndo());
@@ -2563,6 +2572,9 @@ const Cash=(()=>{
 // the model the tap was made on, `c` a card of it; now and by come as arguments. The engine itself never writes)
 //  add(P, list, row)               a new row. A tax with a founder in its name goes to `div` as ptax; an inflow gets
 //                                  vat as a boolean; a tax row gets of:false unless told otherwise. Returns the list
+//  dup(P, its, ym, ids, now, by)   «Продублировать с {октября}»: each line of `its` written again as a one-off row
+//                                  of the month `ym` on the same day of the month — the same name, sum, currency,
+//                                  bank and VAT; not paid, not repeating, of:false for a tax. Returns the rows
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it
 //  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
@@ -4032,6 +4044,15 @@ const Live=(()=>{
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});if(f){k="div";r.ptax=true;r.f=f;delete r.of;}else if(r.of===undefined)r.of=false;}
    r.blk=k==="div"?"div":BLOCKS[k].includes(r.blk)?r.blk:BLK0[k];if(k==="inflows")r.vat=r.vat===true;else delete r.vat;
    if(!Array.isArray(P[k]))P[k]=[];P[k].push(r);return k;},
+  // «Продублировать с {октября}»: lines of the month before, written again as rows of the month `ym` — the same
+  // name, sum, currency, bank and VAT, on the same day of the month. Each is a row of its own: not paid, not
+  // repeating, tied to no tax period, and a line that had no date is a row of `ym` without one. `its` are items of
+  // the model, `ids` the ids of the new rows. Returns the rows.
+  dup(P,its,ym,ids,now,by){return its.map((it,i)=>{const src=(P[it.list]||[]).find(x=>String(x.id)===String(it.row))||{},day=isD(it.date)?+it.date.slice(8):0;
+    const r={id:String(ids[i]),name:it.name,amt:it.amt,cur:it.cur,bank:it.bank,on:true,tag:"",info:false,date:day?dayIn(ym,day):"",c0:now,m:{t:now,by},blk:src.blk};
+    if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
+    if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}
+    write.add(P,it.list,r);return r;});},
   mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
   // «Не придёт» / «Не платим» / the tick taken off: a row is switched off, a month of a repeating row is switched
