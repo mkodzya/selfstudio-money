@@ -565,6 +565,8 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .td-row:focus-visible{outline:2px solid var(--text-primary);outline-offset:-2px}
 .td-nm{overflow-wrap:anywhere;margin-right:8px}
 .td-am{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap;text-align:right}
+/* A word where a figure would stand: said like a remark, not like a sum. */
+.td-am.td-word{font-family:inherit;color:var(--text-muted)}
 .td-hist .td-nm,.td-hist .td-am{color:var(--text-muted)}
 .td-done .td-nm,.td-done .td-am{color:var(--text-muted);text-decoration:line-through}
 .td-foot{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin-top:12px}
@@ -5227,11 +5229,12 @@ const Today=(()=>{
   // The tax rows a founder wrote himself stand in the block too — a bill of its own (Corporation tax, which the
   // page does not work out) and an instalment of a period — each once, by its next payment within sixty days: the
   // head names the nearest payment, and it has to be a row of the block. Nothing is held for them on the right:
-  // such a row is a payment of its day, not money that has accrued. A row that IS a period's whole bill is that
-  // period's own line above.
+  // such a row is a payment of its day, not money that has accrued - and the column says so in a word, «в плане».
+  // (It was a dash, which read as a figure that is missing: Mika, 8 October 2026, «вот это зачем».) A row that IS a
+  // period's whole bill is that period's own line above.
   const seen={},t60=dAdd(T,60),mine=M.items.filter(it=>it.list==="taxes"&&it.src!=="tax"&&!it.ptax&&it.open&&it.day&&it.day<=t60&&!(it.of&&!it.of.part)).sort((a,b)=>a.day<b.day?-1:1).filter(it=>{const k=it.occ?it.occ.chain:it.id;return seen[k]?false:(seen[k]=1);});
   const own=it=>{const P=it.of&&it.of.part?X.periods.find(p=>p.rule===it.of.r&&p.per===it.of.p):null;
-   return `<div class="td-row" data-ed-open="${esc(it.id)}" data-ed-at="tax" role="button" tabindex="0" data-td-own="${esc(it.id)}"><span><span class="td-nm">${esc(it.name||"(без названия)")} · ${it.date<T?"срок был":"до"} ${dRu(it.date)}</span><span class="td-meta">ваша строка${P?` · часть ${esc(P.name)}`:""} · ${fmt(-it.cash,it.cash%1?2:0)}${it.src==="occ"?" · каждый месяц":""}</span></span><span class="td-am">—</span></div>${Ed.under(it.id,"tax")}`;};
+   return `<div class="td-row" data-ed-open="${esc(it.id)}" data-ed-at="tax" role="button" tabindex="0" data-td-own="${esc(it.id)}"><span><span class="td-nm">${esc(it.name||"(без названия)")} · ${it.date<T?"срок был":"до"} ${dRu(it.date)}</span><span class="td-meta">ваша строка${P?` · часть ${esc(P.name)}`:""} · ${fmt(-it.cash,it.cash%1?2:0)}${it.src==="occ"?" · каждый месяц":""}</span></span><span class="td-am td-word">в плане</span></div>${Ed.under(it.id,"tax")}`;};
   const how=X.rules.filter(r=>r.on).map(r=>`${r.name} — ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"}`).join("; ");
   const res=X.reserve,short=!M.v0&&res>M.now+0.5;
   // «с сентября 2026», «с III кв. 2026», «с 2026 года».
