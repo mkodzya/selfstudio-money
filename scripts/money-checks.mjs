@@ -1796,6 +1796,10 @@ await run('p16', 'a quarter before the start, paid in parts (T10)', async () => 
   const p7 = filed('p7', '2026-10-07', -1150, 'tax', 'HMRC', { b: 'Barclays', at: AT });
   M = await C(ledP({ hmrc: two, tx: [p7] }), Q, '2026-10-08');
   same([item(M, 'pp@2026-10').state, item(M, 'pp@2026-10').rows, card(M, 12), per(M, K).paid, M.taxes.reserve], ['done', ['p7'], [], 3450, 4800 + 1350], 'a payment of 1,150 on 7 Oct, uploaded later, closes October\'s part and raises no card 12');
+  // … and paid at another sum than it was planned with, the part has paid what the bank shows: counted at the sum of
+  // the row, a part paid over left the difference owed beside it for ever
+  M = await C(ledP({ hmrc: two, tx: [filed('p7', '2026-10-07', -1180, 'tax', 'HMRC', { b: 'Barclays', at: AT })] }), Q, '2026-10-08');
+  same([item(M, 'pp@2026-10').state, per(M, K).paid, per(M, K).left], ['done', 3480, 0], 'October\'s part of 1,150 paid at 1,180: the quarter has had 3,480 — what the bank shows, not what the row says');
   // [Нет, закрыто]
   M = await C(L, await wr(P, 'shut', c, TAP, BY));
   same([M.taxes.reserve, per(M, K).state, card(M, 14)], [4800, 'paid', []], '[Нет, закрыто] instead: the reserve is 4,800');
@@ -4609,6 +4613,34 @@ await run('rv-inbal', '«Получено» on a line older than its account\'s 
   await pg.click(cs('inflows', 'new') + ' [data-ed-do="paid"]');
   await saved(pg);
   same([await pg.$(ask), await mark('new'), (await wise())[1]], [null, T, 500], 'a line dated after the day of the balance is marked at once, as before: its money cannot be inside that balance');
+  await finish(pg);
+});
+
+await run('rv-taxrow', 'a tax row the bank closed before it was tied to its quarter can still be tied to it, and counts for what was paid', async () => {
+  // Mika, 8 October 2026: «должен быть остаток за 2й квартал равный последнему платежу». A quarter paid in four
+  // instalments: two were found in the statements and named, the fourth stood in the plan as a part - and the third
+  // had come over from the old «Касса» as a row of its own, which the bank's payment then closed. The quarter went
+  // on owing it, and the card of a closed row had no field in which to say whose payment it was.
+  const Q2 = 'vat|2026Q2';
+  const P = planP({ tax: { per: { [Q2]: { tx: ['ph0', 'ph1'] } } }, taxes: [
+    row('debt', 'HMRC — долг', 1100, '2026-10-07', { bank: 'Barclays', blk: 'tax' }),
+    row('nov', 'UK VAT за II кв. 2026 — часть', 1350, '2026-11-07', { bank: 'Barclays', blk: 'tax', of: { r: 'vat', p: '2026Q2', part: true } })] });
+  const led = ledP({ hmrc: [['2026-08-07', 1150], ['2026-09-07', 1150]], tx: [filed('p7', '2026-10-07', -1150, 'tax', 'HMRC', { b: 'Barclays', at: ms('2026-10-08T08:00:00Z') })] });
+  const pg = await scene('a closed tax row', led, P, { H: 60, at: '2026-10-08T12:00:00+01:00' });
+  let S = await look(pg);
+  same([item(S.M, 'debt').state, per(S.M, Q2).paid, per(S.M, Q2).left, !!item(S.M, 't|' + Q2)], ['done', 2300, 1150, true],
+    'the bank has closed the row of 7 October; the quarter counts the two payments it was told of, and still expects the third: 1,150 «ещё уйдёт»');
+  await goCash(pg);
+  await pg.click(cs('taxes', 'debt') + ' [data-ed-open]');
+  same([await pg.inputValue(K('row') + '#ed-of'), await texts(pg, K('row') + '[data-ed-save]'), await pg.$(K('row') + '#ed-amt')], ['own', ['Сохранить'], null],
+    'the card of the closed row: no sum and no date to change — one field, «К чему относится», and «Сохранить»');
+  await pg.selectOption(K('row') + '#ed-of', 'p|' + Q2);
+  await pg.click(K('row') + '[data-ed-save]');
+  await saved(pg);
+  S = await look(pg, 'cash');
+  same([stored(S, 'debt').of, item(S.M, 'debt').state, per(S.M, Q2).paid, per(S.M, Q2).left, item(S.M, 't|' + Q2), per(S.M, Q2).state, await toastText(pg)],
+    [{ r: 'vat', p: '2026Q2', part: true }, 'done', 3450, 0, null, 'parts', 'HMRC — долг: часть UK VAT за II кв. 2026'],
+    'said to be a part of the quarter: the quarter has had 3,450 — the 1,150 the bank shows for it, not the 1,100 the row was written with — and what is left of it is the part of November and nothing more');
   await finish(pg);
 });
 

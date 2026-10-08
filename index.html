@@ -3673,8 +3673,12 @@ const Live=(()=>{
   const amtG=f=>Math.abs(f.a),blocked={},payments=rule=>taxPool.some(f=>onPay(rule,f)),notx=X=>arr(X.st.notx);
   PER.forEach(X=>{const rule=X.rule,st=X.st;
    if(!counts(rule)){X.state=X.look?"gone":rule.ask?"ask":"away";return;}
-   const partDone=sum(X.parts.filter(p=>p.done),p=>p.fullG),inParts=new Set();X.parts.forEach(p=>p.match.forEach(id=>inParts.add(id)));
-   X.PT=sum(X.parts.filter(p=>p.done||p.open||p.state==="undated"),p=>p.fullG);X.LP=sum(X.rows.filter(f=>!inParts.has(f.id)),amtG);X.W=billOf[X.key]||null;X.settled=X.LP+partDone;
+   // What a part has taken off the bill. A part still to be paid: the sum it is written with. A part the bank has
+   // closed: the payments that closed it - a part planned at 2,800 and paid at 2,822.15 has paid 2,822.15, and
+   // counted at 2,800 it left the difference owed for ever.
+   const tookG=p=>{const g=p.done?sum(p.match,id=>{const f=byPool[id]||anyRow[id];return f?Math.abs(+f.a||0):0;}):0;return g>0?g:p.fullG;};
+   const partDone=sum(X.parts.filter(p=>p.done),tookG),inParts=new Set();X.parts.forEach(p=>p.match.forEach(id=>inParts.add(id)));
+   X.PT=sum(X.parts.filter(p=>p.done||p.open||p.state==="undated"),tookG);X.LP=sum(X.rows.filter(f=>!inParts.has(f.id)),amtG);X.W=billOf[X.key]||null;X.settled=X.LP+partDone;
    X.owed=X.W?X.W.fullG:owed0(X);X.left=X.W?(X.W.done||!X.W.on?0:X.W.fullG):Math.max(0,X.owed-X.PT-X.LP);X.paid=X.settled;
    const answered=!!st.tx||!!st.date||st.amt!=null||!!st.none||!!st.closed||!!st.paid;
    if(X.look&&!answered){
@@ -4545,13 +4549,24 @@ const Ed=(()=>{
    if(it.list==="taxes"&&!tax&&!it.ptax)o.of=ofValue(it);
    body=fields({name:it.name,amt:tax?Math.round(it.amt):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
   }
-  const save=done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
+  // A closed row has nothing left to change - except what a tax row was for. A payment the bank showed before
+  // anybody tied its row to a quarter stood beside that quarter as a tax of its own, and the quarter went on owing
+  // it (Mika, 8 October 2026: three instalments paid, two counted, and no way to say so on a row already closed).
+  const ofOnly=done&&it.list==="taxes"&&!tax&&!it.ptax;
+  if(ofOnly)body=`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
+  const save=ofOnly?'<button class="sm primary" data-ed-save>Сохранить</button>':done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
   return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it)}${body}${askBox(it)}
    <div class="ed-foot"><div class="row">${actions(it)}</div><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button>${save}</div></div></article>`;
  }
  const miss=(card,k,msg)=>{const f=q(card,`[data-ed-f="${k}"]`);if(f)f.focus();toast(msg);};
  function rowSave(card,mode){
   const it=item(card.dataset.edId);if(!it||Plan.lost())return;
+  // The card of a closed tax row holds one field: what the row was for.
+  if(it.state==="done"){const e=q(card,'[data-ed-f="of"]');if(!e)return;
+   if(e.value==="")return miss(card,"of","Выберите, к чему относится этот налог");
+   if(e.value===ofValue(it)&&it.of!==null){cur=null;return Plan.redraw();}
+   const say=`${it.name}: ${e.options[e.selectedIndex].textContent.trim().replace(/^./,c=>c.toLowerCase())}`,of=ofStore(e.value);
+   cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{of},now,by);}))toast(say,back);return;}
   const f=k=>q(card,`[data-ed-f="${k}"]`),was=it.src==="occ",tick0=ticked(it),tax=it.src==="tax",amt0=tax?Math.round(it.amt):it.amt,of0=f("of")?ofValue(it):"";
   const v={name:f("name").value.trim(),amt:+f("amt").value,cur:f("cur").value,bank:f("bank").value,date:f("date").value,vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:""};
   if(f("amt").value===""||!(v.amt>=0))return miss(card,"amt","Впишите сумму");
