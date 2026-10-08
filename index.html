@@ -1632,6 +1632,39 @@ function renderLedger(){
 // copy kept for «Отменить» and bringing a plan over from the old artifact are here; a change to a row is written
 // by the same hands that write it on «Сегодня» (Ed), so the two tabs cannot write a row two ways.
 // Every attribute and class it puts on the page starts with cs-, which no other handler of Money's matches.
+// ---------- what unfolds, unfolds smoothly ----------
+// A row's card, a folded section, a week of «Сегодня», a day of «По дням», the page's <details>: each opens with one
+// motion — it grows to its height and comes into ink in about a fifth of a second — and what is shut by its own
+// button goes the same way back, a little faster (Mika, 8 October 2026: «на все раскрывания сделай приятную плавную
+// анимацию»). The page is drawn afresh at every change, so this is not a transition between two states: the motion
+// is played on what has just been drawn, once, and a part that is to go is folded first and only then drawn away.
+// Nothing waits on it: a reader who asked the system for less motion gets none, and for him `fold` calls back at once.
+const CALM=()=>!!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+const EASE="cubic-bezier(.2,.7,.2,1)",SHUT={height:"0px",opacity:0,paddingTop:"0px",paddingBottom:"0px",marginTop:"0px",marginBottom:"0px",borderTopWidth:"0px",borderBottomWidth:"0px"};
+function unfold(el){
+  if(!el||!el.animate||CALM())return;const h=el.getBoundingClientRect().height;if(!(h>0))return;
+  const was=el.style.overflow;el.style.overflow="hidden";
+  const a=el.animate([SHUT,{height:h+"px",opacity:1}],{duration:220,easing:EASE});
+  a.onfinish=a.oncancel=()=>{el.style.overflow=was;};
+}
+// `then` is what takes the part away. It is called once — when the motion ends, or at once where there is none.
+function fold(el,then){
+  if(!el||!el.animate||!el.isConnected||CALM())return then();const h=el.getBoundingClientRect().height;if(!(h>0))return then();
+  // The part is held shut until `then` has taken it away; one that stays in the page (the body of a <details>) is
+  // then let go, or it would still be shut when it is opened again.
+  const was=el.style.overflow;el.style.overflow="hidden";
+  const a=el.animate([{height:h+"px",opacity:1},SHUT],{duration:160,easing:EASE,fill:"forwards"});
+  let done=false;const end=()=>{if(done)return;done=true;then();a.cancel();el.style.overflow=was;};a.onfinish=end;a.oncancel=end;
+}
+// Every <details> of the page, by its own summary. (A tab that has to draw into one before it is measured — the
+// chart under «Аналитика» — answers the press itself, and this then leaves it alone.)
+document.addEventListener("click",e=>{
+  const sm=e.target.closest&&e.target.closest("summary"),d=sm&&sm.parentElement;if(!d||d.tagName!=="DETAILS"||e.defaultPrevented||CALM())return;
+  e.preventDefault();const body=[...d.children].filter(x=>x!==sm);
+  if(!d.open){d.open=true;return body.forEach(unfold);}
+  let n=body.length;if(!n)return void(d.open=false);body.forEach(b=>fold(b,()=>{if(!--n)d.open=false;}));
+});
+
 // What an account is called on the page. Two accounts in one bank and one currency share «Barclays GBP»: the one
 // that was added second goes by the name a founder gave it.
 const acName=a=>a.key.split("|").length>2&&a.title?a.title:a.name;
@@ -2419,8 +2452,10 @@ const Cash=(()=>{
    if(x.dataset.edDo==="paid"){const d=it.date||M.T;cu.open.add(d);if(d<M.T)cu.past=true;}
    if(x.dataset.edDo==="unpaid")cu.open.add(it.date&&it.date>=M.T?it.date:M.T);}
   if((x=c("[data-cs-view]")))return setView(x.dataset.csView);
-  if(c("[data-cs-fold]")){cu.subs=!cu.subs;if(Ed.open())Ed.close();else draw();const b=[...root.querySelectorAll("#cs-sec-subs [data-cs-fold]")].find(z=>!z.closest("[hidden]"));if(b)b.focus({preventScroll:true});return;}
-  if(c("[data-cs-helper]")){cu.helper={tick:{},ed:{}};draw();return bring("#cs-helper");}
+  // «Подписки»: the rows fold away before the line of words is drawn, and grow out of it.
+  if(c("[data-cs-fold]")){const go=()=>{cu.subs=!cu.subs;if(Ed.open())Ed.close();else draw();const b=[...root.querySelectorAll("#cs-sec-subs [data-cs-fold]")].find(z=>!z.closest("[hidden]"));if(b)b.focus({preventScroll:true});unfold(q(cu.subs?"#cs-sec-subs .tbl":"#cs-subs-fold"));};
+   return cu.subs?fold(q("#cs-sec-subs .tbl"),go):go();}
+  if(c("[data-cs-helper]")){cu.helper={tick:{},ed:{}};draw();bring("#cs-helper");return unfold(q("#cs-helper"));}
   if(c("[data-cs-hx]")){cu.helper=null;return draw();}
   if((x=c("[data-cs-hall]"))&&cu.helper){const ls=M.helper.lines.filter(l=>l.list===x.dataset.csHall),on=!ls.every(l=>cu.helper.tick[l.id]);ls.forEach(l=>{cu.helper.tick[l.id]=on;});return draw();}
   if(c("[data-cs-hadd]"))return helperAdd();
@@ -2454,7 +2489,9 @@ const Cash=(()=>{
   // A press on a row of a month, anywhere but in its sum, opens the row's card under it - and shuts it again.
   // (The second press of a double click is not a second answer: it would shut what the first has just opened.)
   if((x=c("#cs-plan tr.cs-r")))return e.detail>1?undefined:Ed.row(x.dataset.csId,"plan");
-  if((x=c("[data-cs-row]"))){const d=x.dataset.csRow;if(d==="__past")cu.past=!cu.past;else if(cu.open.has(d))cu.open.delete(d);else cu.open.add(d);return draw();}
+  if((x=c("[data-cs-row]"))){const d=x.dataset.csRow,lines=()=>d==="__past"?null:q(`#cs-stmt tr[data-cs-row="${d}"] + tr.cs-items ul`);
+   if(d!=="__past"&&cu.open.has(d))return fold(lines(),()=>{cu.open.delete(d);draw();});
+   if(d==="__past")cu.past=!cu.past;else cu.open.add(d);draw();return unfold(lines());}
  });
 
  // For the headless check only, and read-only: the plan as the tab holds it, its revision, where it is kept, and
@@ -4859,20 +4896,26 @@ const Ed=(()=>{
  function under(id,at){if(!cur||cur.k!=="row"||cur.id!==id||(cur.at||"")!==(at||""))return "";const it=item(id);return it?rowCard(it):"";}
  function sheet(k){return cur&&cur.k===k&&M?(k==="add"?addCard():balCard()):"";}
  function after(root){
-  const card=root.querySelector("[data-ed-card]");if(!card||!fresh||!cur)return;fresh=false;
+  const card=root.querySelector("[data-ed-card]");if(!card||!fresh||!cur)return;const how=fresh;fresh=false;
   card.scrollIntoView({block:"center"});
+  unfold(how==="new"?card:q(card,"[data-ed-askbox]"));
   const f=cur.ask==="part"?q(card,"[data-ed-part]"):cur.focus?q(card,`[data-ed-f="${cur.focus}"]`):cur.k==="add"&&cur.what?q(card,`[data-ed-f="${cur.draft.name?"amt":"name"}"]`):null;
   if(f){f.focus();if(cur.focus==="date")try{f.showPicker();}catch(e){}}
   cur.focus="";
  }
- const show=c=>{cur=c;fresh=true;Plan.redraw();};
+ // A card that opens is "new"; the same card drawn again — on a question, on another kind of row to add — is not,
+ // and only what has just appeared in it is unfolded.
+ const show=c=>{const again=!!cur&&!!c&&cur.k===c.k&&(cur.id||"")===(c.id||"")&&(cur.at||"")===(c.at||"");cur=c;fresh=again?"again":"new";Plan.redraw();};
+ // A card shut by its own button, by a second press on its row or by Escape folds away first. If another card was
+ // opened in that fifth of a second, it is left alone.
+ const shut=card=>{const was=cur;fold(card||document.querySelector("[data-ed-card]"),()=>{if(cur===was){cur=null;Plan.redraw();}});};
 
  // ---- events: wherever a card or an opener stands ----
  document.addEventListener("click",ev=>{
   const t=ev.target,c=s=>t.closest&&t.closest(s);let x;const card=c("[data-ed-card]");
   if(card&&cur){
    const kind=card.dataset.edCard;
-   if(c("[data-ed-x]")){cur=null;return Plan.redraw();}
+   if(c("[data-ed-x]"))return shut(card);
    // A subscription is charged every month: the tick starts on, until the founder has set it himself.
    if((x=c("[data-ed-what]"))&&kind==="add"){cur.what=x.dataset.edWhat;if(!cur.monSet)cur.draft.monthly=cur.what==="subs";return show(cur);}
    // An account taken out of the plan: asked twice, as it was beside «Остатки» in «Касса», where this button stood
@@ -4895,7 +4938,7 @@ const Ed=(()=>{
   }
   if((x=c("[data-ed-tax]")))return taxDo(x);
   if((x=c("[data-ed-do]")))return act(x.dataset.edDo,x);
-  if((x=c("[data-ed-open]"))){const id=x.dataset.edOpen,at=x.dataset.edAt||"",ask=x.dataset.edAsk||"";if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===at&&!x.dataset.edFocus&&!ask){cur=null;return Plan.redraw();}return show({k:"row",id,at,focus:x.dataset.edFocus||"",ask});}
+  if((x=c("[data-ed-open]"))){const id=x.dataset.edOpen,at=x.dataset.edAt||"",ask=x.dataset.edAsk||"";if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===at&&!x.dataset.edFocus&&!ask)return shut();return show({k:"row",id,at,focus:x.dataset.edFocus||"",ask});}
   if((x=c("[data-ed-add]")))return show({k:"add",what:x.dataset.edAdd||"",kind:"wd",mon:x.dataset.edMon||"",draft:{name:x.dataset.edName||"",amt:x.dataset.edAmt||"",cur:"GBP",bank:"Wise",date:x.dataset.edDate||"",vat:false,monthly:x.dataset.edAdd==="subs"}});
   if((x=c("[data-ed-bal]")))return show({k:"bal",key:x.dataset.edBal||""});
   if((x=c("[data-ed-radd],[data-ed-rdel],[data-ed-rfrom],[data-ed-rset]")))return ruleDo(x);
@@ -4944,11 +4987,11 @@ const Ed=(()=>{
   if(ev.key==="Enter"&&t.matches("[data-ed-part],[data-ed-partdate]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
   if(ev.key==="Enter"&&t.matches("[data-ed-card] input:not([type=checkbox]):not([list])")){const b=t.closest("[data-ed-card]").querySelector("[data-ed-save]");if(b){ev.preventDefault();b.click();}}
   if(ev.key==="Enter"&&t.matches("[data-ed-rv]"))t.blur();
-  if(ev.key==="Escape"&&cur&&t.closest("[data-ed-card]")){cur=null;Plan.redraw();}
+  if(ev.key==="Escape"&&cur&&t.closest("[data-ed-card]"))shut(t.closest("[data-ed-card]"));
  });
  return{use,under,sheet,after,sum,remark,vatWords,names,apply,forecast,NOZERO,does:(verb,id)=>act(verb,{dataset:{edId:id}},true),
   // A row's card opened where the row stands - and shut by the same press on the row it is open under.
-  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||"")){cur=null;return Plan.redraw();}show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur){cur=null;Plan.redraw();}},open:()=>cur,twinWords};
+  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return shut();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur){cur=null;Plan.redraw();}},open:()=>cur,twinWords};
 })();
 
 // ---------- the balance by day, as «Сегодня» and «Касса» both draw it ----------
@@ -5370,8 +5413,16 @@ const Today=(()=>{
   if(c("[data-td-reload]"))return location.reload();
   if((x=c("[data-td-h]")))return Plan.setH(+x.dataset.tdH);
   // «Раскрыть все недели» and back: either way the weeks opened or shut by hand are forgotten.
-  if((x=c("[data-td-flip]"))){const k=x.dataset.tdFlip;st[k]=!st[k];if(k==="all")st.wk={};return render();}
-  if((x=c("[data-td-wk]"))){st.wk[x.dataset.tdWk]=x.getAttribute("aria-expanded")!=="true";return render();}
+  // (A week that opens grows out of its line, one that is shut folds into it; «Раскрыть все недели» opens the rest.)
+  if((x=c("[data-td-flip]"))){const k=x.dataset.tdFlip,was=new Set([...root.querySelectorAll('.td-wk[aria-expanded="true"]')].map(b=>b.dataset.tdWk));st[k]=!st[k];if(k==="all")st.wk={};render();
+   if(k==="all")root.querySelectorAll('.td-wk[aria-expanded="true"]').forEach(b=>{if(!was.has(b.dataset.tdWk))unfold(b.nextElementSibling);});return;}
+  if((x=c("[data-td-wk]"))){const k=x.dataset.tdWk,open=x.getAttribute("aria-expanded")!=="true",body=x.nextElementSibling;
+   if(open){st.wk[k]=true;render();return unfold(root.querySelector(`.td-wk[data-td-wk="${k}"] + .td-wkd`));}
+   return fold(body&&body.matches(".td-wkd")?body:null,()=>{st.wk[k]=false;render();});}
+  // «Аналитика»: the chart is drawn to its width before the block is measured, so this tab answers the press itself.
+  if((x=c(".td-anl>summary"))&&!CALM()){e.preventDefault();const d=x.parentElement,body=d.querySelector(":scope>.stack");
+   if(d.open)return fold(body,()=>{d.open=false;});
+   d.open=true;st.anl=true;chart();return unfold(body);}
   if((x=c("[data-td-day]"))){st.day=x.dataset.tdDay;root.querySelector("#td-dayinfo").innerHTML=st.day?dayInfo(st.day):"";return;}
   if((x=c("[data-td-days]"))){Cash.day(x.dataset.tdDays,x.hasAttribute("data-td-why"));return setTab("cash");}
   // The two things to do about an empty plan: open the month to type it in, or the list of who is paid every month.

@@ -359,8 +359,12 @@ http
 // ---- the browser ----
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, args: ['--no-sandbox'] });
 const errs = [];
-async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null, folded = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: w < 500 ? 2 : 1 });
+// What unfolds on the page unfolds with a motion a fifth of a second long, and what is shut by its own button is
+// drawn away only when that motion ends. A check presses and reads at once, so every page here asks for less
+// motion - the page then plays none and waits for none; `motion` is for the one check of the motion itself.
+const CALM = { reducedMotion: 'reduce' };
+async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null, folded = false, motion = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: w < 500 ? 2 : 1, ...(motion ? {} : CALM) });
   // «Аналитика» on «Сегодня» is folded until a founder opens it, and the page remembers that he did. The checks read
   // and press what is under it, so they come as that founder; `folded` is for the check of the fold itself.
   if (!folded) await ctx.addInitScript(() => { try { localStorage.setItem('selfstudio-money-analytics', '1'); } catch (e) { /* no storage: the page copes */ } });
@@ -3820,7 +3824,7 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
   // a plan that does not load, and a stored document that is not a plan
   serve(ledA(), planW());
   store.cash.fail = true;
-  const p4 = await browser.newContext({ viewport: { width: 1320, height: 900 } }).then((c) => c.newPage());
+  const p4 = await browser.newContext({ viewport: { width: 1320, height: 900 }, ...CALM }).then((c) => c.newPage());
   await p4.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await p4.goto(BASE + '/money/index.html#cash');
   await p4.waitForFunction(() => /не загрузился/.test(document.querySelector('#view-cash').textContent));
@@ -3838,7 +3842,7 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
   same([await p4.evaluate(() => location.hash), (await look(p4, 'cash')).P.banks[0].amt], ['#cash', 10120], '«Обновить страницу» reloads on the same tab and the plan is there');
   await p4.context().close();
   serve(ledA(), { v: 1, banks: 'oops', inflows: [] });
-  const p5 = await browser.newContext({ viewport: { width: 1320, height: 900 } }).then((c) => c.newPage());
+  const p5 = await browser.newContext({ viewport: { width: 1320, height: 900 }, ...CALM }).then((c) => c.newPage());
   await p5.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await p5.goto(BASE + '/money/index.html#cash');
   await p5.waitForFunction(() => /не загрузился/.test(document.querySelector('#view-cash').textContent));
@@ -3877,7 +3881,7 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
     'with nothing loaded «Загрузить выписки» on «Сегодня» and on «Месяцы» both open «Загрузка выписок»; «Месяцы» names no tab; an empty «Таблица» keeps the switch', months);
   await e0.context().close();
   // with no server at all the plan is kept in the browser, as version 3
-  const lf = await browser.newContext({ viewport: { width: 1320, height: 900 } }).then((c) => c.newPage());
+  const lf = await browser.newContext({ viewport: { width: 1320, height: 900 }, ...CALM }).then((c) => c.newPage());
   lf.on('pageerror', (e) => errs.push(`file: PAGEERROR ${e.message}`));
   await lf.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await lf.goto('file://' + PUB + '/money/index.html#cash');
@@ -3955,7 +3959,7 @@ await run('refused', 'a page whose save was refused stops answering «Сохра
   const v1 = { v: 1, savedAt: '2026-10-01T09:30:00.000Z', cushion: 5000, banks: [{ id: 'r1', name: 'Wise — GBP', amt: 18000, cur: 'GBP', bank: 'Wise', on: true, tag: '', info: false, date: '' }], inflows: [], team: [{ id: 'r2', name: 'Person G', amt: 1000, cur: 'GBP', bank: 'Wise', on: true, tag: '', info: false, date: '2026-10-08' }], taxes: [], other: [] };
   serve(ledA(), v1);
   store.cash.clash = await up(v1, ledA());
-  const ctx = await browser.newContext({ viewport: { width: 1320, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: 1320, height: 900 }, ...CALM });
   const slow = await ctx.newPage();
   slow.on('pageerror', (e) => errs.push(`upgrade race: PAGEERROR ${e.message}`));
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
@@ -4975,6 +4979,90 @@ await run('rv-kassa2', '«Касса · По месяцам» in two columns: a 
   await pg.setViewportSize({ width: 1000, height: 900 });
   same(await pg.$eval('#cs-two', (el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length), 1, 'in a window 1000px wide the two columns are one: the lists stand one under another');
   await finish(pg);
+});
+
+await run('rv-motion', 'what unfolds, unfolds with one motion — a row\'s card, «Подписки», a week, a day, «Аналитика» — and a reader who asked for less motion gets none', async () => {
+  // Mika, 8 October 2026: «на все раскрывания сделай приятную плавную анимацию». The page is drawn afresh at every
+  // change, so the motion is played on what has just been drawn; what is shut by its own button folds first and is
+  // drawn away when the fold ends. Every other check asks the page for less motion; this one does not.
+  const P = planW({ other: [every('s1', 'Tool A', 20, 10, '2026-10', { sub: true }), every('s2', 'Tool B', 30, 25, '2026-10', { sub: true })] });
+  serve(ledA(), P);
+  const pg = await open('motion', undefined, { motion: true, folded: true });
+  await pg.waitForSelector('#view-today [data-live="verdict"]');
+  // what an element is doing right now: how many motions run on it, and how tall it is drawn
+  const moving = (sel) => pg.$eval(sel, (e) => [e.getAnimations().length, Math.round(e.getBoundingClientRect().height)]);
+  const still = (sel) => pg.waitForFunction((s) => { const e = document.querySelector(s); return !!e && !e.getAnimations().length; }, sel);
+  // «Сегодня»: a week, «Аналитика», a row's card
+  const wk = await pg.$eval('#view-today .td-wk[aria-expanded="false"]', (b) => b.dataset.tdWk);
+  await pg.click(`#view-today .td-wk[data-td-wk="${wk}"]`);
+  const body = `#view-today .td-wk[data-td-wk="${wk}"] + .td-wkd`;
+  const w0 = await moving(body);
+  await still(body);
+  const w1 = await moving(body);
+  ok(w0[0] === 1 && w1[0] === 0 && w1[1] > w0[1] && w1[1] > 20, 'a week of «Сегодня» pressed open grows to its height: one motion while it does, none after', [w0, w1]);
+  await pg.click(`#view-today .td-wk[data-td-wk="${wk}"]`);
+  same([await pg.$eval(`#view-today .td-wk[data-td-wk="${wk}"]`, (b) => b.getAttribute('aria-expanded')), (await moving(body))[0]], ['true', 1], '… pressed again, it folds first: it is still drawn, and moving');
+  await pg.waitForSelector(body, { state: 'detached' });
+  same(await pg.$eval(`#view-today .td-wk[data-td-wk="${wk}"]`, (b) => b.getAttribute('aria-expanded')), 'false', '… and is drawn away when the fold ends');
+  await pg.click('#view-today .td-anl > summary');
+  const a0 = await pg.$eval('#view-today .td-anl', (d) => [d.open, d.querySelector(':scope > .stack').getAnimations().length, d.querySelectorAll('#td-chart *').length > 5]);
+  await still('#view-today .td-anl > .stack');
+  same([a0, await pg.evaluate(() => localStorage.getItem('selfstudio-money-analytics'))], [[true, 1, true], '1'], '«Аналитика» opens the same way, with its chart already drawn while it grows — and the page remembers that it is open');
+  await pg.click('#view-today .td-anl > summary');
+  await pg.waitForFunction(() => !document.querySelector('#view-today .td-anl').open);
+  await pg.click('#view-today .td-anl > summary');
+  await still('#view-today .td-anl > .stack');
+  ok((await pg.$eval('#view-today .td-anl > .stack', (e) => e.getBoundingClientRect().height)) > 100, '… shut and opened again, it is whole: nothing of the fold is left on it');
+  // «Касса»: a row's card, and the same card shut three ways
+  await goCash(pg);
+  await pg.click(cs('team', 'rB@2026-10') + ' .cs-nt');
+  const card = '#cs-sec-team tr.cs-edrow ' + K('row').trim();
+  const c0 = await moving(card);
+  await still(card);
+  const c1 = await moving(card);
+  ok(c0[0] === 1 && c1[0] === 0 && c1[1] > c0[1] && c1[1] > 150, 'a row of the month pressed: its card grows out from under it', [c0, c1]);
+  await pg.click(K('row') + '[data-ed-do="part"]');
+  await pg.waitForSelector(K('row') + '[data-ed-askbox="part"]');
+  same([(await moving(card))[0], (await moving(K('row') + '[data-ed-askbox="part"]'))[0]], [0, 1], '«Частично…» in it: the question unfolds, the card around it does not start again');
+  await still(K('row') + '[data-ed-askbox="part"]');
+  await pg.click(K('row') + '[data-ed-x]');
+  same([!!(await pg.$(card)), (await moving(card))[0]], [true, 1], '«Закрыть»: the card folds first');
+  await pg.waitForSelector(card, { state: 'detached' });
+  await pg.click(cs('team', 'rB@2026-10') + ' .cs-nt');
+  await still(card);
+  await pg.click(cs('team', 'rB@2026-10') + ' .cs-dd');
+  await pg.waitForSelector(card, { state: 'detached' });
+  ok(!(await pg.$('[data-ed-card]')), '… and so it does when the row is pressed a second time');
+  // «Подписки», and a day of «По дням»
+  await pg.click('#cs-sec-subs [data-cs-fold]');
+  const s0 = await moving('#cs-sec-subs .tbl');
+  await still('#cs-sec-subs .tbl');
+  ok(s0[0] === 1 && (await moving('#cs-sec-subs .tbl'))[1] > 40, '«Показать 2 строки»: the rows of «Подписки» grow out of the line of words', s0);
+  await pg.click('#cs-sec-subs .cs-addrow [data-cs-fold]');
+  await pg.waitForFunction(() => { const f = document.querySelector('#cs-subs-fold'); return !!f && !f.hidden; });
+  ok(await pg.$eval('#cs-sec-subs .tbl', (e) => e.hidden), '«Свернуть» folds them back into it');
+  await pg.click('#view-cash [data-cs-view="days"]');
+  await pg.waitForSelector('#cs-stmt');
+  const day = '2026-10-20'; // Person B's day
+  same(await pg.$eval(`#cs-stmt tr[data-cs-row="${day}"]`, (tr) => tr.getAttribute('aria-expanded')), 'false', '(the day of Person B\'s payment stands shut)');
+  await pg.click(`#cs-stmt tr[data-cs-row="${day}"] td:first-child`);
+  const lines = `#cs-stmt tr[data-cs-row="${day}"] + tr.cs-items ul`;
+  const d0 = await moving(lines);
+  await still(lines);
+  ok(d0[0] === 1 && (await moving(lines))[1] > 10, 'a day of «По дням» pressed open: its lines grow under it', d0);
+  await pg.click(`#cs-stmt tr[data-cs-row="${day}"] td:first-child`);
+  await pg.waitForSelector(lines, { state: 'detached' });
+  same(await pg.$eval(`#cs-stmt tr[data-cs-row="${day}"]`, (tr) => tr.getAttribute('aria-expanded')), 'false', '… and fold away when it is pressed again');
+  await pg.context().close();
+  // … and for a reader who asked for less motion nothing moves and nothing waits
+  const calm = await open('no motion');
+  await calm.waitForSelector('#view-today [data-live="verdict"]');
+  await goCash(calm);
+  await calm.click(cs('team', 'rB@2026-10') + ' .cs-nt');
+  const q0 = await calm.$eval('#cs-sec-team tr.cs-edrow ' + K('row').trim(), (e) => [e.getAnimations().length, e.getBoundingClientRect().height > 150]);
+  await calm.click(K('row') + '[data-ed-x]');
+  same([q0, await calm.$('[data-ed-card]')], [[0, true], null], 'with «меньше движения» asked of the system the card is simply there, whole, and «Закрыть» takes it away at once');
+  await calm.context().close();
 });
 
 await run('looks', 'the pictures: «Сегодня», «Касса» and the tax settings on a desk and on a phone, and day one', async () => {
