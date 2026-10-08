@@ -1136,7 +1136,12 @@ answering on 5192 (setup steps 1–5 above).
 
 ### Hotfix 2 — the prod name, which is the cut-over
 
-Not written yet. In the `finance.selfstudio.se` block the rewrite of the root
+**Done on 8 October 2026**, on the owner's word: the platform's pull request
+#3, released as its `0.18.2`; the file validated as a copy before and after
+the merge; the proxy recreated; six names answered. The same block for the
+platform's `develop` is its pull request #4. What the change was:
+
+In the `finance.selfstudio.se` block the rewrite of the root
 to `/money/index.html` goes, the port becomes `127.0.0.1:5191`, `request_body`
 and `encode` are added, and the comment is rewritten: Money is a product of
 its own, and the block is there only because one Caddy owns 80 and 443. Six
