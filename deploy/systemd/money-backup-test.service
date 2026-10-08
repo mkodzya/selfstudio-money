@@ -1,0 +1,32 @@
+# One nightly copy of Money's TEST data directory - while it holds real
+# documents.
+#
+# The test stand was built to hold a fabricated studio, and a generated copy
+# needs no backup. While a person's marker, /var/lib/money/test/REAL_DATA, says
+# that its documents are real, the directory is what prod's is: the only copy
+# of what the founders filed there. Then this unit keeps a tarball of it every
+# night, /var/backups/money/money-test-<utc>.tar.gz, fourteen days of them.
+#
+# Without the marker the script says that there is nothing to keep, writes
+# nothing and ends well: the unit may stay switched on across a return to the
+# fabricated studio, though docs/deploy.md says to switch it off then.
+#
+# Installed by linking, never by copying, so the text that runs is the text in
+# the repository:
+#   ln -sf /opt/money-dev/deploy/systemd/money-backup-test.service /etc/systemd/system/
+#   ln -sf /opt/money-dev/deploy/systemd/money-backup-test.timer   /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now money-backup-test.timer
+
+[Unit]
+Description=Money — nightly backup of the test data directory, while it holds real data
+
+[Service]
+Type=oneshot
+ExecStart=/opt/money-dev/deploy/bin/money-backup test
+# The script writes to a .part file and renames it only after the archive has
+# been read back whole, so a failure here means no file was written — not half
+# of one that looks like a backup. A night that fails is in the journal
+# (journalctl -u money-backup-test). A timer that is not switched on is said
+# by the next money-deploy-test, in a WARNING line above its verdict.
+Nice=10
+IOSchedulingClass=idle

@@ -164,6 +164,19 @@ class Sandbox(object):
         os.makedirs(self.data(stand), 0o700)
         return self.data(stand)
 
+    def mark_real(self, stand="test", content="the real ledger, since 8 October 2026\n"):
+        """A person's marker in a stand's data directory: its documents are real. Returns its path."""
+        path = os.path.join(self.data(stand), store.REAL_DATA_FILE)
+        write(path, content)
+        return path
+
+    def backups(self, stand=None):
+        """The names in /var/backups/money, sorted - of one stand, or all of them; [] when the directory is not there."""
+        folder = os.path.join(self.home, "var", "backups", "money")
+        if not os.path.isdir(folder):
+            return []
+        return sorted(name for name in os.listdir(folder) if stand is None or name.startswith("money-%s-" % stand))
+
     def stand_file(self, stand, extra):
         """Add lines to the stand file of a stand's own checkout."""
         path = os.path.join(self.checkouts[stand], "deploy", "stands", stand + ".env")
@@ -1045,6 +1058,130 @@ class DeployCommandTests(DeployCase):
         self.assertEqual([line for line in done.lines if "nightly" in line or "switched on" in line], [],
                          "a good night is not spoken about")
 
+    def test_without_the_marker_no_backup_is_taken_and_the_night_is_asked_about_as_before(self):
+        # The promise to CI's rehearsal and to a stand of fabricated data: nothing of the lock is seen.
+        for empty, last in ((0, "money-test: OK - deployed and seeded with the fabricated studio."),
+                            (1, "money-test: OK - deployed. The stand holds data and was not reseeded (--reseed does that on purpose).")):
+            with self.subTest(empty=empty):
+                box = self.sandbox()
+                box.make_data_dir("test")
+                box.plan(empty=[empty])
+                done = box.run(box.script("test", "money-deploy-test"))
+                self.assertEqual((done.status, done.last), (0, last), done)
+                self.assertEqual(box.backups(), [], "a stand of fabricated data was backed up")
+                self.assertEqual(box.calls(r"^systemctl"), ["systemctl is-failed --quiet money-test-reseed.service",
+                                                           "systemctl is-enabled --quiet money-test-reseed.timer"])
+                self.assertEqual([line for line in done.lines + done.err.splitlines()
+                                  if re.search(r"REAL_DATA|real data|real documents|money-backup", line, re.I)], [])
+                self.assertEqual([event["words"] for event in box.events("ctl") if event["words"] == "empty"], ["empty"])
+
+    def test_reseed_is_refused_on_a_stand_that_holds_real_documents_before_anything_is_touched(self):
+        for content in ("the real ledger, since 8 October 2026\n", ""):
+            with self.subTest(content=content):
+                box = self.sandbox()
+                box.make_data_dir("test")
+                marker = box.mark_real(content=content)
+                box.container("test", box.image("money-test:1.0.0"))
+                before = box.state()
+                done = box.run(box.script("test", "money-deploy-test"), "--reseed")
+                self.assertEqual(done.status, 1, done)
+                self.assertEqual(done.lines, [
+                    "money-test: FAILED - --reseed is refused: %s is there, so the test stand holds real documents, "
+                    "and a reseed would replace them with the fabricated studio. Nothing was deployed." % marker])
+                self.assertEqual(box.calls(), [], "docker, git, flock or systemctl was called")
+                self.assertEqual(box.state(), before)
+                self.assertEqual(box.backups(), [])
+                self.assertEqual(os.listdir(os.path.join(box.home, "run", "lock")), [], "not even the lock was taken")
+                self.assertEqual(read(marker), content)
+
+    def test_a_stand_that_holds_real_documents_is_backed_up_first_and_never_seeded(self):
+        box = self.sandbox()
+        stand = Stand(box.make_data_dir("test"), Clock("2026-10-08T09:00:00"))
+        stand.save("ledger", 0, 3)
+        write(os.path.join(stand.data, "STAND"), "test\n")
+        marker = box.mark_real()
+        # Were it asked, the stand would call itself empty - and an empty stand is what a deploy seeds.
+        box.plan(empty=[0], enabled_units=["money-backup-test.timer"])
+        done = box.run(box.script("test", "money-deploy-test"))
+        self.assertEqual(done.status, 0, done)
+        self.assertEqual(done.last, "money-test: OK - deployed. The stand holds real data (%s is there): nothing was "
+                                    "seeded." % marker)
+        # the backup: one tarball of the test stand, the marker in it, and it was written before the code moved
+        (name,) = box.backups()
+        self.assertRegex(name, r"^money-test-20\d{6}T\d{6}Z\.tar\.gz$")
+        tarball = os.path.join(box.home, "var", "backups", "money", name)
+        listed = subprocess.run(["tar", "-tzf", tarball], stdout=subprocess.PIPE, check=True).stdout.decode("utf-8").split()
+        for inside in ("./REAL_DATA", "./STAND", "./ledger/current.json"):
+            self.assertIn(inside, listed)
+        said = [line.split(" (")[0] for line in done.lines]
+        self.assertLess(said.index(tarball), said.index("abcdef0 A Verdict Phrase in the Style of the Times"),
+                        "the backup came after the pull")
+        self.assertLess(os.stat(tarball).st_mtime_ns, os.stat(os.path.join(box.state_dir, "calls.log")).st_mtime_ns)
+        self.assertEqual(len(box.events("git-pull")), 1)
+        self.assertEqual(len(box.events("up")), 1)
+        # never seeded: the stand was not even asked whether it is empty
+        self.assertEqual(box.events("seed"), [])
+        self.assertEqual([event["image"] for event in box.events("run")], [], "the generator ran")
+        self.assertEqual([event["words"] for event in box.events("ctl")], ["selfcheck"])
+        self.assertEqual([line for line in done.lines if line.startswith("WARNING")], [])
+        self.assertEqual(stand.stores["ledger"].revision(), 1)
+        self.assertTrue(os.path.exists(marker))
+
+    def test_a_backup_that_fails_stops_the_deploy_of_a_stand_that_holds_real_documents(self):
+        box = self.sandbox()
+        box.make_data_dir("test")
+        box.mark_real()
+        cid = box.container("test", box.image("money-test:1.0.0"))
+        # Something lies where the backups go: the directory cannot be made.
+        write(os.path.join(box.home, "var", "backups", "money"), "not a directory\n")
+        done = box.run(box.script("test", "money-deploy-test"))
+        self.assertEqual(done.status, 1, done)
+        self.assertEqual(done.last, "money-test: FAILED - the backup failed, so nothing was deployed.")
+        self.assertEqual(box.calls(r"^git"), [])
+        self.assertUntouched(box, done)
+        self.assertEqual(box.state()["containers"][cid]["status"], "running")
+        # the same when tar itself fails: no file that looks like a backup, and no deploy
+        box = self.sandbox()
+        box.make_data_dir("test")
+        box.mark_real()
+        box.plan(pack=[2])
+        done = box.run(box.script("test", "money-deploy-test"))
+        self.assertEqual(done.status, 1, done)
+        self.assertIn("money-backup: tar failed with status 2. NO BACKUP WAS WRITTEN.", done.err)
+        self.assertEqual(done.last, "money-test: FAILED - the backup failed, so nothing was deployed.")
+        self.assertEqual(box.backups(), [])
+        self.assertUntouched(box, done)
+
+    def test_on_a_stand_that_holds_real_documents_the_warnings_are_turned_round(self):
+        night_on = ("WARNING: money-test-reseed.timer IS SWITCHED ON, and this stand holds REAL data. money-seed-test "
+                    "refuses the night, but the timer must be off. Switch it off now: systemctl disable --now "
+                    "money-test-reseed.timer")
+        no_backup = ("WARNING: money-backup-test.timer is not switched on, so no night backs up the real data of this "
+                     "stand: systemctl enable --now money-backup-test.timer (its units are linked first: docs/deploy.md, "
+                     "the test stand's data)")
+        for what, plan, warnings in (
+                ("the night is off and the backup is on", dict(enabled_units=["money-backup-test.timer"]), []),
+                ("the last reseed failed, long ago", dict(enabled_units=["money-backup-test.timer"],
+                                                         failed_units=["money-test-reseed.service"]), []),
+                ("no timer is on", dict(enabled_units=[]), [no_backup]),
+                ("the night is enabled", dict(enabled_units=["money-test-reseed.timer", "money-backup-test.timer"]), [night_on]),
+                ("the night was started by hand", dict(enabled_units=["money-backup-test.timer"],
+                                                       active_units=["money-test-reseed.timer"]), [night_on]),
+                ("the night is on and the backup is off", dict(enabled_units=["money-test-reseed.timer"]), [night_on, no_backup])):
+            with self.subTest(what=what):
+                box = self.sandbox()
+                box.make_data_dir("test")
+                box.mark_real()
+                box.plan(**plan)
+                done = box.run(box.script("test", "money-deploy-test"))
+                self.assertEqual(done.status, 0, done)
+                self.assertEqual([line for line in done.lines if line.startswith("WARNING")], warnings)
+                self.assertEqual(done.lines[-1 - len(warnings):-1], warnings, "the warnings stand right above the verdict")
+                self.assertTrue(done.last.startswith("money-test: OK - deployed. The stand holds real data ("), done)
+                self.assertEqual([line for line in done.lines if "nightly reseed" in line or "fabricated studio" in line], [],
+                                 "a night that did not reseed is not spoken about")
+                self.assertEqual(box.calls(r"^systemctl is-failed"), [])
+
     def test_a_refused_policy_setting_stops_a_test_deploy_before_the_pull(self):
         box = self.sandbox()
         box.make_data_dir("test")
@@ -1119,6 +1256,37 @@ class SeedTests(DeployCase):
         self.assertEqual(ledger.purge(0, "test"), len(ledger.snapshots()) or 2)
         self.assertEqual(copies(), [])
         self.assertNotIn("A REAL STATEMENT", ledger.read().body.decode("utf-8"))
+
+    def test_a_stand_that_holds_real_documents_is_refused_before_anything_is_generated(self):
+        for how in ("a file with words", "an empty file", "a link to nowhere"):
+            with self.subTest(marker=how):
+                box = self.seeded_stand()
+                marker = os.path.join(box.data("test"), "REAL_DATA")
+                if how == "a link to nowhere":
+                    os.symlink(os.path.join(box.data("test"), "no-such-file"), marker)
+                else:
+                    self.assertEqual(box.mark_real(content="" if how == "an empty file" else "real\n"), marker)
+                before = box.state()
+                done = box.run(box.script("test", "money-seed-test"))
+                self.assertEqual((done.status, done.out), (4, ""), done)
+                self.assertEqual(done.err, "money-seed-test: REFUSED - %s is there: the test stand holds real documents. "
+                                           "Nothing was generated, nothing was seeded and no snapshot was purged.\n" % marker)
+                self.assertEqual(box.calls(), [], "docker or flock was called")
+                self.assertEqual(box.state(), before, "the generator ran, or the stand was asked")
+                self.assertEqual(os.listdir(os.path.join(box.home, "tmp")), [])
+                self.assertTrue(os.path.lexists(marker))
+        # the same for a deploy that holds the lock, and before the missing generator is noticed
+        box = self.seeded_stand()
+        marker = box.mark_real()
+        os.unlink(os.path.join(box.checkouts["test"], "scripts", "money-demo.mjs"))
+        done = box.run(box.script("test", "money-seed-test"), env={"MONEY_DEPLOY_LOCK_HELD": "1"})
+        self.assertEqual((done.status, box.calls()), (4, []), done)
+        # the marker gone, the night is what it was
+        box = self.seeded_stand()
+        os.unlink(box.mark_real())
+        done = box.run(box.script("test", "money-seed-test"))
+        self.assertEqual(done.status, 0, done)
+        self.assertEqual(len(box.events("seed")), 2)
 
     def test_a_seed_the_stand_refuses_is_tried_once_more(self):
         box = self.seeded_stand()
@@ -1208,6 +1376,26 @@ class WrapperTests(DeployCase):
         shutil.rmtree(box.data("test"))
         box.plan(failed_units=["money-test-reseed.service"])
         self.assertEqual(box.run(motd).out, "")
+
+    def test_with_real_documents_on_the_stand_the_words_at_login_say_so_and_nothing_about_the_night(self):
+        box = self.stand()
+        marker = box.mark_real()
+        motd = os.path.join(box.checkouts["test"], "deploy", "motd", "97-money-test-reseed")
+        for plan in (dict(), dict(failed_units=["money-test-reseed.service"]), dict(failed_units=[], enabled_units=[])):
+            with self.subTest(plan=plan):
+                box.plan(**plan)
+                done = box.run(motd)
+                self.assertEqual((done.status, done.err), (0, ""), done)
+                self.assertEqual(len(done.lines), 1, done)
+                self.assertIn("Money (test) holds REAL data", done.last)
+                self.assertIn("(%s)" % marker, done.last)
+                self.assertNotIn("FAILED", done.out)
+                self.assertNotIn("not switched on", done.out)
+                self.assertNotIn("journalctl", done.out)
+        self.assertEqual(box.calls(r"^systemctl"), [], "the night was asked about")
+        # the marker gone, the words are about the night again
+        os.unlink(marker)
+        self.assertIn("The nightly reseed of Money (test) is not switched on.", box.run(motd).out)
 
     def test_the_reseed_unit_cannot_hold_the_deploy_lock_all_night(self):
         unit = read(os.path.join(ROOT, "deploy", "systemd", "money-test-reseed.service"))
@@ -1433,6 +1621,161 @@ class BackupTests(DeployCase):
             self.assertIn(name, listed)
         self.assertTrue(os.path.exists(os.path.join(stand.data, "auth", "sessions.json")))
         self.assertEqual([name for name in listed if "/sessions.json" in name or ".tmp-" in name], [])
+
+    def test_no_argument_and_prod_are_the_same_backup(self):
+        box = self.sandbox()
+        Stand(box.make_data_dir("prod"), Clock("2026-10-06T22:00:00")).save("ledger", 0, 3)
+        Stand(box.make_data_dir("test"), Clock("2026-10-06T22:00:00")).save("ledger", 0, 3)
+        box.mark_real("test")
+        backups = os.path.join(box.home, "var", "backups", "money")
+        for arguments in ((), ("prod",)):
+            with self.subTest(arguments=arguments):
+                before = box.backups()
+                done = box.run(box.script("prod", "money-backup"), *arguments)
+                self.assertEqual((done.status, done.err), (0, ""), done)
+                (new,) = set(box.backups()) - set(before) or (box.backups()[-1],)
+                self.assertRegex(new, r"^money-prod-20\d{6}T\d{6}Z\.tar\.gz$")
+                self.assertRegex(done.out, r"^%s \([^()\n]+\)\n$" % re.escape(os.path.join(backups, new)))
+                listed = subprocess.run(["tar", "-tzf", os.path.join(backups, new)], stdout=subprocess.PIPE,
+                                        check=True).stdout.decode("utf-8").split()
+                self.assertIn("./ledger/current.json", listed)
+                self.assertNotIn("./REAL_DATA", listed, "it is prod's directory that was packed")
+        self.assertEqual(box.backups("test"), [], "a backup of prod wrote one of test")
+        # and the words of prod's refusals are what they were
+        shutil.rmtree(box.data("prod"))
+        done = box.run(box.script("prod", "money-backup"))
+        self.assertEqual((done.status, done.out), (1, ""), done)
+        self.assertEqual(done.err, "money-backup: no data directory %s: is the prod stand set up on this machine?\n"
+                         % box.data("prod"))
+        os.makedirs(box.data("prod"))
+        done = box.run(box.script("prod", "money-backup"))
+        self.assertEqual((done.status, done.err), (0, ""), done)
+        self.assertEqual(done.out, "money-backup: %s is empty, so there is nothing to back up yet\n" % box.data("prod"))
+
+    def test_the_test_stand_is_backed_up_only_while_it_holds_real_documents(self):
+        box = self.sandbox()
+        stand = Stand(box.make_data_dir("test"), Clock("2026-10-08T09:00:00"))
+        write(os.path.join(stand.data, "STAND"), "test\n")
+        stand.save("ledger", 0, 3)
+        token = stand.invite("vanya")
+        stand.auth.set_password(token, PASSWORD, "203.0.113.5")            # leaves a session
+        write(os.path.join(stand.data, "ledger", "current.json.tmp-1234"), "half a write")
+        marker = os.path.join(stand.data, "REAL_DATA")
+        # The fabricated studio: nothing to keep, nothing written - not even the directory - and no failure.
+        done = box.run(box.script("test", "money-backup"), "test")
+        self.assertEqual((done.status, done.err), (0, ""), done)
+        self.assertEqual(done.out, "money-backup: the test stand holds the fabricated studio (%s is not there), so there "
+                                   "is nothing to keep\n" % marker)
+        self.assertFalse(os.path.exists(os.path.join(box.home, "var", "backups", "money")))
+        # Real documents: the same tarball prod gets, under the test stand's name.
+        self.assertEqual(box.mark_real(), marker)
+        done = box.run(box.script("test", "money-backup"), "test")
+        self.assertEqual((done.status, done.err), (0, ""), done)
+        backups = os.path.join(box.home, "var", "backups", "money")
+        (name,) = os.listdir(backups)
+        self.assertRegex(name, r"^money-test-20\d{6}T\d{6}Z\.tar\.gz$")
+        self.assertRegex(done.out, r"^%s \([^()\n]+\)\n$" % re.escape(os.path.join(backups, name)))
+        self.assertEqual(stat.S_IMODE(os.stat(backups).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(backups, name)).st_mode), 0o600)
+        listed = subprocess.run(["tar", "-tzf", os.path.join(backups, name)], stdout=subprocess.PIPE,
+                                check=True).stdout.decode("utf-8").split()
+        for inside in ("./REAL_DATA", "./STAND", "./ledger/current.json", "./ledger/EVER_SAVED", "./auth/users.json",
+                       "./auth/USERS_WRITTEN", "./security.log"):
+            self.assertIn(inside, listed)
+        self.assertTrue(os.path.exists(os.path.join(stand.data, "auth", "sessions.json")))
+        self.assertEqual([inside for inside in listed if "/sessions.json" in inside or ".tmp-" in inside], [])
+        # It works from prod's checkout as well: the command a person finds in /usr/local/bin is prod's.
+        os.unlink(os.path.join(backups, name))
+        done = box.run(box.script("prod", "money-backup"), "test")
+        self.assertEqual((done.status, len(box.backups("test")), box.backups("prod")), (0, 1, []), done)
+        # money-restore puts back prod's tarballs only: this one it refuses.
+        refused = box.run(box.script("prod", "money-restore"), os.path.join(backups, box.backups("test")[0]), stdin="prod\n")
+        self.assertEqual(refused.status, 1, refused)
+        self.assertIn("is not a backup of the prod stand (its STAND marker says 'test')", refused.err)
+
+    def test_an_empty_test_directory_with_nothing_but_the_marker_is_still_a_backup(self):
+        # A person may mark the stand before the first upload: the marker itself is then what is kept.
+        box = self.sandbox()
+        box.make_data_dir("test")
+        self.assertEqual(box.run(box.script("test", "money-backup"), "test").status, 0)
+        self.assertEqual(box.backups(), [])
+        box.mark_real()
+        done = box.run(box.script("test", "money-backup"), "test")
+        self.assertEqual((done.status, len(box.backups("test"))), (0, 1), done)
+        # and a test stand that was never set up is an error, as for prod
+        shutil.rmtree(box.data("test"))
+        done = box.run(box.script("test", "money-backup"), "test")
+        self.assertEqual((done.status, done.out), (1, ""), done)
+        self.assertEqual(done.err, "money-backup: no data directory %s: is the test stand set up on this machine?\n"
+                         % box.data("test"))
+
+    def test_a_wrong_argument_is_a_usage_line_and_status_2_and_nothing_is_written(self):
+        box = self.sandbox()
+        Stand(box.make_data_dir("prod"), Clock("2026-10-06T22:00:00")).save("ledger", 0, 3)
+        box.make_data_dir("test")
+        box.mark_real()
+        for arguments in (("staging",), ("dev",), ("--test",), ("TEST",), ("",), ("prod", "test"), ("test", "now"),
+                          ("/var/lib/money/test",)):
+            with self.subTest(arguments=arguments):
+                done = box.run(box.script("prod", "money-backup"), *arguments)
+                self.assertEqual((done.status, done.out, done.err), (2, "", "usage: money-backup [prod|test]\n"), done)
+        self.assertFalse(os.path.exists(os.path.join(box.home, "var", "backups", "money")))
+
+    def test_each_stand_prunes_its_own_tarballs_and_never_the_others(self):
+        box = self.sandbox()
+        Stand(box.make_data_dir("prod"), Clock("2026-10-06T22:00:00")).save("ledger", 0, 3)
+        box.make_data_dir("test")
+        box.mark_real()
+        backups = os.path.join(box.home, "var", "backups", "money")
+        os.makedirs(backups, 0o700)
+
+        def aged(name, days):
+            path = os.path.join(backups, name)
+            write(path, "an older run\n", 0o600)
+            then = time.time() - days * 86400 - 3600
+            os.utime(path, (then, then))
+            return name
+        old = {stand: aged("money-%s-20260901T000000Z.tar.gz" % stand, 20) for stand in ("prod", "test")}
+        young = {stand: aged("money-%s-20261001T000000Z.tar.gz" % stand, 5) for stand in ("prod", "test")}
+        part = {stand: aged(".money-%s-20261001T000000Z.tar.gz.part" % stand, 2) for stand in ("prod", "test")}
+        stranger = aged("money-prodigal-20260901T000000Z.tar", 20)          # nobody's: not a tarball of either stand
+
+        done = box.run(box.script("prod", "money-backup"))
+        self.assertEqual(done.status, 0, done)
+        left = set(os.listdir(backups))
+        self.assertEqual(done.lines[1:], [os.path.join(backups, old["prod"])], "what was pruned is named, and only that")
+        self.assertFalse({old["prod"], part["prod"]} & left, "prod's old tarball or half-written file stayed")
+        self.assertTrue({young["prod"], old["test"], young["test"], part["test"], stranger} <= left,
+                        "a backup of prod removed a file that is not prod's: %s" % sorted(left))
+        self.assertEqual(len(box.backups("prod")), 2)
+
+        done = box.run(box.script("test", "money-backup"), "test")
+        self.assertEqual(done.status, 0, done)
+        left = set(os.listdir(backups))
+        self.assertEqual(done.lines[1:], [os.path.join(backups, old["test"])])
+        self.assertFalse({old["test"], part["test"]} & left, "test's old tarball or half-written file stayed")
+        self.assertTrue({young["prod"], young["test"], stranger} <= left, sorted(left))
+        self.assertEqual((len(box.backups("prod")), len(box.backups("test"))), (2, 2))
+
+        # KEEP_DAYS is each run's own as well
+        done = box.run(box.script("test", "money-backup"), "test", env={"KEEP_DAYS": "3"})
+        self.assertEqual(done.status, 0, done)
+        self.assertNotIn(young["test"], os.listdir(backups))
+        self.assertIn(young["prod"], os.listdir(backups))
+
+    def test_an_interrupted_backup_of_the_test_stand_leaves_no_half_written_file_either(self):
+        box = self.sandbox()
+        box.make_data_dir("test")
+        box.mark_real()
+        box.plan(block="tar")
+        process = box.start(box.script("test", "money-backup"), "test")
+        self.assertTrue(box.blocked(process), "tar was never reached")
+        backups = os.path.join(box.home, "var", "backups", "money")
+        (half,) = os.listdir(backups)
+        self.assertRegex(half, r"^\.money-test-20\d{6}T\d{6}Z\.tar\.gz\.part$")
+        done = box.signalled(process, signal.SIGTERM)                       # what systemd sends a unit it ends
+        self.assertEqual(done.status, 143, done)
+        self.assertEqual(os.listdir(backups), [], "half of an archive was left behind")
 
     def test_an_interrupted_backup_leaves_no_half_written_file(self):
         # review-deploy/no-cleanup-on-signals, for the one file that holds the ledger and the hashes.

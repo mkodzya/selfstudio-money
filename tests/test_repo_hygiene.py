@@ -8,6 +8,10 @@ session never lives anywhere in git. These tests read the repository as it is an
 * a port in ``deploy/compose.yml`` is published anywhere but on ``127.0.0.1``;
 * a stand file (``deploy/stands/*.env``) gains a key the build spec does not know, or
   anything that looks like a secret;
+* a deploy script looks for the marker of real documents under another name than the service
+  does, or anything in the repository makes or removes that marker - it is a person's;
+* a timer in ``deploy/systemd`` has no service, runs a command that is not in ``deploy/bin``, or
+  the two backups are put on the same minute;
 * ``moneyd`` imports the laptop server, or a test file forgets ``tests/_safety.py``;
 * a vendored reader changed: the three files of ``vendor/`` are pinned here by sha256 (the
   laptop tool's own two files: ``tests/test_laptop_frozen.py``);
@@ -32,7 +36,7 @@ import sys
 import unittest
 from typing import Dict, List, Optional, Tuple
 
-from moneyd import config
+from moneyd import config, store
 
 CHECKOUT = _safety.CHECKOUT
 KIB = 1024
@@ -536,6 +540,132 @@ class StandFilesTests(unittest.TestCase):
                 self.assertEqual(settings.data_dir, "/data")
                 self.assertEqual(settings.logins, ("mika", "misha", "vanya"))
                 self.assertEqual(settings.warnings, (), "the stand would start with a warning")
+
+
+# ---------------------------------------------------------------------------
+# REAL_DATA: one name on both sides, and a person's file
+# ---------------------------------------------------------------------------
+
+def deploy_scripts() -> List[str]:
+    """Every shell script of deploy/, as a path relative to the checkout."""
+    found = ["deploy/stand.sh"]
+    for folder in ("bin", "motd"):
+        found.extend("deploy/%s/%s" % (folder, name) for name in sorted(os.listdir(path_of("deploy", folder))))
+    return found
+
+
+def code_lines(text: str) -> List[str]:
+    """The lines of a shell script or a unit file that are not comments."""
+    return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+class RealDataMarkerTests(unittest.TestCase):
+    """``<data>/REAL_DATA`` says that a stand's documents are real. The service looks for it inside the
+    container (``moneyd.store.REAL_DATA_FILE``), the deploy scripts on the host; and nobody but a person
+    makes it or removes it."""
+
+    #: The scripts that have to know of it: the three that would replace, purge or leave unbacked, and the words at login.
+    LOOKING = ("deploy/bin/money-backup", "deploy/bin/money-deploy-test", "deploy/bin/money-seed-test",
+               "deploy/motd/97-money-test-reseed")
+
+    def test_the_scripts_look_for_the_name_the_service_looks_for(self):
+        self.assertEqual(store.REAL_DATA_FILE, "REAL_DATA")
+        for name in self.LOOKING:
+            with self.subTest(script=name):
+                lines = code_lines(read_text(*name.split("/")))
+                self.assertEqual([line for line in lines if line.startswith("REAL_MARKER=")],
+                                 ["REAL_MARKER=%s" % store.REAL_DATA_FILE])
+                looked = [line for line in lines if re.search(r'\[ !? ?-e "\$DATA/\$REAL_MARKER" \]', line)]
+                self.assertTrue(looked, "%s names the marker and never looks for it" % name)
+                for line in looked:
+                    # A link that leads nowhere is there as well: the service looks with lstat.
+                    self.assertRegex(line, r'\[ !? ?-L "\$DATA/\$REAL_MARKER" \]')
+        naming = [name for name in deploy_scripts() if "REAL_MARKER" in read_text(*name.split("/"))]
+        self.assertEqual(sorted(naming), sorted(self.LOOKING), "the scripts that know of the marker are listed here")
+
+    def test_no_script_makes_or_removes_the_marker(self):
+        writing = re.compile(r"(^|[\s;&|(])(touch|rm|mv|cp|ln|install|tee|truncate|dd|chmod|chown)\s|>")
+        for name in deploy_scripts():
+            for line in code_lines(read_text(*name.split("/"))):
+                if "REAL_MARKER" not in line and store.REAL_DATA_FILE not in line:
+                    continue
+                with self.subTest(script=name, line=line.strip()):
+                    self.assertIsNone(writing.search(line.replace(">&2", "")),
+                                      "%s writes where it should only look: %s" % (name, line.strip()))
+
+    def test_nothing_in_moneyd_makes_or_removes_the_marker(self):
+        named = {}      # type: Dict[str, List[str]]
+        for path in python_files("moneyd"):
+            with open(path, "rb") as handle:
+                text = handle.read().decode("utf-8")
+            for line in text.splitlines():
+                if "REAL_DATA_FILE" in line and not line.lstrip().startswith("#"):
+                    named.setdefault(os.path.relpath(path, CHECKOUT), []).append(line.strip())
+        self.assertEqual(sorted(named), ["moneyd/ctl.py", "moneyd/store.py"])
+        for name, lines in named.items():
+            for line in lines:
+                with self.subTest(module=name, line=line):
+                    self.assertIsNone(re.search(r"\b(open|write|atomic_write|unlink|remove|rename|replace|mkdir|symlink|"
+                                                r"rmtree|truncate|touch|chmod)\b", line),
+                                      "the marker is looked for (lstat) and printed, nothing else")
+        # ... and no command of the stand's command line is about it.
+        with open(path_of("moneyd", "ctl.py"), "rb") as handle:
+            commands = re.findall(r'command\("([a-z-]+)"', handle.read().decode("utf-8"))
+        self.assertIn("seed", commands)
+        self.assertEqual([word for word in commands if "real" in word or "mark" in word], [])
+
+
+# ---------------------------------------------------------------------------
+# deploy/systemd, read as text
+# ---------------------------------------------------------------------------
+
+def unit_values(name: str, key: str) -> List[str]:
+    return [line.split("=", 1)[1] for line in code_lines(read_text("deploy", "systemd", name))
+            if line.startswith(key + "=")]
+
+
+class UnitTests(unittest.TestCase):
+    """The timers of the server. Each is installed by a link into the checkout its stand is deployed from."""
+
+    UNITS = ["money-backup", "money-backup-test", "money-test-reseed"]
+    #: What each service runs: prod's from prod's checkout, the test stand's from its own.
+    RUNS = {
+        "money-backup": "/opt/money/deploy/bin/money-backup",
+        "money-backup-test": "/opt/money-dev/deploy/bin/money-backup test",
+        "money-test-reseed": "/opt/money-dev/deploy/bin/money-seed-test",
+    }
+
+    def test_every_unit_is_a_timer_and_the_service_it_starts(self):
+        self.assertEqual(sorted(os.listdir(path_of("deploy", "systemd"))),
+                         sorted(name + kind for name in self.UNITS for kind in (".service", ".timer")))
+
+    def test_each_service_runs_one_command_of_its_stands_own_checkout_once(self):
+        for unit, command in self.RUNS.items():
+            with self.subTest(unit=unit):
+                self.assertEqual(unit_values(unit + ".service", "ExecStart"), [command])
+                self.assertEqual(unit_values(unit + ".service", "Type"), ["oneshot"])
+                script = command.split()[0]
+                self.assertRegex(script, r"^/opt/money(-dev)?/deploy/bin/[a-z-]+$")
+                self.assertTrue(os.access(path_of("deploy", "bin", os.path.basename(script)), os.X_OK), script)
+                text = read_text("deploy", "systemd", unit + ".service")
+                for link in (".service", ".timer"):
+                    self.assertIn("ln -sf %s/deploy/systemd/%s%s" % (script.split("/deploy/")[0], unit, link), text,
+                                  "the unit says how it is installed, from the checkout it runs")
+
+    def test_each_timer_fires_once_a_night_catches_up_and_can_be_enabled(self):
+        for unit in self.UNITS:
+            with self.subTest(unit=unit):
+                (when,) = unit_values(unit + ".timer", "OnCalendar")       # CI reads exactly one, with sed
+                self.assertRegex(when, r"^\*-\*-\* \d\d:\d\d:00 (UTC|Asia/Yerevan)$")
+                self.assertEqual(unit_values(unit + ".timer", "Persistent"), ["true"])
+                self.assertEqual(unit_values(unit + ".timer", "WantedBy"), ["timers.target"])
+
+    def test_the_two_backups_do_not_read_the_one_disk_at_the_same_minute(self):
+        (prod,) = unit_values("money-backup.timer", "OnCalendar")
+        (test,) = unit_values("money-backup-test.timer", "OnCalendar")
+        self.assertEqual(prod, "*-*-* 03:40:00 Asia/Yerevan")
+        self.assertEqual(test, "*-*-* 03:50:00 Asia/Yerevan")
+        self.assertNotEqual(prod, test)
 
 
 # ---------------------------------------------------------------------------

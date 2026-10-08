@@ -13,6 +13,13 @@
 # --older-than-days 0` - every snapshot, because the day's copy is what the
 # seed has just replaced. Accounts and passwords survive it.
 #
+# NOT WHILE THE STAND HOLDS REAL DOCUMENTS. With a person's marker in the data
+# directory (/var/lib/money/test/REAL_DATA) money-seed-test refuses, with
+# status 4 and nothing touched, so this unit would turn "failed" every night.
+# The timer is switched off for that time -
+#   systemctl disable --now money-test-reseed.timer
+# - and money-deploy-test says so, loudly, for as long as it is not.
+#
 # Installed by linking:
 #   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.service /etc/systemd/system/
 #   ln -sf /opt/money-dev/deploy/systemd/money-test-reseed.timer   /etc/systemd/system/

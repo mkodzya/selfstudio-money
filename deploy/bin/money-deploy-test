@@ -31,11 +31,36 @@
 # The fabricated studio comes from scripts/money-demo.mjs. While that file is
 # not in the checkout the deploy still succeeds: it prints a warning and skips
 # the seeding.
+#
+# A STAND THAT HOLDS REAL DOCUMENTS. While a person's marker lies in the
+# stand's data directory -
+#
+#   /var/lib/money/test/REAL_DATA
+#
+# - the stand is deployed the way prod is, and 5 and 6 above do not apply:
+#   - `--reseed` is refused before anything is touched, the lock included;
+#   - after 2, a backup of the data directory is taken (`money-backup test`).
+#     A deploy that cannot back up does not go on;
+#   - nothing is seeded, whatever the stand holds: an empty document on a
+#     stand of real ones is a question for a person, not a place for the
+#     fabricated studio. `ctl empty` is not even asked;
+#   - the WARNING lines are turned round. Nothing is said about a night that
+#     did not reseed. It is said, loudly, when money-test-reseed.timer is
+#     enabled or active - money-seed-test refuses the night, but the timer
+#     must be off - and when money-backup-test.timer is not enabled;
+#   - the verdict says that the stand holds real data and nothing was seeded.
+# The marker is made and removed by hand: docs/deploy.md, "The test stand's
+# data". It is looked for once, at the start, as root sees it. money-seed-test
+# and `ctl seed` look for it again by themselves.
 set -eu
 
 CHECKOUT=/opt/money-dev
 LOCK=/run/lock/money-deploy.lock
 NIGHT=money-test-reseed
+NIGHTLY_BACKUP=money-backup-test
+# A person's marker in the data directory: the documents are real
+# (moneyd/store.py, REAL_DATA_FILE).
+REAL_MARKER=REAL_DATA
 
 # Whatever stops a deploy before it starts ends in the same words a deploy
 # ends in, on standard output: one line, the last one.
@@ -62,6 +87,20 @@ about_the_night() {
   fi
 }
 
+# The same place in the output, on a stand that holds real documents: the night
+# must NOT reseed, and a night has to back the stand up.
+about_real_data() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if systemctl is-enabled --quiet "$NIGHT.timer" 2>/dev/null || systemctl is-active --quiet "$NIGHT.timer" 2>/dev/null; then
+    echo "WARNING: $NIGHT.timer IS SWITCHED ON, and this stand holds REAL data. money-seed-test refuses the night, but the timer must be off. Switch it off now: systemctl disable --now $NIGHT.timer"
+  fi
+  if ! systemctl is-enabled --quiet "$NIGHTLY_BACKUP.timer" 2>/dev/null; then
+    echo "WARNING: $NIGHTLY_BACKUP.timer is not switched on, so no night backs up the real data of this stand: systemctl enable --now $NIGHTLY_BACKUP.timer (its units are linked first: docs/deploy.md, the test stand's data)"
+  fi
+}
+
 if [ $# -gt 1 ]; then
   usage
 fi
@@ -74,6 +113,16 @@ esac
 
 cd "$CHECKOUT" || die "there is no checkout at $CHECKOUT. Nothing was deployed."
 
+# Are the stand's documents real? Asked once, before anything else.
+DATA=$("$CHECKOUT/deploy/stand.sh" test get MONEY_DATA_HOST_DIR)
+REAL=0
+if [ -e "$DATA/$REAL_MARKER" ] || [ -L "$DATA/$REAL_MARKER" ]; then
+  REAL=1
+fi
+if [ "$REAL" -eq 1 ] && [ "$RESEED" -eq 1 ]; then
+  die "--reseed is refused: $DATA/$REAL_MARKER is there, so the test stand holds real documents, and a reseed would replace them with the fabricated studio. Nothing was deployed."
+fi
+
 if ! command -v flock >/dev/null 2>&1; then
   die "flock is not installed. Nothing was changed."
 fi
@@ -85,6 +134,13 @@ MONEY_DEPLOY_LOCK_HELD=1
 export MONEY_DEPLOY_LOCK_HELD
 
 "$CHECKOUT/deploy/stand.sh" test preflight
+
+# As on prod: real documents are backed up before the code under them changes.
+if [ "$REAL" -eq 1 ]; then
+  if ! "$CHECKOUT/deploy/bin/money-backup" test; then
+    die "the backup failed, so nothing was deployed."
+  fi
+fi
 
 if ! git pull --ff-only -q; then
   die "the checkout did not fast-forward. Nothing was deployed."
@@ -100,6 +156,14 @@ fi
 MONEY_VERDICT=deferred
 export MONEY_VERDICT
 "$CHECKOUT/deploy/stand.sh" test up
+
+# Real documents are never seeded over, and an empty document beside them is
+# not filled with the fabricated studio either.
+if [ "$REAL" -eq 1 ]; then
+  about_real_data
+  echo "money-test: OK - deployed. The stand holds real data ($DATA/$REAL_MARKER is there): nothing was seeded."
+  exit 0
+fi
 
 # `ctl empty`: 0 when both documents are at revision 0, 1 when the stand holds
 # something. Only a plain "empty" seeds; anything unclear leaves the data alone.

@@ -19,14 +19,15 @@ The service and this are two processes; every file they share is written whole u
     restore <ledger|plan> <snapshot>      asks to type the stand's name
     floor <ledger|plan> <N>               no later revision of that document is N or lower
     verify <dir>                          counts of any data directory - an unpacked backup, say
-    seed <ledger|plan> [--fresh]          test and dev only: the document on standard input
-    purge-snapshots --older-than-days N   test and dev only; N is 0 to 36500
+    seed <ledger|plan> [--fresh]          test and dev only, never beside REAL_DATA: the document on standard input
+    purge-snapshots --older-than-days N   test and dev only, never beside REAL_DATA; N is 0 to 36500
     empty                                 exit 0 when both documents are at revision 0, else 1
 
 Exit status: 0 done, or "yes"; 1 failed, or "no" (``ping``, ``selfcheck``, ``doctor``,
 ``verify``, ``empty``); 2 refused before anything was changed - a command this stand does
-not take (``seed`` on prod), a setting that stops the service too, a wrong command line,
-a number no command takes (a floor below 0 or longer than fifteen digits).
+not take (``seed`` on prod, ``seed`` on a stand marked as holding real documents), a setting
+that stops the service too, a wrong command line, a number no command takes (a floor below 0
+or longer than fifteen digits).
 
 ``user retire-links`` and ``floor`` are for the two moments when a stand's files are older
 than what browsers and messengers hold: a stand put back from a backup, and the cut-over.
@@ -40,6 +41,12 @@ stored revision stays what it is, and it is allowed on every stand.
 ``seed`` without ``--fresh`` fills a document that is at revision 0 and nothing else (exit 1,
 nothing written, when the document holds something); with ``--fresh`` it replaces what is
 there, as an ordinary save. It never deletes a snapshot - that is ``purge-snapshots``.
+
+``REAL_DATA`` in the root of the data directory is a person's marker: the documents of this
+stand are real (``store.holds_real_data``). A person makes it and removes it, by hand; no
+command here does either. While it is there ``seed`` and ``purge-snapshots`` are refused on
+every stand - exit 2, before anything is read or written - and ``doctor`` and ``verify``
+name it in one line. It is never a problem to them.
 
 Three things hold for every command:
 
@@ -464,6 +471,9 @@ def _show_directory(ctl: _Ctl, report: Dict[str, Any], accounts: Dict[str, Any])
     """Print what a data directory holds. Returns the problems found in the accounts."""
     problems = []  # type: List[str]
     ctl.say("  STAND marker: %s" % (report["stand"] or "none"))
+    if report.get("realData"):
+        ctl.say("  %s marker: there - the documents are real; seed and purge-snapshots are refused"
+                % store.REAL_DATA_FILE)
     if report.get("freeBytes") is not None:
         ctl.say("  free space: %s" % _size(report["freeBytes"]))
     for kind in store.KINDS:
@@ -691,12 +701,19 @@ def _floor(ctl: _Ctl, args: Any) -> int:
 
 
 def _fabricated_only(ctl: _Ctl, command: str, why: str) -> bool:
+    """Whether ``command`` may run here: on a stand whose data is made up, and on no directory a person
+    has marked as holding real documents. Says why not; looks at nothing but the marker."""
     settings = ctl.settings()
-    if settings.stand in _FABRICATED:
-        return True
-    ctl.warn("moneyd.ctl: refused: %s %s, so it exists on test and dev only. This stand is %s. "
-             "Nothing was read or written." % (command, why, settings.stand))
-    return False
+    if settings.stand not in _FABRICATED:
+        ctl.warn("moneyd.ctl: refused: %s %s, so it exists on test and dev only. This stand is %s. "
+                 "Nothing was read or written." % (command, why, settings.stand))
+        return False
+    if store.holds_real_data(settings.data_dir):
+        ctl.warn("moneyd.ctl: refused: %s %s, and the documents of this %s stand are real: %s is there. "
+                 "Nothing was read or written." % (command, why, settings.stand,
+                                                   os.path.join(settings.data_dir, store.REAL_DATA_FILE)))
+        return False
+    return True
 
 
 def _seed(ctl: _Ctl, args: Any) -> int:
@@ -872,11 +889,13 @@ def _parser(out: Any, err: Any) -> argparse.ArgumentParser:
     floor.add_argument("floor", type=_whole, metavar="N", help="a revision: a whole number, fifteen digits at most")
     command("verify", _verify, "counts of any data directory; never contents").add_argument("dir")
     seed = command("seed", _seed,
-                   "test and dev only: write the document on standard input through the stand's own door")
+                   "test and dev only, never beside REAL_DATA: write the document on standard input through "
+                   "the stand's own door")
     seed.add_argument("kind", choices=store.KINDS)
     seed.add_argument("--fresh", action="store_true",
                       help="replace what the stand holds; without it only an empty document is filled")
-    purge = command("purge-snapshots", _purge, "test and dev only: delete snapshots older than N days")
+    purge = command("purge-snapshots", _purge,
+                    "test and dev only, never beside REAL_DATA: delete snapshots older than N days")
     purge.add_argument("--older-than-days", dest="days", type=_whole, required=True, metavar="N",
                        help="a whole number of days, 0 to %d" % _PURGE_DAYS_MAX)
     command("empty", _empty, "exit 0 when both documents are at revision 0, else 1")

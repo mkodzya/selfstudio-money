@@ -7,8 +7,10 @@
 # that gap: whoever signs in to this machine is told, and nothing is said on a
 # good day.
 #
-# Prod only: the test stand is not backed up. And nothing is said on a machine
-# where prod holds nothing yet.
+# Prod only. The test stand is backed up only while it holds real documents
+# (money-backup-test.timer), and that backup is not watched here: a timer of
+# it that is not switched on is said by money-deploy-test. And nothing is said
+# on a machine where prod holds nothing yet.
 #
 # Installed by linking, as /etc/update-motd.d/98-money-backup (one before the
 # platform's own 99-selfstudio-backup):
