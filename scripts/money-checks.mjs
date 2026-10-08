@@ -1947,7 +1947,10 @@ async function scene(name, led, P, { w = 1320, h = 900, H = 30, at } = {}) {
 // the tab still says of what the page no longer does: history, averages, a cautious scenario (live-spec-2 §7.15).
 const look = (pg, tab = 'today') => pg.evaluate((tab) => {
   const p = tab === 'today' ? 'td' : 'cs';
-  const H = +document.querySelector(`#view-${tab} [data-${p}-h][aria-pressed="true"]`).dataset[p + 'H'];
+  // «30 дней / 60 дней» stands on «Сегодня» and in «Касса · По дням»; in «По месяцам» there is no such switch, and
+  // the choice is the one the page keeps in the browser.
+  const hb = document.querySelector(`#view-${tab} [data-${p}-h][aria-pressed="true"]`);
+  const H = hb ? +hb.dataset[p + 'H'] : (localStorage.getItem('selfstudio-money-days') === '30' ? 30 : 60);
   const live = {};
   const twice = [];
   document.querySelectorAll(`#view-${tab} [data-live]`).forEach((e) => { const k = e.dataset.live; if (k in live) twice.push(k); live[k] = { v: e.dataset.v, t: e.textContent }; });
@@ -2011,7 +2014,9 @@ async function holds(pg, msg, tab = 'today') {
       if (!(Math.abs(shown - w) <= 0.51)) off.push(`${k}: «${plain(e.t)}» is printed for ${w}`);
     }
   }
-  (tab === 'today' ? MUST : SIX).concat(S.M.v0 || S.M.verdict.id === 'vE' ? [] : ['lowday', 'in.n', 'out.team', 'out.other', 'out.taxes', 'out.div'], tab === 'today' && !S.M.empty ? ['end'] : []).forEach((k) => { if (!(k in S.live)) off.push(`${k}: not on the screen`); });
+  // «Касса» is the plan by months and by days: the figures of the forecast are on «Сегодня» alone, and none of them
+  // has to stand here (until 8 October 2026 the six stood at its head too).
+  (tab === 'today' ? MUST.concat(S.M.v0 || S.M.verdict.id === 'vE' ? [] : ['lowday', 'in.n', 'out.team', 'out.other', 'out.taxes', 'out.div'], !S.M.empty ? ['end'] : []) : []).forEach((k) => { if (!(k in S.live)) off.push(`${k}: not on the screen`); });
   // «Можно вывести» is the one figure printed rounded: down to a hundred pounds, never up.
   if (S.live.free && S.live.free.v !== '') { const shown = parseFloat(S.live.free.t.replace(/[^\d.]/g, '')); if (!(shown <= S.M.free.now + 0.005 && S.M.free.now - shown < 100 && shown % 100 === 0)) off.push(`free: «${plain(S.live.free.t)}» is printed for ${S.M.free.now}`); }
   // Nothing the page shows is invented: no «≈» anywhere, and no line names a founder as a kind of money.
@@ -2024,7 +2029,9 @@ async function holds(pg, msg, tab = 'today') {
   ok(!off.length, `${msg}: each of the ${n} figures on ${tab === 'today' ? 'the screen' : '«Касса»'} is the model's (verdict ${S.M.verdict.id})`, off.slice(0, 8));
   held.runs++;
   inv(S.M, S.P).forEach((b) => held.bad.push(msg + ' — ' + b));
-  S.fig = (k) => (k in S.live ? (isNaN(+S.live[k].v) || S.live[k].v === '' ? S.live[k].v : +S.live[k].v) : undefined);
+  // A figure by its key: what the screen says of it — or, on «Касса», where the forecast's figures are not drawn any
+  // more, what the page's own model holds for it (the model the screen's figures are held against, above).
+  S.fig = (k) => (k in S.live ? (isNaN(+S.live[k].v) || S.live[k].v === '' ? S.live[k].v : +S.live[k].v) : tab === 'cash' ? want(S.M, k, S.at) : undefined);
   return S;
 }
 // The screen's own figures against the design's.
@@ -2068,12 +2075,22 @@ async function fill(pg, kind, f) {
 }
 const rowIds = (pg) => pg.evaluate(() => { const P = window.__cash.state(); return ['inflows', 'team', 'taxes', 'other', 'div'].flatMap((k) => P[k].map((r) => String(r.id))); });
 // «Добавить» → what → the fields → «Добавить». Returns the id the new row was given.
+// «Добавить» stood in the head of «Сегодня» and of «Касса» until 8 October 2026. A row is now added where its list
+// is — «Касса · По месяцам», «+ новая строка» under the list — so a check that adds one goes there, and comes back
+// to «Сегодня» when it is done.
+async function openAdd(pg, what) {
+  await pg.click('.nav [data-tab="cash"]');
+  if ((await pg.getAttribute('#view-cash [data-cs-view="plan"]', 'aria-pressed')) !== 'true') await pg.click('#view-cash [data-cs-view="plan"]');
+  await pg.click(`#cs-sec-${what} [data-ed-add]`);
+  await pg.waitForSelector(K('add'));
+}
+const toToday = async (pg) => { await pg.click('.nav [data-tab="today"]'); await pg.waitForSelector('#view-today .page-head'); };
 async function addRow(pg, what, f) {
   const before = new Set(await rowIds(pg));
-  await pg.click('#view-today .page-head [data-ed-add]');
-  await pg.click(K('add') + `[data-ed-what="${what}"]`);
+  await openAdd(pg, what);
   await fill(pg, 'add', f);
   await pg.click(K('add') + '[data-ed-save]');
+  await toToday(pg);
   return (await rowIds(pg)).find((id) => !before.has(id));
 }
 // The list of days at its full length, not only the next seven.
@@ -2207,11 +2224,10 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
     await ph.click('#view-today .td-kpi');
     await ph.waitForSelector(K('bal'));
     const b = await ph.evaluate(() => [document.documentElement.scrollWidth, document.querySelectorAll('[data-ed-card]').length]);
-    await ph.click('#view-today .page-head [data-ed-add]');
-    await ph.click(K('add') + '[data-ed-what="inflows"]');
+    await openAdd(ph, 'inflows');
     const c = await ph.evaluate(() => document.documentElement.scrollWidth);
-    ok(a <= w && b[0] <= w && c <= w && b[1] === 1, `${w}px: nor does it with the accounts unfolded and a row's card open, with the balances open, with «Добавить» open — one card at a time`, [a, b, c]);
-    await calm(ph, `${w}px with «Добавить» open`);
+    ok(a <= w && b[0] <= w && c <= w && b[1] === 1, `${w}px: nor does it with a row's card open, with the balances open, with «+ новая строка» of «Касса» open — one card at a time`, [a, b, c]);
+    await calm(ph, `${w}px with «+ новая строка» open`, 'cash');
     await ph.context().close();
   }
   same([await puts('led', 0), await puts('cash', 0)], [0, 0], '§5.13: loading the page three times, walking its tabs, opening every card and closing none with «Сохранить» wrote nothing');
@@ -2241,20 +2257,19 @@ await run('26 on screen', 'day one: an account in use without a balance, and typ
   const b = S.P.banks.find((r) => r.bank === 'Barclays');
   same([S.P.banks.length, b.amt, b.asOf, b.by, typeof b.at, 'legacy' in b, S.P.banks[0].asOf, S.P.banks[0].amt, await text(pg, '#view-today .td-at .td-tl')], [2, 15000, T, 'Mika', 'number', false, '2026-09-30', 10120, 'Денег сейчас'], '… one account written into the plan — the amount, today, who — and the other, which nobody touched, left as it was');
   same([await saved(pg), store.cash.puts, store.cash.doc.v, store.cash.doc.savedBy, store.cash.doc.banks.length, store.led.puts], [true, 1, 3, 'Mika', 2, 0], '… saved once, as version 3, signed; the ledger untouched');
-  // «Касса» reads the same balances: what was typed, on which day, by whom — and beside it what it comes to now.
+  // «Касса» does not repeat the balances: «Счета» on «Сегодня» is where they stand and where they are typed.
   await pg.click('.nav [data-tab="cash"]');
-  same(await pg.$$eval('#cs-accts .cs-ac[data-cs-acct]', (l) => l.map((e) => [e.dataset.csAcct, ...[...e.querySelectorAll('.cs-acv')].map((x) => x.textContent.replace(/\s+/g, ' ').trim())].join(' / '))), ['Wise|GBP / £10,120 на 30 сен · вручную · Mika / £10,000', 'Barclays|GBP / £15,000 на 6 окт · вручную · Mika / £15,000'], '«Касса · Остатки» shows each balance as «на {день} · вручную · {кто}», the one typed on «Сегодня» among them, and beside it what the account comes to now');
-  same(await pg.$$eval('#cs-accts input, #cs-accts select', (l) => l.length), 0, '… and a balance is not typed into its row: «Вписать остаток» is the way');
-  await pg.click('#cs-accts [data-ed-bal]');
-  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$$eval(K('bal') + '[data-ed-acct]', (l) => l.map((e) => e.dataset.edAcct))], [1, ['Wise|GBP', 'Barclays|GBP']], '… which opens the same sheet as on «Сегодня»');
+  same([await pg.$('#cs-accts'), await pg.$('#view-cash [data-ed-bal]'), await pg.$('#view-cash .kpis'), await texts(pg, '#view-cash .tabs2 button')], [null, null, null, ['По месяцам', 'По дням']], '«Касса» holds neither the balances, nor a way to type one, nor the six figures — two views of the plan, «По месяцам» and «По дням», and that is all');
+  await pg.click('.nav [data-tab="today"]');
+  await pg.click('#view-today .td-acc button[data-ed-bal]');
+  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$$eval(K('bal') + '[data-ed-acct]', (l) => l.map((e) => e.dataset.edAcct))], [1, ['Wise|GBP', 'Barclays|GBP']], '«Вписать остаток» under «Счета» opens the sheet with both accounts');
   await pg.fill(K('bal') + '[data-ed-acct="Wise|GBP"] [data-ed-bamt]', '9900');
   await pg.click(K('bal') + '[data-ed-save]');
-  S = await holds(pg, 'a balance typed from «Касса»', 'cash');
-  same([S.fig('now'), S.fig('acct.Wise|GBP'), S.P.banks[0].asOf, S.P.banks[0].by, await text(pg, '#cs-accts [data-cs-acct="Wise|GBP"] .cs-act')], [24900, 9900, T, 'Mika', '£9,900 на 6 окт · вручную · Mika'], '… Wise typed there as 9,900: a balance as of today, signed, and «Денег сейчас» follows');
+  S = await holds(pg, 'a second balance typed');
+  same([S.fig('now'), S.fig('acct.Wise|GBP'), S.P.banks[0].asOf, S.P.banks[0].by, (await text(pg, '#view-today .td-accs')).includes('вписан 6 окт, Mika')], [24900, 9900, T, 'Mika', true], '… Wise typed as 9,900: a balance as of today, signed, and «Денег сейчас» follows');
   await saved(pg);
   await pg.click('#toastUndo');
   await saved(pg);
-  await pg.click('.nav [data-tab="today"]');
   // The same after a reload: nothing more is written, and the row ids are the ones that were saved.
   const ids = S.P.banks.map((r) => r.id);
   await pg.reload();
@@ -2551,40 +2566,47 @@ const openDay = async (pg, d) => { if ((await pg.$eval(`#cs-stmt tr[data-cs-row=
 const wiseCsv = (rows) => 'TransferWise ID,Date,Amount,Currency,Description,Payment Reference,Payer Name,Payee Name,Merchant,Card Holder Full Name\n' + rows.map(([id, d, a, text, payer, payee]) => `${id},${d.slice(8)}-${d.slice(5, 7)}-${d.slice(0, 4)},${a.toFixed(2)},GBP,${text},,${payer || ''},${payee || ''},,`).join('\n');
 const feed = (pg, csv) => pg.evaluate((c) => { const r = window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'wise.csv'), 'wise.csv'); return [r.bank, r.added]; }, csv);
 
-await run('kassa figures', '«Касса» stands the same six figures at its head as «Сегодня», from the same model', async () => {
+await run('kassa figures', '«Касса» is the plan by months and by days, and repeats nothing «Сегодня» says', async () => {
+  // Mika, 8 October 2026: «давай уберем оттуда информацию которая задваивается из Сегодня … просто вся касса расчётов
+  // по месяцам и по дням и всё». It stood the six figures at its head, the balances above the month, the sentence
+  // and the chart of the days in «По дням», and «30 дней / 60 дней» with «Добавить» beside its name.
   // Three states of one studio: money enough, a balance missing, a minus.
   const none = JSON.parse(JSON.stringify(demoPlan(T)));
   none.banks.forEach((r) => { delete r.asOf; delete r.at; delete r.by; r.legacy = true; });
   const minus = JSON.parse(JSON.stringify(demoPlan(T)));
   minus.banks.forEach((r) => { r.amt = 0; });
-  // The studio without the one incoming payment nobody has filed: with it the sentence is «Сначала разберите…»,
-  // and the three states this check walks are the ones below it.
+  // The studio without the one incoming payment nobody has filed: with it the sentence is «Сначала разберите…».
   const L0 = { ...demoLedger(T), inbox: [] };
+  const there = (pg, list) => pg.evaluate((l) => l.filter((q) => document.querySelector('#view-cash ' + q)), list);
+  const GONE = ['.kpis', '#cs-accts', '[data-ed-bal]', '.page-head [data-cs-h]', '.page-head [data-ed-add]', '#cs-chart', '[data-live="say"]', '[data-live="now"]'];
   for (const [name, P, verdict] of [['the fabricated studio', demoPlan(T), 'v1'], ['with no balance typed', none, 'v0'], ['with nothing in the bank', minus, 'v4']]) {
     const pg = await scene('kassa figures', L0, P, { H: 60 });
     const A = await holds(pg, `${name}, «Сегодня»`);
-    const six = (S) => SIX.concat(S.M.v0 ? [] : ['lowday', 'marks'].filter((k) => k in S.live)).map((k) => [k, S.live[k].v, plain(S.live[k].t)].join(' '));
-    // On «Сегодня» the first of the six is the last line of «Счета» — the same label, figure and words, set as a
-    // line of a table and not as a tile; so the two are read without regard to capitals.
-    const heads = async (tab) => {
-      const l = await pg.$$eval(`#view-${tab} .kpis .kpi`, (l) => l.map((e) => e.innerText.replace(/\s+/g, ' ').trim().toUpperCase()));
-      if (tab === 'today') l.unshift(await pg.$eval('#view-today .td-at', (e) => ['.td-tl', '[data-live="now"]', '.td-tw'].map((q) => e.querySelector(q).innerText).join(' ').replace(/\s+/g, ' ').trim().toUpperCase()));
-      return l;
-    };
-    const today = [six(A), await heads('today'), await text(pg, '#view-today .page-sub')];
+    same(A.M.verdict.id, verdict, `${name}: the sentence of «Сегодня» is ${verdict}`);
     await goCash(pg);
-    let B = await holds(pg, `${name}, «Касса · План»`, 'cash');
-    same([B.M.verdict.id, six(B), await heads('cash'), await text(pg, '#view-cash .page-sub')], [verdict, ...today], `${name} (${verdict}): the six figures of «Касса», their labels, the words under them and the line under the heading are those of «Сегодня», to the letter`);
+    let B = await holds(pg, `${name}, «Касса · По месяцам»`, 'cash');
+    same([await there(pg, GONE), await texts(pg, '#view-cash .tabs2 button'), await pg.$$eval('#view-cash .page-head button', (l) => l.length), await text(pg, '#view-cash .page-sub'), await pg.$$eval('#cs-plan section.cs-rows', (l) => l.length), !!(await pg.$('#cs-cov'))],
+      [[], ['По месяцам', 'По дням'], 0, await (async () => { await pg.click('.nav [data-tab="today"]'); const t = await text(pg, '#view-today .page-sub'); await goCash(pg); return t; })(), 5, true],
+      `${name} (${verdict}): «По месяцам» is the month, its five lists and «Покрытие по банкам» — no figures of the forecast, no balances, nothing in the head but the name and the day it speaks of`);
     await goCash(pg, 'days');
     B = await holds(pg, `${name}, «Касса · По дням»`, 'cash');
-    same([six(B), await heads('cash')], today.slice(0, 2), '… the same on «По дням»');
-    same([B.fig('say'), plain(await text(pg, '#cs-answer .cs-hl')).slice(0, verdict === 'v0' ? 12 : verdict === 'v4' ? 0 : 20)], [{ v1: 'fine', v0: 'v0', v4: 'minus' }[verdict], { v1: 'Денег хватает на 60 ', v0: 'Нет остатка:', v4: '' }[verdict]], `… and «Итог» says what the sentence on «Сегодня» says: ${plain(await text(pg, '#cs-answer .cs-hl')).slice(0, 70)}…`);
-    // Its own «30 дней» is the same switch.
-    await pg.click('#view-cash [data-cs-h="30"]');
+    same([await there(pg, GONE), await texts(pg, '#cs-scope [data-cs-h]'), await pg.$eval('#cs-scope [data-cs-h][aria-pressed="true"]', (b) => b.textContent), !!(await pg.$('#cs-cal')), !!(await pg.$('#cs-stmt')), !!(await pg.$('#cs-covd'))],
+      [[], ['30 дней', '60 дней'], '60 дней', true, true, true],
+      `… «По дням» is the calendar, the statement by days and «Покрытие по банкам», with «30 дней / 60 дней» beside the choice of an account — the one view that choice changes; no sentence of all the accounts, no chart`);
+    // Of all the accounts together the sentence is the one «Сегодня» opens with, and is not said here; of one bank it is this view's own.
+    const card = async () => ((await pg.$('#cs-answer')) ? plain(await text(pg, '#cs-answer h2')).replace(/на \d+ дней.*/, '') : '');
+    const all = await card();
+    await pg.click('#cs-scope [data-cs-scope="Mosta"]');
+    const one = await card();
+    await pg.click('#cs-scope [data-cs-scope="__all"]');
+    same([all, one], [{ v1: 'Как подстраховаться', v0: '', v4: 'Как закрыть' }[verdict], 'Итог'],
+      `… of all the accounts «По дням» says only what to do — ${all ? '«' + all + '»' : 'nothing, while a balance is missing'} — and of one bank, «Итог» with that bank's own sentence`);
+    // Its «30 дней» is the same switch as the one on «Сегодня».
+    await pg.click('#cs-scope [data-cs-h="30"]');
     B = await holds(pg, `${name}, 30 days chosen in «Касса»`, 'cash');
     await pg.click('.nav [data-tab="today"]');
     const A30 = await holds(pg, `${name}, back on «Сегодня»`);
-    same([A30.H, six(A30)], [30, six(B)], '… «30 дней» pressed in «Касса» is 30 days on «Сегодня» too, and the figures agree again');
+    same([A30.H, B.H, A30.fig('in'), A30.fig('out')], [30, 30, B.M.IN, B.M.OUT], '… «30 дней» pressed in «Касса» is 30 days on «Сегодня» too');
     await pg.click('#view-today [data-td-h="60"]');
     same([await puts('cash', 0), await puts('led', 0)], [0, 0], '… and none of the looking wrote anything');
     await pg.context().close();
@@ -2600,8 +2622,8 @@ await run('kassa figures', '«Касса» stands the same six figures at its he
   await goCash(pg);
   const plain60 = await holds(pg, 'a plan with wild rates, a far horizon and every balance unticked', 'cash');
   const M0 = await C(demoLedger(T), usd(demoPlan(T)), T, { H: 60 });
-  same([plain60.fig('now'), plain60.fig('in'), plain60.fig('out'), plain60.fig('low'), await pg.$$eval('#view-cash [data-cs-fx], #view-cash #cs-horizon, #view-cash #cs-cushion, #cs-accts input', (l) => l.length)], [M0.now, M0.IN, M0.OUT, M0.LOW, 0], '§5.14: «Касса» draws the same figures whatever plan.fx, plan.horizon and banks[].on say — and has no box for a rate, a horizon or a balance');
-  // … and not only the six: every word of both halves is what the same plan without those oddities draws.
+  same([plain60.M.now, plain60.M.IN, plain60.M.OUT, plain60.M.LOW, await pg.$$eval('#view-cash [data-cs-fx], #view-cash #cs-horizon, #view-cash #cs-cushion, #cs-accts input', (l) => l.length)], [M0.now, M0.IN, M0.OUT, M0.LOW, 0], '§5.14: the page reckons the same figures whatever plan.fx, plan.horizon and banks[].on say — and «Касса» has no box for a rate, a horizon or a balance');
+  // … and every word of both halves is what the same plan without those oddities draws.
   const both = async (g) => { const o = [await g.$eval('#cs-plan', (e) => e.innerText)]; await g.click('#view-cash [data-cs-view="days"]'); o.push(await g.$eval('#cs-days', (e) => e.innerText)); await g.click('#view-cash [data-cs-view="plan"]'); return o; };
   const wild = await both(pg);
   await pg.context().close();
@@ -2628,7 +2650,7 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   S = await holds(pg, '«✓ оплачено»', 'cash');
   shows(S, { now: 9000, out: 6120, marks: -1000 }, '«✓ оплачено», one tap');
   const r = stored(S, g);
-  same([S.M.END, plain(S.live.now.t), JSON.stringify(S.P.banks) === banks, r.paid.on, r.paid.by, typeof r.paid.at, 'paidAdj' in r, S.fig('acct.Wise|GBP'), await text(pg, '#cs-accts [data-cs-acct="Wise|GBP"] .cs-act')], [10880, '£9,000', true, T, 'Mika', 'number', false, 9000, '£10,120 на 30 сен · вручную · Mika'],
+  same([S.M.END, S.M.now, JSON.stringify(S.P.banks) === banks, r.paid.on, r.paid.by, typeof r.paid.at, 'paidAdj' in r, acct(S.M, 'Wise|GBP').est, S.P.banks[0].amt + ' ' + S.P.banks[0].asOf], [10880, 9000, true, T, 'Mika', 'number', false, 9000, '10120 2026-09-30'],
     '… END unchanged, NOW with the words «в т.ч. отмечено вручную» under it, plan.banks deep-equal (§5.8): the mark is {on: today, at, by} on the row, the typed balance still reads £10,120 as of 30 Sep, and only the reckoning beside it is 1,000 lower');
   same([await csRow(pg, 'team', g), await toastText(pg)], ['cs-done | line-through | no tick | Person G | 1,000 | GBP | 7 окт | Wise | отмечено · ждёт выписку | оплачено ✓', 'Оплачено: Person G'], '… the row stays in its place in October, struck through, its toggle pressed');
   // under its own day in «По дням», toggle still working
@@ -2646,7 +2668,7 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   await goCash(pg, 'days');
   S = await holds(pg, 'the statement row in the mark\'s place', 'cash');
   shows(S, { now: 9000, out: 6120 }, 'the row, still unrecognised in «Разбор», replaces the mark');
-  same([S.M.END, plain(S.live.now.t), 'marks' in S.live, item(S.M, g).done.by, item(S.M, g).done.day], [10880, '£9,000', false, 'row', T], '… NOW 9,000 without «≈», END where it was; the line is closed by the row');
+  same([S.M.END, S.M.now, S.M.marksGbp, item(S.M, g).done.by, item(S.M, g).done.day], [10880, 9000, 0, 'row', T], '… NOW 9,000 with nothing of it a mark any more, END where it was; the line is closed by the row');
   await openDay(pg, T);
   same((await dayRows(pg, T)).filter((x) => x.startsWith(g)), [`${g} | cs-ispaid cs-done | line-through | по выписке 6 окт | no date | no фикс |  | −£1,000`], '… and now stands under the day of the statement\'s row, 6 Oct — «по выписке», with nothing left to press');
   await pg.click('#view-cash [data-cs-view="plan"]');
@@ -2768,9 +2790,9 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
       ['12 октября не хватит £500 — это первый минус. Глубже всего 20 октября: не хватит £6,500. В плюс выходим 28 октября.', '12 окт', '2026-10-12 Как закрыть'], `${w}px: the sentence leads with the first day short and then names the deepest; «Нижняя точка» says «первый минус 12 окт»`);
     await pg.click('#view-today .td-verdict [data-td-days]');
     await pg.waitForSelector('#cs-answer');
-    const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const k = document.querySelector('#view-cash .cs-sum'); const stuck = getComputedStyle(k).position === 'sticky' ? k.getBoundingClientRect().bottom : bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
-    ok(r.view === 'days' && r.sel === '2026-10-12' && r.top >= 0 && r.top <= 40 && r.inView && r.y > 0, `${w}px: «Как закрыть» opens «По дням» on the first day short, scrolled so that «Итог» stands right under the bar`, r);
-    same(plain(await text(pg, '#cs-answer .cs-hl')), 'С пн 12 окт по вт 27 окт не хватает до £6,500.', `${w}px: … which says the stretch in one sentence`);
+    const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
+    ok(r.view === 'days' && r.sel === '2026-10-12' && r.top >= 0 && r.inView, `${w}px: «Как закрыть» opens «По дням» on the first day short, with what to do about it in view under the bar`, r);
+    same([plain(await text(pg, '#cs-answer h2')).replace(/на \d+ дней.*/, ''), await pg.$('#cs-answer .cs-hl')], ['Как закрыть', null], `${w}px: … and the card there is «Как закрыть» — the stretch itself is said once, by the sentence of «Сегодня»`);
     await pg.context().close();
   }
   // One stretch of minus whose first day is its deepest reads as the design has it.
@@ -2954,11 +2976,11 @@ await run('p4 on screen', 'a written withdrawal, through the real controls (test
   same([await freeSays(pg), await freeRows(pg), await text(pg, '#view-today .td-verdict .note'), await pg.$('#view-today .td-free [data-ed-add]')], ['В плане уже выводы: £20,000 (10 окт). Сверх них — £0: 20 окт без новых выводов на счетах будет £8,000; £5,280 — налоги, £5,000 — запас.', ['когда придёт Client A (ждём 28 окт) → до £900', 'когда придёт Client A (ждём 28 ноя) → до £4,200'], 'В нижней точке £5,280 — деньги под налоги.', null],
     '… «Сверх них — £0», the steps read «до £900» and «до £4,200», the sentence adds «В нижней точке £5,280 — деньги под налоги», and no «Вписать вывод» is offered');
   // A founder's own tax is a row he types: «Дивиденды → Личный налог».
-  await pg.click('#view-today .page-head [data-ed-add]');
-  await pg.click(K('add') + '[data-ed-what="div"]');
+  await openAdd(pg, 'div');
   await pg.click(K('add') + '[data-ed-kind="ptax"]');
   await fill(pg, 'add', { name: 'HMRC Vanya', amt: 400, date: '2026-10-21' });
   await pg.click(K('add') + '[data-ed-save]');
+  await toToday(pg);
   S = await holds(pg, 'a personal tax typed');
   const pt = S.P.div.find((r) => r.name === 'HMRC Vanya');
   same([pt.ptax, pt.f, pt.blk, S.fig('out.ptax'), S.fig('out.taxes'), item(S.M, pt.id).grp], [true, 'vanya', 'div', 900, 360, 'div'], '«Личный налог» HMRC Vanya £400: a row of «Дивиденды» with ptax — «личные налоги» +400, the studio\'s taxes untouched');
@@ -3048,8 +3070,8 @@ await run('repeat', '«каждый месяц» is a plain control on every kin
   await openRow(pg, TAX);
   same(await pg.$(K('row') + '[data-ed-f="monthly"]'), null, '… and none on a tax the page worked out');
   await pg.click(K('row') + '[data-ed-x]');
-  // «Добавить».
-  await pg.click('#view-today .page-head [data-ed-add]');
+  // «+ новая строка»: the card that adds a row, of whatever kind.
+  await openAdd(pg, 'inflows');
   const inAdd = [];
   for (const k of ['inflows', 'team', 'other', 'taxes', 'div']) { await pg.click(K('add') + `[data-ed-what="${k}"]`); inAdd.push(await pg.$eval(K('add') + '[data-ed-f="monthly"]', (e) => e.closest('label').textContent.replace(/ /g, ' ').trim())); }
   same(inAdd, ['каждый месяц нужна дата', 'каждый месяц нужна дата', 'каждый месяц нужна дата', 'каждый месяц нужна дата', 'каждый месяц нужна дата'], '«Добавить»: the same tick whatever is being added — and it says a date is needed while there is none');
@@ -3110,7 +3132,7 @@ await run('p9 on screen', 'a typed tax row says what it is, through the real con
   let S = await holds(pg, 'the plan of test 2, 60 days');
   const K3 = 'vat|2026Q3';
   const ofSel = () => pg.$eval(K('add') + '[data-ed-f="of"]', (s) => [s.value, s.selectedOptions[0].textContent]);
-  const add = async (f, of) => { await pg.click('#view-today .page-head [data-ed-add]'); await pg.click(K('add') + '[data-ed-what="taxes"]'); await fill(pg, 'add', f); const was = await ofSel(); if (of !== undefined) await pg.selectOption(K('add') + '[data-ed-f="of"]', of); await pg.click(K('add') + '[data-ed-save]'); return was; };
+  const add = async (f, of) => { await openAdd(pg, 'taxes'); await fill(pg, 'add', f); const was = await ofSel(); if (of !== undefined) await pg.selectOption(K('add') + '[data-ed-f="of"]', of); await pg.click(K('add') + '[data-ed-save]'); await toToday(pg); return was; };
   // «VAT Q3» 4,500 on 7 Nov: the name says which bill it is.
   let was = await add({ name: 'VAT Q3', amt: 4500, date: '2026-11-07', bank: 'Barclays' });
   S = await holds(pg, '«VAT Q3» saved as the whole bill');
@@ -3127,14 +3149,14 @@ await run('p9 on screen', 'a typed tax row says what it is, through the real con
     '«VAT Q3 часть» 1,200 on 20 Oct: pre-set to «Часть…» — under 0.7 of the bill — OUT 18,400: the part and a computed 3,600');
   await undo(pg);
   // «Corporation tax» falls a week before the VAT date at about its size: the page does not guess.
-  await pg.click('#view-today .page-head [data-ed-add]');
-  await pg.click(K('add') + '[data-ed-what="taxes"]');
+  await openAdd(pg, 'taxes');
   await fill(pg, 'add', { name: 'Corporation tax', amt: 5500, date: '2026-11-01', bank: 'Barclays' });
   same(await ofSel(), ['', 'Выберите, к чему относится'], '«Corporation tax» 5,500 on 1 Nov: no word of a rule in its name, near the VAT date at about its size — the select stands on «Выберите, к чему относится»');
   await pg.click(K('add') + '[data-ed-save]');
   same([(await rowIds(pg)).length, await toastText(pg), !!(await pg.$(K('add')))], [5, 'Выберите, к чему относится этот налог', true], '… and the row is not saved without a choice');
   await pg.selectOption(K('add') + '[data-ed-f="of"]', 'own');
   await pg.click(K('add') + '[data-ed-save]');
+  await toToday(pg);
   S = await holds(pg, '«Corporation tax» as a bill of its own');
   same([S.P.taxes[0].of, S.fig('out'), item(S.M, 't|' + K3).cash, card(S.M, 13)], [false, 23900, -4800, []], '«Отдельный…»: OUT 23,900, the computed VAT untouched, nothing to ask');
   // … and in the row's own card the same select says, and changes, what the row is.
@@ -3832,7 +3854,8 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
   await lf.goto('file://' + PUB + '/money/index.html#cash');
   await lf.waitForFunction(() => window.__cash && window.__cash.state());
   same([await lf.evaluate(() => window.__cash.home()), await lf.evaluate(() => window.__cash.state().banks.map((b) => b.bank + ' ' + b.cur + ' ' + b.amt)), await lf.$('#cs-accts input')], ['local', ['Wise GBP 0', 'Wise USD 0', 'Barclays GBP 0', 'Tochka RUB 0', 'Mosta USD 0'], null], 'opened as a file the page keeps the plan in the browser; a new plan names five accounts and waits for their balances');
-  await lf.click('#cs-accts [data-ed-bal]');
+  await lf.click('.nav [data-tab="today"]');
+  await lf.click('#view-today [data-ed-bal]');
   await lf.fill(K('bal') + '[data-ed-acct="Wise|GBP"] [data-ed-bamt]', '1234');
   await lf.click(K('bal') + '[data-ed-save]');
   same(await lf.evaluate(() => { const d = JSON.parse(localStorage.getItem('selfstudio-money-cash-v1')); return [d.v, d.banks[0].amt, typeof d.banks[0].asOf, 'fx' in d, 'horizon' in d, d.tax.rules.map((r) => r.id), typeof d.tax.since]; }), [3, 1234, 'string', false, false, ['vat', 'usn'], 'string'], 'a balance typed there is kept under selfstudio-money-cash-v1 as version 3 — with its day, the two tax rules and the day they began, and with no rates or horizon of its own');
@@ -4327,8 +4350,7 @@ await run('rv-tax', 'taxes on screen: a founder\'s own tax row is in the block; 
   await addRow(pg, 'taxes', { name: 'VAT Q4 whole', amt: 5000, date: '2027-02-07' });
   S = await holds(pg, 'a whole-bill row for IV кв.');
   same(per(S.M, 'vat|2026Q4').state, 'typed', '«VAT Q4 whole», pre-set by its name to «Весь UK VAT за IV кв. 2026»: the quarter is the founder\'s row now');
-  await pg.click('#view-today .page-head [data-ed-add]');
-  await pg.click(K('add') + '[data-ed-what="taxes"]');
+  await openAdd(pg, 'taxes');
   const opts = await pg.$$eval(K('add') + '#ed-of option', (l) => l.map((o) => o.textContent));
   same([opts.some((o) => /^Часть UK VAT за IV кв\. 2026/.test(o)), opts.some((o) => /^Весь UK VAT за IV кв\. 2026/.test(o)), opts.some((o) => /^Часть UK VAT за III кв\. 2026/.test(o))], [false, false, true], 'for the next tax row neither «Весь…» nor «Часть UK VAT за IV кв. 2026» is offered — a part would be counted on top of the whole bill; a period the page works out still offers its «Часть…»');
   await pg.click(K('add') + '[data-ed-x]');
@@ -4706,6 +4728,30 @@ await run('rv-layout', '«Сегодня» from the top: where the money is, the
   await pg.context().close();
 });
 
+await run('rv-drop', 'an account is taken out of the plan in «Вписать остаток»; neither page has «Добавить» in its head', async () => {
+  // Mika, 8 October 2026: «Касса» repeats nothing of «Сегодня», and «Добавить» leaves both heads. The cross that took
+  // an account out of the plan stood beside «Остатки» in «Касса»; with that block gone the button went to the sheet
+  // where a balance is typed.
+  const pg = await scene('an account out of the plan', ledA(), planX({ banks: [bal('Wise', 'GBP', 9000, '2026-10-05'), bal('Barclays', 'GBP', 2500, '2026-10-05')] }), { H: 60 });
+  same([await pg.$('#view-today .page-head [data-ed-add]'), await texts(pg, '#view-today .page-head button')], [null, ['30 дней', '60 дней']], '«Сегодня»: nothing in the head but «30 дней / 60 дней»');
+  await pg.click('#view-today .td-acc button[data-ed-bal]');
+  const drop = K('bal') + '[data-ed-acct="Barclays|GBP"] [data-ed-drop]';
+  const banks = async () => (await look(pg)).P.banks.map((b) => b.id);
+  same([await text(pg, drop), await pg.$$eval(K('bal') + '[data-ed-drop]', (l) => l.length)], ['Убрать счёт из плана', 2], '«Вписать остаток»: under each account of the plan, «Убрать счёт из плана»');
+  await pg.click(drop);
+  same([await text(pg, drop), await banks()], ['Точно убрать?', ['b-Wise-GBP', 'b-Barclays-GBP']], 'the first press asks — «Точно убрать?» — and writes nothing');
+  await pg.click(drop);
+  await saved(pg);
+  same([await banks(), await toastText(pg), await pg.$$eval(K('bal') + '[data-ed-acct]', (l) => l.map((e) => e.dataset.edAcct)), store.cash.doc.banks.length], [['b-Wise-GBP'], 'Счёт убран из плана', ['Wise|GBP'], 1], 'the second takes the account out of the plan, says so, and the sheet stays open on what is left');
+  await pg.click('#toastUndo');
+  await saved(pg);
+  same(await banks(), ['b-Wise-GBP', 'b-Barclays-GBP'], '«Отменить» brings it back');
+  // «Касса»: a row is added where its list is, and nowhere else
+  await goCash(pg);
+  same([await pg.$$eval('#view-cash .page-head button', (l) => l.length), await pg.$$eval('#cs-plan [data-ed-add]', (l) => l.map((b) => b.textContent.trim()))], [0, ['+ новая строка', '+ новая строка', '+ новая строка', '+ новая строка', '+ новая строка']], '«Касса»: no button in the head; «+ новая строка» under each of the five lists');
+  await finish(pg);
+});
+
 await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
   // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
   // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
@@ -4793,8 +4839,7 @@ await run('rv-small', 'the rest of the review: a save the server did not take, t
   await pg.click(K('row') + '[data-ed-do="tick"]');
   let S = await holds(pg, 'the paid row made to repeat');
   same([S.P.team[0].rec, await toastText(pg), item(S.M, 'g@2026-10').state, item(S.M, 'g@2026-11').cash], [{ day: 7, from: '2026-10', x: { '2026-10': { paid: paid(T) } } }, 'Person G: каждый месяц, с октября', 'done', -1000], 'pressed: the row repeats on the 7th from October, its mark stays with October, November is in the plan');
-  await pg.click('#view-today .page-head [data-ed-add]');
-  await pg.click(K('add') + '[data-ed-what="inflows"]');
+  await openAdd(pg, 'inflows');
   await pg.fill(K('add') + '#ed-name', 'Client R');
   same([await pg.$eval(K('add') + '#ed-bank', (e) => e.value), await pg.$eval(K('add') + '#ed-cur', (e) => e.value), await text(pg, K('add') + '[data-ed-n="last"]')], ['Tochka', 'GBP', 'в прошлый раз £2,000, 15 сен'], '«Добавить» → «Client R»: the bank becomes Tochka, where he last paid, and the card says «в прошлый раз £2,000, 15 сен»');
   await pg.selectOption(K('add') + '#ed-bank', 'Wise');
@@ -4847,8 +4892,7 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
     }
     if (tag === 'd') {
       // The other card a founder types into: «Добавить» on a tax.
-      await pg.click('#view-today .page-head [data-ed-add]');
-      await pg.click(K('add') + '[data-ed-what="taxes"]');
+      await openAdd(pg, 'taxes');
       await fill(pg, 'add', { name: 'VAT за III квартал', amt: 8000, date: '2026-11-07' });
       await shot(pg, 'live-d-add');
       await pg.click(K('add') + '[data-ed-x]');

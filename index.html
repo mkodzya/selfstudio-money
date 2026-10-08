@@ -274,20 +274,11 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .cs-note{font-family:var(--sans);font-size:12px;font-weight:400;color:var(--text-muted)}
 /* The six figures stay in sight while the rows below them are edited, but only where they fit in one line: on a
    narrow screen they are two or three rows tall and would cover what is being typed. */
-@media (min-width:1101px){.cs-sum{position:sticky;top:var(--cs-top,59px);z-index:30}.cs-sum.cs-stuck{box-shadow:var(--shadow-lift)}}
+@media (min-width:1101px){.cs-hh{margin-left:auto}}
 .cs-undo{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--accent-dim);padding:8px 12px;font-size:13px}
 .cs-secnote{margin:0 0 10px}
 /* The balances: a figure, the day it is true for, the hand that typed it — and beside it what the page makes of it
    now. The rows share their columns; a browser that does not know `subgrid` keeps the columns written before it. */
-.cs-acs{display:grid;grid-template-columns:minmax(120px,auto) minmax(0,1.5fr) minmax(0,1fr) auto;column-gap:18px;font-size:13px}
-.cs-ac{grid-column:1/-1;display:grid;grid-template-columns:minmax(120px,170px) minmax(0,1.5fr) minmax(0,1fr) auto;grid-template-columns:subgrid;column-gap:18px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border)}
-.cs-ac:last-child{border-bottom:0}
-.cs-ach{padding:0 0 4px;border-bottom-color:var(--border-strong)}
-.cs-acn{display:inline-flex;align-items:baseline;gap:8px;font-weight:600;min-width:0}
-.cs-acn .sw{align-self:center;flex:none}
-.cs-acv{min-width:0;font-size:12.5px}
-.cs-ac>button,.cs-ac>span:last-child{justify-self:end;min-width:24px}
-@media (max-width:620px){.cs-acs,.cs-ac{grid-template-columns:minmax(0,1fr) auto auto}.cs-ach{display:none}.cs-act{grid-column:1/-1;grid-row:2}}
 /* One month at a time. The switcher is the heading of everything under it. */
 .cs-month{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;border-bottom:1px solid var(--text-primary)}
 .cs-mname{font-size:19px;font-weight:600;letter-spacing:-.01em;min-width:8.6em;text-align:center}
@@ -658,6 +649,7 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .ed-acct{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:8px 12px;align-items:end;padding:10px 0;border-top:1px solid var(--border)}
 .ed-acct .fld input{width:100%;min-width:0}
 .ed-an{align-self:center;min-width:0}
+.ed-drop{margin:6px 0 0 -12px}
 .ed-an b{display:block;font-weight:600}
 .ed-passed,.ed-drift{grid-column:1/-1}
 .ed-passed{display:flex;flex-direction:column;gap:6px}
@@ -1662,7 +1654,7 @@ const Cash=(()=>{
   taxes:{title:"Налоги",who:"Какой налог",done:"оплачено"},other:{title:"Прочие расходы",who:"На что",done:"оплачено"},div:{title:"Дивиденды",who:"Что",done:"взято"}};
  const STL={ok:"хватает",low:"мало",neg:"минус"};
  const FARMSG="Слишком далёкая дата: касса считает не дальше двух лет вперёд";
- let plan=null,home="local",rev=0,ready=false,failed=false,first=false,stale=false,saveT=null,retryT=null,failing=false,busy=false,again=false,lastSig="",chartW=0;
+ let plan=null,home="local",rev=0,ready=false,failed=false,first=false,stale=false,saveT=null,retryT=null,failing=false,busy=false,again=false,lastSig="";
  // The model the tab is drawn from, and its items by id. Worked out afresh on every draw and after every keystroke
  // in a row: nothing here remembers a figure, a rate or a date from one reckoning to the next.
  let M=null,by={};
@@ -1941,20 +1933,9 @@ const Cash=(()=>{
    &&toast(`В плане: ${count(lines.length,"строка","строки","строк")} «каждый месяц»`+startsLater(lines),()=>popUndo());
  }
 
- // ---- the month: the balances above it, the banks below it ----
- // A balance is not typed into its row: it is a figure with a day and a hand behind it, and «Вписать остаток» is the
- // one place that asks for all three — and for what, of the plan, is already inside the figure.
- function accounts(){
-  const A=M.accounts.filter(a=>a.inPlan||a.active);
-  const row=a=>{const A0=a.anchor,n=v=>nat(round2(v),a.cur),two=a.key.split("|").length>2;
-   const typed=A0?`${n(A0.amt)} <span class="cs-note">на ${dRu(A0.asOf)} · вручную${A0.by?" · "+esc(A0.by):""}</span>`:`<span class="cs-note">${a.legacy&&a.old?`нет остатка · в старой Кассе было ${n(a.old)}`:a.active?"нет остатка":"не используется"}</span>`;
-   return `<div class="cs-ac" data-cs-acct="${esc(a.key)}"><span class="cs-acn">${dot(a.bank)}${esc(a.name)}${two&&a.title?` <span class="cs-note">${esc(a.title)}</span>`:""}</span><span class="cs-acv cs-act mono">${typed}</span>
-    <span class="cs-acv mono" data-live="acct.${esc(a.key)}" data-v="${num(a.est)}">${A0?n(a.est)+(a.cur!=="GBP"?` <span class="cs-note">${fmt(a.gbp)}</span>`:""):"—"}</span>
-    ${a.inPlan?`<button class="x" data-cs-drop="${esc(a.id)}" title="Убрать счёт из плана" aria-label="Убрать счёт ${esc(a.name)}">×</button>`:"<span></span>"}</div>`;};
-  return `<section class="card" id="cs-accts"><h2>Остатки<button class="sm" data-ed-bal>Вписать остаток</button></h2>
-   <p class="note cs-secnote">Сколько на счёте и на какой день это верно. Остаток вписывается от руки; дальше страница считает сама — по выпискам и по отметкам «оплачено».</p>
-   <div class="cs-acs">${A.length?`<div class="cs-ac cs-ach"><span class="lbl">Счёт</span><span class="lbl">Вписано</span><span class="lbl">Сейчас по расчёту</span><span></span></div>`+A.map(row).join(""):'<p class="note" style="margin:0">Счетов пока нет: они появятся с первой выпиской или с первой строкой плана.</p>'}</div></section>`;
- }
+ // ---- the month: the banks below it ----
+ // (The balances stood above the month until 8 October 2026. They are «Счета» on «Сегодня» now, and «Касса» is the
+ // plan by months and by days and nothing that is said there already — Mika's words.)
  // What the month asks of each bank: what is expected through it and how much of that is done; what is still to be
  // paid from it and in which currency; and, for a month that is not over, what the bank holds going in and coming
  // out — so a founder sees which account has to be topped up, and by when.
@@ -2029,7 +2010,7 @@ const Cash=(()=>{
   // is one press away at the head of the tab, and is offered again, in full view, by a month nobody has written.
   const written=M.items.some(it=>it.src!=="tax"&&it.ym===m),hb='<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>';
   const help=cu.helper?helperHTML():m>=ymT&&!written?`<div class="empty cs-nomonth" id="cs-nomonth"><b>В ${monP(m)} пока ничего не вписано</b>В плане только то, что вписали вы. Впишите строки ниже — или начните с тех, кому платят каждый месяц.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-cs-helper>Подставить по прошлым месяцам</button></div></div>`:`<div class="row cs-helpbar">${hb}<span class="note">список тех, кому платят каждый месяц, — отметьте, кого вписать</span></div>`;
-  return `<div id="cs-plan" class="stack">${accounts()}${sw}${back}${past}${help}${ROWS.map(k=>section(k,adding&&cu.addAt===k)).join("")}
+  return `<div id="cs-plan" class="stack">${sw}${back}${past}${help}${ROWS.map(k=>section(k,adding&&cu.addAt===k)).join("")}
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
    <p class="note"><b>Как читать.</b> В плане только то, что вписали вы: разовые строки и строки «каждый месяц» — галочка в своей колонке. Правка в месяце такой строки меняет только этот месяц; «и дальше так же» — под строкой и в «ещё». Серым — налог студии, который страница посчитала по правилу: его сумму и дату можно поправить на месте, снятая галочка слева значит «не платим». Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «✓ получено» и «✓ оплачено» есть у каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. Второе нажатие снимает отметку. «Частично» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
@@ -2150,9 +2131,9 @@ const Cash=(()=>{
     head=`<div class="cs-hl${low?" cs-low":""}"${say(low?"low":"fine")}>${low?`Хватает, но впритык: ${day(lo.d)} останется ${money(lo.e)} — меньше запаса ${fmt(M.cushion)}.`:`${V.all?"Денег хватает":"На "+esc(cu.scope)+" хватает"} на ${H} дней. Нижняя точка — ${money(lo.e)}, ${day(lo.d)}.`}</div>${negB.length?`<div class="cs-sub">Но в минус уходят отдельные счета (${negB.join(", ")}) — нужен перевод между счетами, см. ниже.</div>`:""}`;
    }
   }
-  const U=M.undated.ids.map(id=>by[id]).filter(Boolean);
+  const U=M.undated.ids.map(id=>by[id]).filter(Boolean);let warn="";
   if(U.length){const s=d=>U.filter(it=>it.dir===d).reduce((a,it)=>a+Math.abs(it.cash),0);
-   head+=`<div class="cs-sub cs-warn">${count(U.length,"строка","строки","строк")} без даты в расчёт по дням не ${U.length===1?"идёт":"идут"}: поступления ${fmt(s(1))}, платежи ${fmt(s(-1))}. Даты можно поставить в выписке внизу.</div>`;}
+   warn=`<div class="cs-sub cs-warn">${count(U.length,"строка","строки","строк")} без даты в расчёт по дням не ${U.length===1?"идёт":"идут"}: поступления ${fmt(s(1))}, платежи ${fmt(s(-1))}. Даты можно поставить в выписке внизу.</div>`;}
   const SG=advise(V),base=SG.base,word=SG.floor?"до запаса не хватит":"не хватать будет";cu.sugg=SG.list;cu.auto=SG.auto;
   const eff=s=>s.full?`<span class="cs-good">${SG.floor?"запас сохранён":"минус закрыт полностью"}</span>`:`${word} ${fmt(s.r.need)} вместо ${fmt(base.need)}`;
   // Drawn rather than typed: an arrow typed as a character is whatever the reader's fonts happen to hold.
@@ -2169,11 +2150,12 @@ const Cash=(()=>{
    auto=`<div class="cs-auto"><div class="bar"><b>Автоплан: как сдвинуть платежи, чтобы ${SG.floor?"сохранить запас":"не уйти в минус"}</b>${A.steps.length?'<button class="primary sm" data-cs-auto>Применить автоплан</button>':""}</div>
     ${A.steps.length?`<ol>${A.steps.map(s=>`<li>${esc(s.m.it.name)} ${sum(s.m)}: ${dRuW(s.from)} → <b>${dRuW(s.to)}</b></li>`).join("")}</ol><div class="note">${A.final.need<0.005?`<span class="cs-good">${SG.floor?"После этого остаток не опускается ниже запаса.":"После этого минуса нет."}</span>`:`Даже так ${word} ${fmt(A.final.need)} — нужны деньги или более ранние поступления.`} Двигаются только строки, которые вписали вы, и только внутри этих ${H} дней; с отметкой «фикс» — не двигаются; налоги по правилам — тоже.</div>`
     :`<div class="note">Сдвигом платежей это не закрыть: вписанные платежи уже позже самой глубокой точки или отмечены «фикс», а налоги, посчитанные по правилам, советы не двигают.</div>`}</div>`;}
-  return `<h2>Итог</h2>${head}${li||auto?`<h3 class="cs-h3">${SG.floor?"Как подстраховаться":"Как закрыть"}</h3><ul class="cs-sugg">${li}</ul>${auto}`:""}`;
- }
- function chart(){
-  const svg=q("#cs-chart"),V=cu.V;if(!svg||!V)return;
-  chartW=dayChart(svg,V.cells,{start:V.start,cush:V.all&&V.known?M.cushion:0,rel:!V.known,low:V.low,attr:"data-cs-i",pick:pickDay});
+  const adv=li||auto?`<ul class="cs-sugg">${li}</ul>${auto}`:"",how=SG.floor?"Как подстраховаться":"Как закрыть";
+  // Of all the accounts together the sentence is the one «Сегодня» opens with, and it is not said twice: what stands
+  // here is what only this view knows — the rows without a date, and what to do about an account that goes below
+  // zero. Of one bank the sentence is this view's own, and stays. Nothing to say: no card.
+  if(V.all)return (adv?`<h2>${how}<span class="note">на ${H} дней, по каждому счёту отдельно</span></h2>`:"")+warn+adv;
+  return `<h2>Итог</h2>${head}${warn}${adv?`<h3 class="cs-h3">${how}</h3>${adv}`:""}`;
  }
  function pickDay(d){cu.sel=d;cu.open.add(d);draw();const el=document.getElementById("cs-row-"+d);if(el)el.scrollIntoView({behavior:"smooth",block:"center"});else toast("В этот день строк нет");}
  const mover=it=>{const id=esc(it.id);return `<span class="cs-mv"><button data-cs-shift="-1" data-cs-it="${id}" title="На день раньше" aria-label="На день раньше">‹</button><input type="date" data-cs-ldate data-cs-it="${id}" max="${dAdd(M.T,731)}" value="${esc(it.date)}"${it.date?"":' class="cs-nodate"'} aria-label="Дата: ${esc(it.name)}"><button data-cs-shift="1" data-cs-it="${id}" title="На день позже" aria-label="На день позже">›</button></span>`;};
@@ -2235,27 +2217,26 @@ const Cash=(()=>{
   const V=cu.V=scope(),H=M.H;
   if(!cu.open)cu.open=new Set(V.known?V.cells.filter(c=>c.e<0).map(c=>c.d):[]);
   if(cu.sel)cu.open.add(cu.sel);
+  const said=answer(V);
   const chips=[["__all","Все счета",""],...V.banks.map(b=>[b,b,dot(b)])].map(([k,l,sw])=>`<button class="chip${cu.scope===k?" active":""}" data-cs-scope="${esc(k)}" aria-pressed="${cu.scope===k}">${sw}${esc(l)}</button>`).join("");
   return `<div id="cs-days" class="stack">
-   <div class="row cs-scope" id="cs-scope" role="group" aria-label="Какой счёт показывать">${chips}</div>
-   <section class="card" id="cs-answer">${answer(V)}</section>
+   <div class="row cs-scope" id="cs-scope"><span class="row" role="group" aria-label="Какой счёт показывать">${chips}</span><span class="row cs-hh" role="group" aria-label="На сколько дней вперёд">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-cs-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span></div>
+   ${said?`<section class="card" id="cs-answer">${said}</section>`:""}
    <section class="card"><h2>Календарь<span class="note">остаток на конец дня${V.known?"":" — изменение от сегодняшнего"} · нажмите на день — откроется в выписке</span></h2>
     <div class="legend"><span><i class="sw cs-sw-ok"></i>хватает</span>${V.all?`<span><i class="sw cs-sw-low"></i>меньше запаса ${fmtK(M.cushion)}</span>`:""}<span><i class="sw cs-sw-neg"></i>минус</span><span><i class="sw cs-sw-out"></i>вне периода</span></div>
     <div class="tbl"><div class="cs-cal" id="cs-cal">${cal(V)}</div></div></section>
-   <section class="card"><h2>${V.known?"Остаток по дням":"Изменение кассы по дням"}<span class="note">${V.all?"все счета":esc(cu.scope)} · ${H} дней, в £</span></h2>
-    <div class="legend"><span><i class="td-line"></i>${V.known?"остаток":"изменение"}</span>${V.all&&V.known?`<span><i class="td-line td-q"></i>запас ${fmtK(M.cushion)}</span>`:""}<span><i class="sw" style="background:var(--s1)"></i>придёт</span><span><i class="sw" style="background:var(--s2)"></i>уйдёт</span></div>
-    <div class="chartbox"><svg class="chart cs-chart" id="cs-chart" role="img" aria-label="${V.known?"Остаток":"Изменение кассы"} по дням"></svg><div class="tip" hidden></div></div></section>
-   <section class="card"><h2>Покрытие по банкам<span class="note">на ${H} дней: что пройдёт через каждый банк, в £</span></h2><div class="cs-cov" id="cs-covd">${coverDays(V)}</div></section>
    <section class="card"><h2>Выписка по дням<span class="note">нажмите на день, чтобы увидеть строки и подвинуть даты · серым — налог по правилу</span></h2>
-    <div class="tbl"><table class="cs-stmt" id="cs-stmt">${stmt(V)}</table></div></section></div>`;
+    <div class="tbl"><table class="cs-stmt" id="cs-stmt">${stmt(V)}</table></div></section>
+   <section class="card"><h2>Покрытие по банкам<span class="note">на ${H} дней: что пройдёт через каждый банк, в £</span></h2><div class="cs-cov" id="cs-covd">${coverDays(V)}</div></section></div>`;
  }
 
  // ---- the tab ----
  function head(){
-  const H=M.H,ref=M.accounts.find(a=>a.key===M.nowAcct),sub=[dRuW(M.T),M.v0?"остатки вписаны не все":M.nowDate?`выписки и остатки по ${dRu(M.nowDate)}${ref?` (${ref.name})`:""}`:"остатки не вписаны"];
+  const ref=M.accounts.find(a=>a.key===M.nowAcct),sub=[dRuW(M.T),M.v0?"остатки вписаны не все":M.nowDate?`выписки и остатки по ${dRu(M.nowDate)}${ref?` (${ref.name})`:""}`:"остатки не вписаны"];
   const lost=stale?'<div class="banner cs-stale" id="cs-stale"><span><b>Касса изменилась в другом окне.</b> То, что вы меняете здесь, больше не сохраняется. Обновите страницу, чтобы увидеть свежий план.</span><a class="btnlink" href="#cash" data-cs-reload>Обновить</a></div>':"";
-  return lost+`<div class="page-head"><div><h1>Касса</h1><div class="page-sub" id="cs-sub">${esc(sub.join(" · "))}</div></div>
-   <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-cs-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span><button class="primary" data-ed-add data-ed-mon="${cu.view==="plan"?cu.month:""}" data-cs-addat="">Добавить</button></div></div>`;
+  // Nothing but the heading: «30 дней / 60 дней» is in «По дням», the one view it changes, and a row is added where
+  // its list is, by «+ новая строка» (both stood here until 8 October 2026).
+  return lost+`<div class="page-head"><div><h1>Касса</h1><div class="page-sub" id="cs-sub">${esc(sub.join(" · "))}</div></div></div>`;
  }
  const undoStrip=()=>undoStack.length?`<div class="cs-undo" id="cs-undo"><span>Последнее изменение: ${esc(undoStack[undoStack.length-1].label)}</span><button class="sm" data-cs-undo>Отменить</button></div>`:'<div id="cs-undo" hidden></div>';
  // The whole tab, from the plan and the ledger as they stand this minute. It is drawn from scratch — its rows hold
@@ -2270,19 +2251,17 @@ const Cash=(()=>{
   if(cu.follow){const had=cu.follow,it=M.items.find(x=>x.src!=="tax"&&!had.has(x.row));cu.follow=null;if(it&&cu.view==="plan")cu.month=it.ym;}
   if(!M.months.list.includes(cu.month))cu.month=M.T.slice(0,7);
   const ed=Ed.open(),adding=!!ed&&ed.k==="add",inList=adding&&cu.view==="plan"&&ROWS.includes(cu.addAt);
-  root.innerHTML=head()+(adding&&!inList?Ed.sheet("add"):"")+Today.kpis(M,"cs-sum")+Ed.sheet("bal")
-   +`<div class="tabs2" role="group" aria-label="Что показать"><button data-cs-view="plan" aria-pressed="${cu.view==="plan"}">План</button><button data-cs-view="days" aria-pressed="${cu.view==="days"}">По дням</button></div>`
+  root.innerHTML=head()+(adding&&!inList?Ed.sheet("add"):"")+Ed.sheet("bal")
+   +`<div class="tabs2" role="group" aria-label="Что показать"><button data-cs-view="plan" aria-pressed="${cu.view==="plan"}">По месяцам</button><button data-cs-view="days" aria-pressed="${cu.view==="days"}">По дням</button></div>`
    +undoStrip()+(cu.view==="plan"?planView(inList):daysView());
-  if(cu.view==="days")chart();
   Ed.after(root);
   if(key){const t=[...root.querySelectorAll("tr[data-cs-id]")].find(x=>x.dataset.csId===key[0]),el=t&&t.querySelector(`[data-cs-f="${key[1]}"]`);if(el)el.focus({preventScroll:true});}
   topbar();
  }
- // After a keystroke in a row: the six figures, the totals, the banks and every other row follow at once; the row
+ // After a keystroke in a row: the totals, the banks and every other row follow at once; the row
  // being typed into keeps its boxes. Rows the typing has moved — to another place in the month, to another month —
  // stay where they are until the cursor leaves the row.
  function patch(){
-  const s=q(".cs-sum");if(s){s.insertAdjacentHTML("afterend",Today.kpis(M,"cs-sum"));s.remove();}
   const u=q("#cs-undo");if(u){u.insertAdjacentHTML("afterend",undoStrip());u.remove();}
   const act=document.activeElement;
   root.querySelectorAll("#cs-plan tr[data-cs-id]").forEach(tr=>{
@@ -2292,7 +2271,6 @@ const Cash=(()=>{
    tr.remove();});
   ROWS.forEach(k=>{const sec=q("#cs-sec-"+k);if(!sec)return;sec.querySelector("[data-cs-tot]").innerHTML=totalHTML(k);});
   const c=q("#cs-cov");if(c)c.innerHTML=cover();
-  stuck();
  }
  const inSync=()=>ROWS.every(k=>{const sec=q("#cs-sec-"+k);return !!sec&&[...sec.querySelectorAll("tr[data-cs-id]")].map(t=>t.dataset.csId).join("\n")===mon(k).rows.join("\n");});
  // One cell of a row, as it is typed. The first keystroke in a row keeps a copy of the plan for «Отменить»; each one
@@ -2376,14 +2354,11 @@ const Cash=(()=>{
   address();
   if(Ed.open())Ed.close();else draw();
  }
- // The six figures stick under the top bar, whose height is not a constant: it wraps on a narrow window and grows a
- // pixel when the web font arrives. So it is watched, and the shadow that lifts the figures off the rows is worn
- // only while they are actually stuck.
+ // The height of the top bar is not a constant: it wraps on a narrow window and grows a pixel when the web font
+ // arrives. So it is watched: what is brought up under the bar has to clear it.
  const bar=document.querySelector(".topbar");let barH=0;
- const topbar=()=>{barH=bar.getBoundingClientRect().height;root.style.setProperty("--cs-top",barH+"px");stuck();};
- function stuck(){const e=ready&&!root.hidden&&q(".cs-sum");if(e)e.classList.toggle("cs-stuck",window.scrollY>0&&e.getBoundingClientRect().top<=barH+.5);}
+ const topbar=()=>{barH=bar.getBoundingClientRect().height;};
  if(window.ResizeObserver)new ResizeObserver(topbar).observe(bar);
- window.addEventListener("scroll",stuck,{passive:true});
  // The tab has just been opened: it is drawn now, when the chart has a width to be drawn to.
  function show(){
   if(!ready)return;
@@ -2395,11 +2370,11 @@ const Cash=(()=>{
   // … and from «Заполнить {октябрь}» or «Подставить по прошлым месяцам»: the month, or the helper's list.
   if(cu.land){const s=cu.land;cu.land="";bring(s);}
  }
- // A part of the tab brought up under the top bar, and under the six figures where they stick.
- function bring(sel){const a=q(sel),k=q(".cs-sum");if(!a)return;window.scrollTo(0,Math.max(0,a.getBoundingClientRect().top+window.scrollY-barH-(k&&getComputedStyle(k).position==="sticky"?k.getBoundingClientRect().height:0)-12));stuck();}
- // Only the chart depends on the width. Redrawing the whole view here would close a date picker on a phone, where
- // the keyboard coming up is itself a resize.
- function resize(){if(!ready)return;topbar();const svg=q("#cs-chart");if(svg){const w=Math.round(svg.parentElement.clientWidth);if(w&&w!==chartW)chart();}}
+ // A part of the tab brought up under the top bar.
+ function bring(sel){const a=q(sel);if(!a)return;window.scrollTo(0,Math.max(0,a.getBoundingClientRect().top+window.scrollY-barH-12));}
+ // Nothing here is drawn to the width any more (the chart of the days is on «Сегодня» alone); the top bar's height
+ // is still measured, for what is brought up under it.
+ function resize(){if(!ready)return;topbar();}
 
  // ---- events: all of them on the tab itself ----
  // What follows a row losing the cursor may rebuild the lists, and a button rebuilt between the press and the
@@ -2471,12 +2446,10 @@ const Cash=(()=>{
    return;}
   if((x=c("[data-cs-h]")))return Plan.setH(+x.dataset.csH);
   // Everything below this line that changes the plan is refused, in words, on a page that can no longer save.
-  if(c("[data-cs-drop],[data-cs-shift],[data-cs-fix],[data-cs-sugg],[data-cs-auto],[data-cs-imp],[data-cs-impyes]")&&Plan.lost())return;
+  if(c("[data-cs-shift],[data-cs-fix],[data-cs-sugg],[data-cs-auto],[data-cs-imp],[data-cs-impyes]")&&Plan.lost())return;
   if((x=c("[data-cs-mon]"))){const L=M.months.list,k=x.dataset.csMon;cu.month=k==="now"?M.T.slice(0,7):L.includes(k)?k:L[Math.max(0,Math.min(L.length-1,L.indexOf(cu.month)+(+k)))];if(Ed.open())Ed.close();else draw();
    const b=q(`[data-cs-mon="${k}"]:not([disabled])`)||q("[data-cs-mon]:not([disabled])");if(b)b.focus({preventScroll:true});return;}
   if(c("[data-cs-undo]"))return popUndo();
-  if((x=c("[data-cs-drop]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно убрать?";x.classList.remove("x");x.classList.add("sm","danger");return;}
-   const id=x.dataset.csDrop;Plan.edit("счёт убран из плана",P=>{P.banks=P.banks.filter(b=>String(b.id)!==id);})&&toast("Счёт убран из плана",()=>popUndo());return;}
   if(c("[data-cs-imp]")){if(!cu.impText.trim()){cu.impMsg="Сначала вставьте текст в поле.";cu.imp=null;return draw();}return readImport(cu.impText);}
   if(c("[data-cs-impfile]"))return q("#cs-imp-file").click();
   if(c("[data-cs-impno]")){cu.imp=null;return draw();}
@@ -4701,7 +4674,7 @@ const Ed=(()=>{
   const T=M.T,rank=a=>a.active&&!a.anchor?0:a.active?1:2,list=M.accounts.filter(a=>a.inPlan||a.active).sort((a,b)=>rank(a)-rank(b));
   const rows=list.map(a=>{const sym=SYM[a.cur]||"",A=a.anchor,old=a.legacy&&a.old;
    const hint=A?`по расчёту ${nat(a.est,a.cur)} · вписан ${dRu(A.asOf)}${A.by?", "+A.by:""}`:old?`в старой Кассе было ${nat(a.old,a.cur)} — подтвердите сумму и дату`:a.active?"остатка нет":"счёт не используется";
-   return `<div class="ed-acct" data-ed-acct="${esc(a.key)}"><div class="ed-an"><b>${esc(acName(a))}</b><span class="note">${esc(hint)}</span></div>
+   return `<div class="ed-acct" data-ed-acct="${esc(a.key)}"><div class="ed-an"><b>${esc(acName(a))}</b><span class="note">${esc(hint)}</span>${a.inPlan&&a.id!=null?`<button class="sm ghost ed-drop" data-ed-drop="${esc(a.id)}" aria-label="Убрать счёт ${esc(acName(a))} из плана">Убрать счёт из плана</button>`:""}</div>
     <label class="fld"><span>Остаток, ${esc(sym.trim()||a.cur)}</span><input type="number" step="any" inputmode="decimal" data-ed-bamt value="${A?a.est:old?a.old:""}" aria-label="Остаток ${esc(acName(a))}"></label>
     <label class="fld"><span>На дату</span><input type="date" data-ed-bdate max="${T}" value="${A||!old?T:""}" aria-label="Дата остатка ${esc(acName(a))}"></label>
     ${a.id!=null?`<label class="fld"><span>Номер счёта, последние цифры</span><input data-ed-bac inputmode="numeric" autocomplete="off" value="${esc(a.ac||"")}" placeholder="не обязательно" aria-label="Номер счёта ${esc(acName(a))}"></label>`:""}
@@ -4892,6 +4865,11 @@ const Ed=(()=>{
    const kind=card.dataset.edCard;
    if(c("[data-ed-x]")){cur=null;return Plan.redraw();}
    if((x=c("[data-ed-what]"))&&kind==="add"){cur.what=x.dataset.edWhat;return show(cur);}
+   // An account taken out of the plan: asked twice, as it was beside «Остатки» in «Касса», where this button stood
+   // until that block left for «Сегодня». The rows written on the account stay; «Отменить» brings it back.
+   if((x=c("[data-ed-drop]"))&&kind==="bal"){if(Plan.lost())return;
+    if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно убрать?";x.classList.remove("ghost");x.classList.add("danger");return;}
+    const id=x.dataset.edDrop;if(Plan.edit("счёт убран из плана",P=>{P.banks=P.banks.filter(b=>String(b.id)!==id);}))toast("Счёт убран из плана",back);return show(cur);}
    if((x=c("[data-ed-kind]"))&&kind==="add"){cur.kind=x.dataset.edKind;return show(cur);}
    if((x=c("[data-ed-shift]"))){const f=q(card,'[data-ed-f="date"]'),v=dAdd(f.value||Live.today(),f.value?+x.dataset.edShift:0);if(!okDate(v))return toast(FARMSG);f.value=v;if(kind==="add")cur.draft.date=v;return;}
    if((x=c("[data-ed-save]")))return kind==="add"?addSave(card):kind==="bal"?balSave(card):rowSave(card,x.dataset.edSave);
@@ -5116,20 +5094,16 @@ const Today=(()=>{
    ${p.none?`<p class="td-fwhy">${esc(p.none)}</p>`:""}${p.btn?`<div class="row" style="margin-top:12px">${p.btn}</div>`:""}${p.notes.map(x=>`<p class="note">${esc(x)}</p>`).join("")}</section>`;
  }
 
- // ---- six figures ----
- // They are the head of «Касса» as well, from the same model: the two tabs cannot disagree about a figure they both
- // print. `cls` is a class for the row itself («Касса» makes it stick under the top bar). The sixth is «Можно
- // вывести»; the month's result lives in the month's own block. With `five` the first — the money now — is left
- // out: on «Сегодня» it is the last line of «Счета», above.
- function kpis(M,cls,five){
-  const acc=k=>M.accounts.find(a=>a.key===k)||null;
-  const H=M.H,kp=(label,val,hint,o)=>`<div class="kpi${o&&o.hot?" hot":""}${o&&o.tap?" td-kpi":""}"${o&&o.tap?' data-ed-bal role="button" tabindex="0" title="Вписать остаток"':""}><div class="lbl">${label}</div><div class="val${o&&o.cls?" "+o.cls:""}">${val}</div><div class="hint">${hint}</div></div>`;
+ // ---- five figures ----
+ // What comes, what goes, the lowest point, what is late and what may be taken out. There were six, and they headed
+ // «Касса» as well: the first — the money now — is the last line of «Счета» since 8 October 2026, and «Касса» no
+ // longer repeats what «Сегодня» says. The month's result lives in the month's own block.
+ function kpis(M){
+  const H=M.H,kp=(label,val,hint,o)=>`<div class="kpi${o&&o.hot?" hot":""}"><div class="lbl">${label}</div><div class="val${o&&o.cls?" "+o.cls:""}">${val}</div><div class="hint">${hint}</div></div>`;
   // With nothing written ahead no figure of the forecast is shown — whether the balances are typed (vE) or not
   // yet (v0): «Уйдёт £8,612» and «Нужно на счетах £13,612» on the very first screen were one tax bill and the
   // cushion, read as the cost of two months.
-  const known=M.accounts.filter(a=>a.anchor).length,vE=M.verdict.id==="vE"||(M.v0&&M.empty),none=(k,label)=>kp(label,lv(k,"","—"),"план пуст");
-  const now=M.v0?kp("Денег сейчас",lv("now","","—"),`не хватает остатка: ${esc(M.missing.map(k=>acc(k).name).join(", "))}`,{tap:1})
-   :kp(M.nowIsToday?"Денег сейчас":`Денег на ${dRu(M.nowDate)}`,lv("now",M.now,fmt(M.now)),`выписки и остатки по ${dRu(M.nowDate)} · ${count(known,"счёт","счёта","счетов")}${M.taxes.reserve>0.5?` · под налоги ${lv("reserve",M.taxes.reserve,fmt(M.taxes.reserve))}`:""}${M.marksGbp?` · в т.ч. отмечено вручную ${lv("marks",M.marksGbp,(M.marksGbp>0?"+":"")+fmt(M.marksGbp))}`:""}`,{tap:1});
+  const vE=M.verdict.id==="vE"||(M.v0&&M.empty),none=(k,label)=>kp(label,lv(k,"","—"),"план пуст");
   const low=vE?none("low",M.v0?"Нужно на счетах сегодня":"Нижняя точка"):M.v0?kp("Нужно на счетах сегодня",lv("low",M.need,fmt(M.need)),`чтобы пройти ${H} дней без минуса${M.cushion?` и с запасом ${fmt(M.cushion)}`:""}`,{hot:1})
    :kp("Нижняя точка",lv("low",M.LOW,fmt(M.LOW)),`${lv("lowday",M.LOWDAY,dRu(M.LOWDAY))}${M.minusDay&&M.minusDay!==M.LOWDAY?` · первый минус ${lv("minusday",M.minusDay,dRu(M.minusDay))}`:""}${M.verdict.lowRes>0.5?` · из них под налоги ${lv("lowres",M.verdict.lowRes,fmt(M.verdict.lowRes))}`:""}`,{hot:1,cls:M.LOW<0?"neg":M.LOW<M.cushion?"td-amber":""});
   // «Можно вывести»: the sum, or a dash and the one thing that is missing.
@@ -5137,7 +5111,7 @@ const Today=(()=>{
   const fh=p.state==="v0"?"нужны остатки":p.state==="stale"?`остатки от ${dRu(M.nowDate)}`:p.state==="noout"?"впишите расходы":p.state==="thin"?`в плане расходов ${fmtK(F.thin.plan)} из обычных ${fmtK(F.thin.usual)}`
    :(st0?`${esc(st0.label.replace(/ \(.*\)$/,""))} — ${st0.amt}`:`тесный день ${dRu(F.tight.d)}`)+(F.wd.gbp>0.5?` · сверх выводов в плане ${fmtK(F.wd.gbp)}`:"");
   const free=kp(p.sum&&F.asOf?`Можно вывести · на ${dRu(F.asOf)}`:"Можно вывести",p.sum?lv("free",F.now,fmt(p.v)):lv("free","","—"),fh);
-  return `<section class="kpis${cls?" "+cls:""}" aria-label="${five?"Пять цифр":"Шесть цифр"}">${five?"":now}
+  return `<section class="kpis td-k5" aria-label="Пять цифр">
    ${vE?none("in",`Придёт за ${H} дней`):kp(`Придёт за ${H} дней`,lv("in",M.IN,fmt(M.IN)),`по плану · ${lv("in.n",M.inParts.n,count(M.inParts.n,"поступление","поступления","поступлений"))}${M.inParts.vat>0.5?` · в т.ч. VAT ${lv("in.vat",M.inParts.vat,fmtK(M.inParts.vat))}`:""}`)}
    ${vE?none("out",`Уйдёт за ${H} дней`):kp(`Уйдёт за ${H} дней`,lv("out",M.OUT,fmt(M.OUT)),`команда ${lv("out.team",M.outParts.team,fmtK(M.outParts.team))} · прочее ${lv("out.other",M.outParts.other,fmtK(M.outParts.other))} · налоги ${lv("out.taxes",M.outParts.taxes,fmtK(M.outParts.taxes))} · дивиденды ${lv("out.div",M.outParts.div,fmtK(M.outParts.div))}${M.outParts.ptax>0.5?` (личные налоги ${lv("out.ptax",M.outParts.ptax,fmtK(M.outParts.ptax))})`:""}`)}
    ${low}
@@ -5148,8 +5122,8 @@ const Today=(()=>{
 
  // ---- the accounts: where the money is, and how much ----
  // One account to a line, in the plan's own order: what is on it, what that is in pounds, and what the figure rests
- // on. The last line is the money now — the first of the six figures of «Касса» — and a press on it opens
- // «Вписать остаток», as a press on that figure did.
+ // on. The last line is the money now — it was the first of six figures at the head of the page — and a press on
+ // it opens «Вписать остаток», as a press on that figure did.
  function accounts(){
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
   const A=M.accounts.filter(a=>a.inPlan||a.active),known=M.accounts.filter(a=>a.anchor).length,miss=M.missing.map(k=>acc(k).name);
@@ -5245,7 +5219,7 @@ const Today=(()=>{
  }
  // «Аналитика»: what a founder reads rather than acts on — the five figures, the balance by day, the taxes.
  function analytics(){
-  return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">пять цифр · ${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${kpis(M,"td-k5",true)}${chartCard()}${taxCard()}</div></details>`;
+  return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">пять цифр · ${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${kpis(M)}${chartCard()}${taxCard()}</div></details>`;
  }
 
  // ---- the studio's taxes ----
@@ -5366,7 +5340,7 @@ const Today=(()=>{
   // is where that has to be said, because this is where a founder now makes most changes.
   const lost=Cash.status()==="stale"?`<div class="banner" style="margin:0"><span><b>План изменился в другом окне.</b> То, что вы меняете здесь, больше не сохраняется. Обновите страницу, чтобы увидеть свежий план.</span><button class="sm" data-td-reload>Обновить</button></div>`:"";
   const head=lost+`<div class="page-head"><div><h1>Сегодня</h1><div class="page-sub">${esc(sub.join(" · "))}</div></div>
-   <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-td-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span><button class="primary" data-ed-add>Добавить</button></div></div>`;
+   <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-td-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span></div></div>`;
   const nothing=!S.tx.some(real)&&!S.inbox.some(real)&&!LISTS.some(k=>P[k].length)&&!M.accounts.some(a=>a.anchor);
   root.innerHTML=nothing?head+Ed.sheet("add")+Ed.sheet("bal")+`<div class="empty"><b>Пока считать не из чего</b>Загрузите выписки и впишите остатки на счетах — здесь появится, хватит ли денег на ближайшие недели.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-ed-bal>Вписать остатки</button><button data-demo class="ghost">Показать на примере</button></div></div>`
    // From the top: the verdict; where the money is; the month and what may be taken out; the plan by weeks beside
@@ -5398,7 +5372,7 @@ const Today=(()=>{
  // «Аналитика» opened: the chart was drawn while it had no width, so it is drawn again.
  root.addEventListener("toggle",e=>{if(!e.target.matches||!e.target.matches(".td-anl"))return;st.anl=e.target.open;try{localStorage.setItem(ANL,st.anl?"1":"0");}catch(x){}if(st.anl)chart();},true);
  Plan.watch(render);
- return{render,resize,kpis,freeParts};
+ return{render,resize,freeParts};
 })();
 Plan.watch(()=>Ed.settingsDraw());
 
