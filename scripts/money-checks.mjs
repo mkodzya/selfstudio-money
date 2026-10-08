@@ -2412,7 +2412,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   same([S.P.team[0].rec.x, item(S.M, 'rB@2026-11').state, item(S.M, 'rB@2026-12').state], [{ '2026-11': { off: true } }, 'off', 'due'], '«только ноябрь» on November\'s Person B: that month is off, December stays');
   await editRow(pg, 'rS@2026-11', { monthly: false });
   S = await holds(pg, 'Tool S no longer repeats');
-  same(['rec' in S.P.other[0], S.P.other[0].date, S.M.items.filter((x) => x.row === 'rS').map((x) => x.id), await toastText(pg)], [false, '2026-11-03', ['rS'], 'Tool S: больше не повторяется'], '«каждый месяц» unticked on Tool S\'s November, the month it starts: nothing repeats, so it is an ordinary row of 3 November again — and the page says «больше не повторяется»');
+  same(['rec' in S.P.other[0], S.P.other[0].date, S.M.items.filter((x) => x.row === 'rS').map((x) => x.id)], [false, '2026-11-03', ['rS']], '«каждый месяц» unticked on Tool S\'s November, the month it starts: nothing repeats, so it is an ordinary row of 3 November again');
   // The tax the page worked out: its card, and «Сумма по декларации».
   const vat = 't|vat|2026Q3';
   await openRow(pg, vat);
@@ -2984,7 +2984,7 @@ await run('p5 on screen', '«каждый месяц» through the real controls
   await tapRow(pg, 'rB@2026-11', 'skip');
   await pg.click(K('row') + '[data-ed-go="skip-onward"]');
   S = await holds(pg, 'November and on switched off');
-  same([S.P.team[0].rec.to, S.fig('out')], ['2026-10', 12400], '«Не платим → ноябрь и дальше»: the repeat ends with October');
+  same(['rec' in S.P.team[0], S.P.team[0].date, S.fig('out')], [false, '2026-10-20', 12400], '«Не платим → ноябрь и дальше»: the repeat ends with October — one month is left of it, so Person B is an ordinary row of 20 October');
   await undo(pg);
   // A month that already holds the founder's own row: the repeat is switched off there, and says so.
   const h1 = await addRow(pg, 'team', { name: 'Person H', amt: 6300, date: '2026-11-20' });
