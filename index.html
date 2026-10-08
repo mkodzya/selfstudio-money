@@ -548,7 +548,7 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .td-wkf b{color:var(--text-primary);font-weight:600}
 .td-wkd{padding:0 0 10px 20px}
 @media (max-width:620px){.td-wkd{padding-left:0}}
-/* «Аналитика»: the five figures, the chart and the taxes, folded into one line under everything a founder acts on. */
+/* «Аналитика»: the chart and the taxes, folded into one line under everything a founder acts on. */
 .td-anl{border-top:1px solid var(--text-primary);margin-top:8px}
 .td-anl>summary{display:flex;gap:6px 14px;align-items:baseline;flex-wrap:wrap;padding:16px 2px;font-size:17px;list-style:none}
 .td-anl>summary::-webkit-details-marker{display:none}
@@ -5217,9 +5217,9 @@ const Today=(()=>{
    <div class="td-days">${before}${none?`<p class="note" style="margin:8px 0 0">${M.empty?"План пуст: в эти дни ничего не вписано.":"В эти дни строк нет."}</p>`:weeks}</div>
    ${none?"":`<div class="td-foot"><span></span><button class="sm ghost" data-td-flip="all" aria-expanded="${st.all}">${st.all?"Свернуть недели":"Раскрыть все недели"}</button></div>`}</section>`;
  }
- // «Аналитика»: what a founder reads rather than acts on — the five figures, the balance by day, the taxes.
+ // «Аналитика»: what a founder reads rather than acts on — the balance by day and the taxes.
  function analytics(){
-  return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">пять цифр · ${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${kpis(M)}${chartCard()}${taxCard()}</div></details>`;
+  return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${chartCard()}${taxCard()}</div></details>`;
  }
 
  // ---- the studio's taxes ----
@@ -5343,9 +5343,10 @@ const Today=(()=>{
    <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-td-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span></div></div>`;
   const nothing=!S.tx.some(real)&&!S.inbox.some(real)&&!LISTS.some(k=>P[k].length)&&!M.accounts.some(a=>a.anchor);
   root.innerHTML=nothing?head+Ed.sheet("add")+Ed.sheet("bal")+`<div class="empty"><b>Пока считать не из чего</b>Загрузите выписки и впишите остатки на счетах — здесь появится, хватит ли денег на ближайшие недели.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-ed-bal>Вписать остатки</button><button data-demo class="ghost">Показать на примере</button></div></div>`
-   // From the top: the verdict; where the money is; the month and what may be taken out; the plan by weeks beside
-   // what has to be decided; and, folded, what is only read (Mika's choice of 8 October 2026 among three lay-outs).
-   :head+Ed.sheet("add")+verdict()+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+analytics();
+   // From the top: the verdict and the five figures; where the money is; the month and what may be taken out; the
+   // plan by weeks beside what has to be decided; and, folded, what is only read (Mika's choice of 8 October 2026
+   // among three lay-outs — the five figures went under the fold with the rest and came back up the same evening).
+   :head+Ed.sheet("add")+verdict()+kpis(M)+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+analytics();
   chart();Ed.after(root);
  }
  // Only the chart depends on the width; redrawing the whole tab on a resize would take the keyboard away on a
