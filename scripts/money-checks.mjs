@@ -4325,6 +4325,42 @@ await run('rv-tax', 'taxes on screen: a founder\'s own tax row is in the block; 
   await finish(pg);
 });
 
+await run('rv-tochka', 'a Tochka statement prints every sum without a sign: which way the money went stands in a column of its own, and the page reads it', async () => {
+  // The bank's own export as it comes: forty-two columns, both sides of every row named, every sum positive, the way
+  // in «Направление». Read without that column, every payment out was a receipt and was offered as revenue — found on
+  // the first real statement, 8 October 2026. The header is the bank's; the rows are made up.
+  const HEAD = ['Дата проводки', 'Дата документа', 'Дата списания', 'Дата зачисления', 'Номер документа', 'Направление', 'Сумма операции', 'Сумма операции в рублях', 'Входящий остаток', 'Исходящий остаток',
+    'Назначение платежа', 'Наименование плательщика', 'Счет плательщика', 'ИНН плательщика', 'КПП плательщика', 'Бик банка плательщика', 'Наименование банка плательщика', 'Адрес банка плательщика', 'Корр. счёт банка плательщика',
+    'Наименование получателя', 'Счет получателя', 'ИНН получателя', 'КПП получателя', 'Бик банка получателя', 'Наименование банка получателя', 'Адрес банка получателя', 'Корр. счет банка получателя',
+    'Курс конвертации', 'Сумма после конвертации', 'Приоритет', 'Тип документа', 'Бюджетный', 'Бюджетный: статус', 'Бюджетный: КБК', 'Бюджетный: ОКАТО', 'Бюджетный: Основание', 'Бюджетный: Период', 'Бюджетный: Номер',
+    'Бюджетный: дата', 'Бюджетный: тип', 'Основание списания', 'Код'];
+  const cell = (v) => (/[;"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  const BANK = 'ООО "Банк Точка"', US = 'Индивидуальный предприниматель Примеров Пётр Петрович', INN = '770000000011';
+  const line = (n, way, amt, text, from, to) => {
+    const c = new Array(HEAD.length).fill('');
+    c[0] = c[1] = c[way === 'Исходящий' ? 2 : 3] = '02.10.2026'; c[4] = String(n); c[5] = way; c[6] = c[7] = amt; c[10] = text;
+    [c[11], c[12], c[13]] = from; c[16] = BANK; [c[19], c[20], c[21]] = to; c[24] = BANK;
+    return c.map(cell).join(';');
+  };
+  const csv = [HEAD.join(';'),
+    line(11, 'Входящий', '120000,00', 'Оплата по счету №7 за разработку. НДС не облагается', ['ООО "ВЫДУМКА"', '40702810000000000001', '7700000001'], ['ИП Примеров Пётр Петрович', '40802810000000000011', INN]),
+    line(12, 'Исходящий', '4200,00', 'Оплата лицензионного вознаграждения за использование базовой лицензии по тариф.пакету. НДС не предусмотрен.', [US, '40802810000000000011', INN], [BANK, '60322810000000000001', '7700000099']),
+    line(13, 'Исходящий', '7528,00', 'Перевод средств в счёт накоплений на оплату налогов без НДС', [US, '40802810000000000011', INN], [US, '40802810000000000022', INN]),
+    line(14, 'Исходящий', '16,11', 'Покупка товара(Терминал:EXAMPLE*77*CLOUD,16, Some str., Office 1,Moscow,RU,дата операции:01/10/2026 19:12(МСК),на сумму:16.11 RUB,карта 220000******0000)', [US, '40802810000000000011', INN], [BANK, '30232810000000000001', '7700000099']),
+  ].join('\n') + '\n';
+  serve(ledger([]), null);
+  const pg = await open('a Tochka statement');
+  const read = await pg.evaluate((c) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv'); return p.error ? [p.error] : [p.bank, p.defCur, p.rows.map((r) => [r.d, r.a, !!r.own, r.p].join(' | '))]; }, csv);
+  same(read, ['Tochka', 'RUB', ['2026-10-02 | 120000 | false | ООО "ВЫДУМКА"', '2026-10-02 | -4200 | false | ', `2026-10-02 | -7528 | true | ${US}`, '2026-10-02 | -16.11 | false | EXAMPLE*77*CLOUD']],
+    '«Входящий» is money in, «Исходящий» money out; payer and recipient under one tax number are the holder\'s own accounts; a payment to the bank itself is named by its terminal, or by nobody');
+  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv'), 'tochka.csv'); }, csv);
+  for (let i = 0; i < 80 && !((store.led.doc.inbox || []).length === 3 && store.led.doc.tx.length === 1); i++) await sleep(50);
+  const inb = (store.led.doc.inbox || []).map((r) => [r.o.a, r.dir, r.c === 'rev', r.o.cur].join(' ')).sort(), kept = store.led.doc.tx.map((r) => [r.o.a, r.c, r.s].join(' '));
+  same([inb, kept], [['-16.11 -1 false RUB', '-4200 -1 false RUB', '120000 1 true RUB'], ['-7528 skip file']],
+    '… so in «Разбор» the one receipt is offered as revenue, the tariff and the card purchase are payments out and are not, and the move to the holder\'s own tax account is taken out as a transfer between own accounts');
+  await pg.context().close();
+});
+
 await run('rv-small', 'the rest of the review: a save the server did not take, the wordmark, a paid row made to repeat, a name the table knows, a tax row renamed after a founder, an unsorted receipt in «Можно вывести»', async () => {
   // A save the server fails is said out loud and tried again by itself.
   serve(ledP(), await plan2());

@@ -878,13 +878,17 @@ function parseDate(v){
 const COLS={
  date:{exact:["date","дата","дата операции","дата проводки","completed date","transaction date","created on","date completed (utc)"],has:["date","дата"]},
  amount:{exact:["amount","сумма","сумма операции","amount (gbp)","total amount"],has:["amount","сумма"],not:["exchange","fee","balance","комис","остаток","orig"]},
- debit:{exact:["debit","дебет","списание","paid out","money out","расход"],has:["debit","дебет","списан","paid out","money out"]},
- credit:{exact:["credit","кредит","зачисление","поступление","paid in","money in","приход"],has:["credit","кредит","зачислен","поступлен","paid in","money in"]},
+ debit:{exact:["debit","дебет","списание","paid out","money out","расход"],has:["debit","дебет","списан","paid out","money out"],not:["дата","date","основание"]},
+ credit:{exact:["credit","кредит","зачисление","поступление","paid in","money in","приход"],has:["credit","кредит","зачислен","поступлен","paid in","money in"],not:["дата","date"]},
+ way:{exact:["направление","direction"],has:["направлени"]},
  cur:{exact:["currency","валюта","payment currency"],has:["currency","валюта"],not:["exchange","orig"]},
  desc:{exact:["description","memo","назначение платежа","details","narrative","описание","reference"],has:["description","memo","назначение","details","описание","reference"]},
  merchant:{exact:["merchant"],has:["merchant"]},
  party:{exact:["payee name","counterparty","контрагент","получатель","name","beneficiary","payee"],has:["payee","контрагент","получател","counterparty","beneficiar"]},
  payer:{exact:["payer name","плательщик","payer"],has:["payer","плательщик"]},
+ payerId:{exact:["инн плательщика"],has:[]},
+ partyId:{exact:["инн получателя"],has:[]},
+ partyBank:{exact:["наименование банка получателя"],has:[]},
  id:{exact:["id","transferwise id","transaction id","номер документа","номер"],has:["transaction id","wise id"]},
  holder:{exact:["card holder full name","cardholder","card holder"],has:["card holder","cardholder"]}
 };
@@ -914,8 +918,15 @@ function parseGrid(grid,name){
   if(isNaN(a)||(map.debit!=null&&map.credit!=null&&map.amount==null)){const cr=map.credit!=null?parseNum(r[map.credit]):NaN,de=map.debit!=null?parseNum(r[map.debit]):NaN;a=(isNaN(cr)?0:Math.abs(cr))-(isNaN(de)?0:Math.abs(de));}
   if(!a||isNaN(a))continue;
   const g=k=>map[k]!=null?String(r[map[k]]==null?"":r[map[k]]).trim():"";
+  // A statement that prints every sum without a sign says in a column of its own which way the money went
+  // (Tochka: «Направление» — «Входящий» / «Исходящий»). Read without it, every payment out is a receipt.
+  if(a>0&&/^(исх|out|debit|спис|расход)/i.test(g("way")))a=-a;
   const cur=(g("cur").toUpperCase().match(/[A-Z]{3}/)||[""])[0];
-  rows.push({d,a,cur:CURS.includes(cur)?cur:"",hasCur:!!cur,t:g("desc"),p:a>0?(g("payer")||g("party")):(g("party")||g("merchant")||g("payer")),h:g("holder"),tid:g("id")});
+  // The same statement names both sides of every row. Payer and recipient under one tax number are one holder:
+  // money moved between his own accounts. And a payment whose recipient is its own bank — a card purchase, a
+  // tariff — is to somebody the text names: the terminal, where there is one, else nobody.
+  const own=!!g("payerId")&&g("payerId")===g("partyId"),toBank=a<0&&!!g("party")&&g("party")===g("partyBank"),shop=(/терминал:\s*([^,)]+)/i.exec(g("desc"))||[])[1]||"";
+  rows.push({d,a,cur:CURS.includes(cur)?cur:"",hasCur:!!cur,t:g("desc"),p:a>0?(g("payer")||g("party")):toBank?shop.trim():(g("party")||g("merchant")||g("payer")),h:g("holder"),tid:g("id"),own});
  }
  if(!rows.length)return{error:"Колонки нашла, но операций в файле нет."};
  return{bank,defCur,rows:foldFees(rows),cols:Object.keys(map).length};
@@ -995,7 +1006,7 @@ function allRules(){const pr=r=>FOUNDERS.includes(r.c)?1:0;return S.rules.concat
 function classify(r){
  const text=norm([r.o.p,r.o.t].join(" "));
  const pn=norm(r.o.p),own=t=>S.own.some(k=>k&&t.includes(k));
- if(OWN.test(text)||own(pn)||(r.dir<0&&own(text))||(r.dir>0&&!pn&&own(text)&&!allRules().some(x=>x.c==="rev"&&text.includes(x.k)))){r.c="skip";r.l="";r.auto=true;r.v=0;r.maybe=false;return;}
+ if(r.o.own||OWN.test(text)||own(pn)||(r.dir<0&&own(text))||(r.dir>0&&!pn&&own(text)&&!allRules().some(x=>x.c==="rev"&&text.includes(x.k)))){r.c="skip";r.l="";r.auto=true;r.v=0;r.maybe=false;return;}
  const text2=text.replace(/\d+/g," ").replace(/\s+/g," ");
  const hit=allRules().find(x=>x.k&&(text.includes(x.k)||text2.includes(x.k))&&(x.any||((x.c==="rev")===(r.dir>0))));
  if(hit){r.c=hit.c;r.l=hit.l;r.auto=hit.c!=="tax";}
@@ -1059,7 +1070,7 @@ function ingest(parsed,file,src){
  parsed.rows.forEach(p=>{
   const cur=p.cur||file.cur,key=[file.bank+(file.acc?"·"+file.acc:""),p.d,p.a,cur,p.tid||norm(p.t+" "+p.p).slice(0,60)].join("|");
   if(keys.has(key)){dup++;return;}keys.add(key);
-  const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||"",dir:p.a>0?1:-1,a:round2(Math.abs(toGBP(p.a,cur))),o:{a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},key,s:src,at};
+  const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||"",dir:p.a>0?1:-1,a:round2(Math.abs(toGBP(p.a,cur))),o:Object.assign({a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},p.own?{own:true}:{}),key,s:src,at};
   classify(r);r.twin=findTwin(r);S.inbox.push(r);added++;});
  return{added,dup};
 }
