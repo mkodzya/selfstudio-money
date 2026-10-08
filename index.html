@@ -2598,7 +2598,9 @@ const Cash=(()=>{
 //                                  and VAT, and no sum (amt 0); not paid, not repeating, of:false for a tax.
 //                                  Returns the rows
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
-//                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it
+//                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it. `on` is
+//                                  the day the founder says it was paid: today — or, for a line older than its
+//                                  account's balance that he says is inside that balance, the line's own date
 //  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
 //                                  new row (id) dated `date`, the day the founder named — «{name} — остаток с
 //                                  {октября}», carry:{ym}, no mon, the same list, link and VAT; a one-off row even
@@ -4388,8 +4390,14 @@ const Ed=(()=>{
   nopayer:[it=>`${it.name}: это другой платёж`,(P,it)=>{W.notx(P,it,it.payer.id);}],
   del:[it=>`Удалено: ${it.name}`,(P,it)=>{W.del(P,it);}]
  };
+ // «Получено» / «Оплачено» on a line dated before the day its account's balance was typed for. A mark made after a
+ // balance is money that moved after it, and is added to that balance (Live: `later`). But a line that old has as
+ // likely been paid long since, and is inside the balance already: on 8 October 2026 an inflow of 28 September,
+ // marked «получено» in the evening, put its £1,440 on top of the balance typed that afternoon. Only the founder
+ // knows which it is, so the press asks. The account whose balance it is, or null when there is nothing to ask.
+ const inBal=it=>{if(!M||it.src==="tax"||!it.date)return null;const a=M.accounts.find(a=>a.key===it.acct);return a&&a.anchor&&it.date<a.anchor.asOf?a:null;};
  // A press that has two answers opens the row's card on the question instead of doing one of them.
- const asks=(verb,it)=>verb==="part"?"part":(verb==="skip"||verb==="del")&&it.src==="occ"&&!(verb==="del"&&it.occ.last)?verb:verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":"";
+ const asks=(verb,it)=>verb==="part"?"part":(verb==="skip"||verb==="del")&&it.src==="occ"&&!(verb==="del"&&it.occ.last)?verb:verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
  function act(verb,x,direct){
   if(Plan.lost())return;
   const it=item(x.dataset.edId),V=VERBS[verb];if(!it)return;
@@ -4418,6 +4426,10 @@ const Ed=(()=>{
    const when=dRuW(d)+(d.slice(0,4)===T.slice(0,4)?"":" "+d.slice(0,4));
    return done(`${it.name}: ${inn?"получено":"оплачено"} ${nat(v,it.cur)} из ${nat(full,it.cur)}, остаток — на ${when}`,(P,now,by)=>{W.partial(P,it,v,uid(),now,by,T,d);});}
   if(what==="pay-none")return done(`Оплачено: ${it.name}`,(P,now,by)=>{W.mark(P,it,Live.today(),now,by);});
+  // «уже в остатке»: the line was paid on its own day, before the balance — the mark says that day, and a mark of a
+  // day before the balance adds nothing to it. «… позже»: paid today, as a mark always said.
+  if(what==="paid-in")return done(`${VERBS.paid[0](it)} — уже в остатке`,(P,now,by)=>{W.mark(P,it,it.date,now,by);});
+  if(what==="paid-after")return done(VERBS.paid[0](it),(P,now,by)=>{W.mark(P,it,Live.today(),now,by);});
  }
  const payRow=(it,id,whole)=>{const say=whole?`Оплачено: ${it.name}`:`${it.name}: платёж записан как часть`;cur=null;if(Plan.edit(say,(P,now,by)=>{W.pay(P,it.tax.key,id,whole,now,by);}))toast(say,back);};
 
@@ -4485,6 +4497,8 @@ const Ed=(()=>{
     <span class="note">Строка закроется за ${mon(ymOf(it))} на том, что ${inn?"получено":"оплачено"}. Остаток встанет отдельной строкой на выбранный день.</span></div>`;}
   if((a==="skip"||a==="del")&&it.src==="occ"){const ym=it.occ.ym;
    return `<div class="ed-ask" data-ed-askbox="${a}"><span>${a==="del"?"Убрать":inn?"Не придёт":"Не платим"}:</span><div class="row"><button class="sm primary" data-ed-go="${a}-only">только ${mon(ym)}</button><button class="sm" data-ed-go="${a}-onward">${mon(ym)} и дальше</button>${x}</div></div>`;}
+  if(a==="paid"){const A=inBal(it);
+   if(A)return `<div class="ed-ask" data-ed-askbox="paid"><span>Остаток ${esc(acName(A))} вписан на ${dRu(A.anchor.asOf)}, а строка — от ${dRu(it.date)}. Эти деньги:</span><div class="row"><button class="sm primary" data-ed-go="paid-in">уже в остатке</button><button class="sm" data-ed-go="paid-after">${inn?"пришли":"ушли"} позже</button>${x}</div></div>`;}
   // «Оплачено» on a tax first shows the payments to the tax authority that nothing has claimed: one of them may be it.
   if(a==="pay"&&it.src==="tax")return `<div class="ed-ask" data-ed-askbox="pay"><span>Какой из платежей — этот налог?</span>
    ${(it.pays||[]).map(p=>`<div class="ed-pay"><span>${esc(p.label||"Платёж")} · ${fmt(p.gbp,p.gbp%1?2:0)} · ${dRu(p.d)}</span><span class="row"><button class="sm" data-ed-payrow="${esc(p.id)}" data-ed-whole="1">Это он — весь</button><button class="sm" data-ed-payrow="${esc(p.id)}">Это часть</button></span></div>`).join("")}

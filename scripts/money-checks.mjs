@@ -4557,6 +4557,44 @@ await run('rv-stale', 'a window whose table was saved from elsewhere says so ove
   await pg.context().close();
 });
 
+await run('rv-inbal', '«Получено» on a line older than its account\'s balance asks whether the money is inside that balance', async () => {
+  // Mika, 8 October 2026: «почему на счёте 1651, хотя я вписал 211». An inflow of 28 September had been marked
+  // «получено» that evening; the balance had been typed that afternoon, for that day; and a mark made after a
+  // balance is money that came after it — so its £1,440 stood on top of a balance that already held it. The plan
+  // here: Wise typed for 30 September, Client L's invoice of 28 September (1,200 and the tax on top), Client N's
+  // of 12 October.
+  const pg = await scene('a mark and a balance', ledA(), planW({ inflows: [row('old', 'Client L', 1200, '2026-09-28', { vat: true }), row('new', 'Client N', 500, '2026-10-12', { vat: false })] }), { H: 60 });
+  await goCash(pg);
+  const wise = async () => { const a = (await look(pg, 'cash')).M.accounts.find((a) => a.key === 'Wise|GBP'); return [a.est, a.marks]; };
+  const mark = async (id) => { const r = stored(await look(pg, 'cash'), id); return r.paid ? r.paid.on : 'no mark'; };
+  const ask = '[data-ed-card="row"] [data-ed-askbox="paid"]';
+  const [est0] = await wise();
+  await toMonth(pg, '2026-09');
+  await pg.click(cs('inflows', 'old') + ' [data-ed-do="paid"]');
+  same([await text(pg, ask + ' > span'), await pg.$$eval(ask + ' [data-ed-go]', (l) => l.map((e) => [e.dataset.edGo, e.textContent.trim()].join(': '))), await mark('old')],
+    ['Остаток Wise GBP вписан на 30 сен, а строка — от 28 сен. Эти деньги:', ['paid-in: уже в остатке', 'paid-after: пришли позже'], 'no mark'],
+    '«получено» on a line dated before the day of its account\'s balance: the page asks — «уже в остатке» or «пришли позже» — and writes nothing until the answer');
+  await shot(pg, 'rv-inbal');
+  // «уже в остатке»: closed on its own day, and the balance is what was typed
+  await pg.click(ask + ' [data-ed-go="paid-in"]');
+  await saved(pg);
+  same([await mark('old'), await wise(), item((await look(pg, 'cash')).M, 'old').state, await toastText(pg)], ['2026-09-28', [est0, 0], 'done', 'Получено: Client L — уже в остатке'],
+    '«уже в остатке»: the line is closed as paid on its own day, 28 September, and adds nothing to the balance');
+  // «пришли позже»: a mark of today, added to the balance — what every mark did before
+  await undo(pg);
+  await pg.click(cs('inflows', 'old') + ' [data-ed-do="paid"]');
+  await pg.click(ask + ' [data-ed-go="paid-after"]');
+  await saved(pg);
+  same([await mark('old'), await wise(), await toastText(pg)], [T, [est0 + 1440, 1440], 'Получено: Client L'], '«пришли позже»: the mark is today\'s, and the £1,440 is on top of the balance');
+  // a line dated after the day of the balance has one answer, and is not asked about
+  await undo(pg);
+  await toMonth(pg, '2026-10');
+  await pg.click(cs('inflows', 'new') + ' [data-ed-do="paid"]');
+  await saved(pg);
+  same([await pg.$(ask), await mark('new'), (await wise())[1]], [null, T, 500], 'a line dated after the day of the balance is marked at once, as before: its money cannot be inside that balance');
+  await finish(pg);
+});
+
 await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
   // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
   // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
