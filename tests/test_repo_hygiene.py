@@ -136,6 +136,22 @@ class TrackedFilesTests(unittest.TestCase):
                 continue
             self.fail("%s is %d bytes and reads as one JSON document: a ledger under another name?" % (name, size))
 
+    def test_a_british_account_in_a_fixture_stands_under_the_made_up_sort_code(self):
+        # A Barclays export names its account in every row as "<sort code> <account>". The check of two Barclays
+        # accounts was first written with that column as a real statement has it (found and replaced on 8 October
+        # 2026). A fixture's account stands under 20-00-00, which no statement of the studio carries, so a row
+        # pasted from a real file fails here. The message names the file and not what was found in it.
+        account = re.compile(r"(?<!\d)(\d{2}-\d{2}-\d{2})[ ,;]+\d{8}(?!\d)")
+        for name in self.tracked:
+            path = path_of(name)
+            if name.startswith("vendor/") or not os.path.isfile(path) or os.path.islink(path):
+                continue
+            with open(path, "rb") as handle:
+                text = handle.read().decode("utf-8", "replace")
+            for found in account.finditer(text):
+                self.assertTrue(found.group(1) == "20-00-00",
+                                "%s holds a sort code and an account number that are not the fixtures' own" % name)
+
     def test_git_ignores_the_ledger_its_copies_design_notes_and_environment_files(self):
         must = ["data/db.json", "data/cash.json", "data/backups/db-2026-10-07.json", "backups/db-2026-10-07.json",
                 "design/notes.md", ".env", ".env.prod", ".env.local", "deploy/.env", "node_modules/x/index.js"]
