@@ -2039,12 +2039,15 @@ class WholeStandRestoreTests(DoorCase):
 
 #: A process that keeps saving on top of whatever is stored until ``wanted`` of its saves were accepted.
 #: It says "ready", waits for the gate file so that all of them start together, and prints
-#: [[revision, base], ...] of the accepted saves. argv: directory, name, wanted, gate.
+#: [[revision, base], ...] of the accepted saves. argv: directory, name, wanted, gate, now.
+#: ``now`` is the test's own clock, as for the writer that dies: the workers write into a store that
+#: stands on the test's day, whatever the day is.
 SAVING_WORKER = r'''
-import json, os, sys, time
+import datetime, json, os, sys, time
 from moneyd import store
 directory, name, wanted, gate = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
-document = store.DocStore(directory, "ledger")
+now = datetime.datetime.fromisoformat(sys.argv[5])
+document = store.DocStore(directory, "ledger", lambda: now)
 accepted = []
 print("ready", flush=True)
 deadline = time.monotonic() + 60
@@ -2105,7 +2108,8 @@ class TwoWritersTests(StoreCase):
         wanted, names = 30, ("mika", "misha", "vanya")
         gate = os.path.join(tempfile.mkdtemp(prefix="money-store-"), "go")
         self.addCleanup(shutil.rmtree, os.path.dirname(gate), True)
-        workers = [subprocess.Popen([sys.executable, "-c", SAVING_WORKER, self.dir, name, str(wanted), gate], cwd=CHECKOUT,
+        workers = [subprocess.Popen([sys.executable, "-c", SAVING_WORKER, self.dir, name, str(wanted), gate,
+                                     self.clock().isoformat()], cwd=CHECKOUT,
                                     env=child_environ(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE) for name in names]
         accepted = {}

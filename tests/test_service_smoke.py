@@ -733,6 +733,7 @@ class PageScriptTests(unittest.TestCase):
 
     def test_a_replace_first_saves_what_it_replaces_and_replaces_nothing_without_that_copy(self):
         page = self.web().render("data", firstName="Mika", entries="[]")
+        began = datetime.date.today()
         out = self.run_page(page, self.DOORS + r"""
           const NEW = '{"tx":[{"id":"n"}],"note":"новый"}';
           input.files = [file('new.json', NEW)]; await input.fire('change');
@@ -763,7 +764,9 @@ class PageScriptTests(unittest.TestCase):
           return { asked: asked, replaced: replaced, moved: moved, uncopied: uncopied,
                    fresh: { keeps: first, saved: saved.slice(), puts: puts.slice(), done: shown('data-done') } };
         """, path="/data")
-        kept = "money-ledger-before-replace-%s.json" % datetime.date.today().isoformat()
+        # The page names the copy after its own today, which is this test's unless midnight came in between.
+        names = ["money-ledger-before-replace-%s.json" % day.isoformat() for day in (began, datetime.date.today())]
+        kept = names[0] if names[0] in out["asked"]["keeps"] else names[1]
         self.assertTrue(out["asked"]["panel"])
         self.assertIn("Перед ней страница сама скачает то, что сейчас на сервере", out["asked"]["keeps"])
         self.assertIn(kept, out["asked"]["keeps"])
