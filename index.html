@@ -671,10 +671,8 @@ table.grp{min-width:560px}table.rws{min-width:620px}
       <button data-tab="today" class="active">Сегодня</button>
       <button data-tab="cash">Касса</button>
       <button data-tab="inbox">Разбор<span class="nav-count" id="inboxBadge" hidden></span></button>
-      <button data-tab="upload">Загрузка</button>
       <button data-tab="dashboard">Месяцы</button>
       <button data-tab="reports">Отчёты</button>
-      <button data-tab="ledger">Таблица</button>
       <button data-tab="settings">Настройки</button>
     </nav>
     <div class="topbar-right"><span id="sync" class="sync wait">загружаю</span></div>
@@ -1224,7 +1222,7 @@ const rowsCard=rows=>{const n=Math.min(rows.length,ui.dashRows||DASH_STEP);retur
 function renderDash(){
  const el=$("#view-dashboard"),all=months();
  if(!S.loaded)return;
- if(!all.length){el.innerHTML=`<div class="page-head"><div><h1>Месяцы</h1></div></div><div class="empty"><b>Пока нет ни одного месяца</b>Загрузите первую выписку во вкладке «Загрузка» или посмотрите, как это работает, на примере.<div style="margin-top:12px"><button class="primary" data-demo>Показать на примере</button></div></div>`;return;}
+ if(!all.length){el.innerHTML=`<div class="page-head"><div><h1>Месяцы</h1></div></div><div class="empty"><b>Пока нет ни одного месяца</b>Загрузите первую выписку или посмотрите, как это работает, на примере.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-demo class="ghost">Показать на примере</button></div></div>`;return;}
  if(!["month","quarter","year","all"].includes(ui.scope))ui.scope="month";
  // The month that is running is «Сегодня»'s to tell; this tab opens on the last one that is whole.
  const run=Live.today().slice(0,7),closed=all.filter(m=>m<run).pop();
@@ -1406,9 +1404,16 @@ function repGo(v){
  saveRep();renderReports();window.scrollTo(0,0);
 }
 
+// ---------- the three screens of «Настройки» ----------
+// «Загрузка» and «Таблица» are not in the bar: they are opened from «Настройки», by the switch the three screens
+// begin with. The bar keeps «Настройки» lit on each of them (UNDER, in the shell); their addresses, #upload and
+// #ledger, are as they were, and so is every button elsewhere that leads to one of them.
+const SETNAV=[["settings","Общие"],["upload","Загрузка выписок"],["ledger","Таблица"]];
+function setNav(cur){return `<div class="tabs2 set-nav" role="group" aria-label="Что открыть в настройках">${SETNAV.map(([k,n])=>`<button data-tabgo="${k}" aria-pressed="${k===cur}">${n}</button>`).join("")}</div>`;}
+
 // ---------- upload ----------
 function renderUpload(){
- $("#view-upload").innerHTML=`
+ $("#view-upload").innerHTML=`${setNav("upload")}
  <div class="page-head"><div><h1>Загрузка <em>выписок</em></h1><div class="page-sub">раз в неделю · все банки сразу</div></div>
   <div class="row"><button data-demo class="ghost">Показать на примере</button></div></div>
  <label class="drop" id="drop"><input type="file" id="fileIn" multiple accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" aria-label="Выбрать файлы выписок"><b>Перетащите выписки сюда</b><span class="note">или нажмите, чтобы выбрать файлы. Перетащить можно на любую страницу.<br>Wise, Barclays, Tochka, Mosta, Nebeus · CSV, Excel и PDF</span></label>
@@ -1434,7 +1439,7 @@ function ruleRows(){
 }
 function renderSettings(){
  const hs=Object.entries(S.holders);
- $("#view-settings").innerHTML=`
+ $("#view-settings").innerHTML=`${setNav("settings")}
  <div class="page-head"><div><h1>Настройки</h1><div class="page-sub">что инструмент знает о ваших деньгах</div></div></div>
  <div class="settings">
   <section class="card"><h2>Курсы валют</h2><p class="note" style="margin:0 0 12px">Таблица ведётся в фунтах. Операции в другой валюте пересчитываются по этому курсу.</p>
@@ -1508,14 +1513,14 @@ function labelList(c){const s=new Set();S.tx.forEach(r=>{if(r.c===c&&r.l)s.add(r
 // ---------- ledger ----------
 function renderLedger(){
  const el=$("#view-ledger"),qs=[...new Set(S.tx.map(r=>qOf(r.d.slice(0,7))))].sort();
- if(!qs.length){el.innerHTML=`<div class="page-head"><div><h1>Таблица</h1></div></div><div class="empty"><b>В таблице пока нет строк</b>Они появятся после разбора первой выписки.</div>`;return;}
+ if(!qs.length){el.innerHTML=`${setNav("ledger")}<div class="page-head"><div><h1>Таблица</h1></div></div><div class="empty"><b>В таблице пока нет строк</b>Они появятся после разбора первой выписки.</div>`;return;}
  if(!ui.quarter||!qs.includes(ui.quarter))ui.quarter=qs[qs.length-1];
  const rows=S.tx.filter(r=>qOf(r.d.slice(0,7))===ui.quarter).sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
  const vat=rows.filter(r=>r.c==="rev").reduce((a,r)=>a+(r.v||0),0),skipped=rows.filter(r=>r.c==="skip");
  const e=ui.edit&&S.tx.find(r=>r.id===ui.edit);
  const seen=new Set(),tj=[];skipped.forEach(r=>{if(seen.has(r.id))return;const m=r.pair?S.tx.find(q=>q.pair===r.pair&&q!==r):null;seen.add(r.id);if(m)seen.add(m.id);
   const legs=[r,m].filter(Boolean),out=legs.find(q=>q.o&&q.o.a<0),inn=legs.find(q=>q!==out&&(!q.o||q.o.a>0));tj.push({r,m,out,inn});});
- el.innerHTML=`
+ el.innerHTML=`${setNav("ledger")}
  <div class="page-head"><div><h1>Таблица</h1><div class="page-sub">один период на экране, как отдельный лист в Google Sheets</div></div></div>
  <div class="bar"><div class="row"><span class="lbl">VAT PERIOD</span>${qs.slice().reverse().map(q=>`<button class="chip${q===ui.quarter?" active":""}" data-q="${q}" aria-pressed="${q===ui.quarter}">${qLabel(q)}</button>`).join("")}
   <span class="note">TOTAL VAT</span><b class="mono">${fmt(vat,2)}</b></div></div>
@@ -5157,7 +5162,9 @@ Plan.watch(()=>Ed.settingsDraw());
 
 // ---------- shell ----------
 const TABS=["today","cash","inbox","upload","dashboard","reports","ledger","settings"];
-function setTab(t){ui.tab=t;Ed.close();document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===t);b.setAttribute("aria-current",b.dataset.tab===t?"page":"false");});
+// A screen that has no button in the bar lights the one it is opened from.
+const UNDER={upload:"settings",ledger:"settings"};
+function setTab(t){ui.tab=t;Ed.close();const lit=UNDER[t]||t;document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===lit);b.setAttribute("aria-current",b.dataset.tab===lit?"page":"false");});
  TABS.forEach(v=>$("#view-"+v).hidden=v!==t);
  try{history.replaceState(null,"","#"+t);}catch(e){}
  window.scrollTo(0,0);
@@ -5170,7 +5177,8 @@ const inboxRow=el=>{const h=el.closest("[data-id]");return h?S.inbox.find(q=>q.i
 document.addEventListener("click",ev=>{
  const t=ev.target,c=s=>t.closest(s);let x,r;
  if((x=c("[data-tab]"))){ev.preventDefault();return setTab(x.dataset.tab);}
- if((x=c("[data-tabgo]")))return setTab(x.dataset.tabgo);
+ // The switch of «Настройки» is drawn anew in the screen it opens: the keyboard stays on the button that was pressed.
+ if((x=c("[data-tabgo]"))){setTab(x.dataset.tabgo);if(x.closest(".set-nav")){const b=$(`#view-${ui.tab} .set-nav [aria-pressed="true"]`);if(b)b.focus({preventScroll:true});}return;}
  if(c("[data-demo]"))return demo();
  if(c("#demoOff"))return demoOff();
  if(c("#toastUndo")){$("#toast").hidden=true;const f=toast.back;toast.back=null;return f?f():undo();}
