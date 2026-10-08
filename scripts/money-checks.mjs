@@ -2214,7 +2214,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
     });
     ok(r.wide <= w && r.win === w, `${w}px: the page does not scroll sideways`, r);
     ok(r.tab[0] >= 0 && r.tab[1] <= w && r.badge <= w && r.badgeW > 0, `${w}px: «Разбор» and its counter are inside the screen`, r);
-    ok(r.two && r.need < r.chart && r.chartH <= 200, `${w}px: the five figures under «Аналитика» stand two to a row, «Нужно решить» above the chart, the chart no taller than 190`, r);
+    ok(r.two && r.need < r.chart && r.chartH <= 200, `${w}px: the five figures stand two to a row, «Нужно решить» above the chart, the chart no taller than 190`, r);
     await holds(ph, `${w}px`);
     await calm(ph, `${w}px`);
     // The widest things the screen can hold: a row's card, the sheet of balances, «Добавить».
@@ -3611,10 +3611,10 @@ await run('phone', 'a phone, 375 and 390 wide: nothing scrolls sideways, and the
     await ph.waitForSelector('#view-today [data-live="verdict"]');
     const r = await ph.evaluate(() => {
       const top = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top + window.scrollY) : -1; };
-      return { wide: document.documentElement.scrollWidth, order: ['.td-verdict', '.td-acc', '.td-month', '.td-free', '.td-need', '[aria-label="Ближайшие дни"]', '.kpis', '#td-chart', '.td-tax'].map((s) => top('#view-today ' + s)), bv: getComputedStyle(document.querySelector('#view-today .td-bv')).fontSize, say: getComputedStyle(document.querySelector('#view-today .td-fsay')).fontSize };
+      return { wide: document.documentElement.scrollWidth, order: ['.td-verdict', '.kpis', '.td-acc', '.td-month', '.td-free', '.td-need', '[aria-label="Ближайшие дни"]', '#td-chart', '.td-tax'].map((s) => top('#view-today ' + s)), bv: getComputedStyle(document.querySelector('#view-today .td-bv')).fontSize, say: getComputedStyle(document.querySelector('#view-today .td-fsay')).fontSize };
     });
     ok(r.wide <= w, `${w}px: «Сегодня» does not scroll sideways`, r);
-    ok(r.order.every((t, i) => t > 0 && (!i || t > r.order[i - 1])), `${w}px: the sentence, the accounts, the month, «Можно вывести», what needs deciding, the plan by weeks, and under «Аналитика» the five figures, the chart and «Налоги» — in that order, one under another`, r.order);
+    ok(r.order.every((t, i) => t > 0 && (!i || t > r.order[i - 1])), `${w}px: the sentence, the five figures, the accounts, the month, «Можно вывести», what needs deciding, the plan by weeks, and under «Аналитика» the chart and «Налоги» — in that order, one under another`, r.order);
     ok(parseFloat(r.bv) >= 20 && parseFloat(r.say) >= 16, `${w}px: the type is not shrunk to fit — the month's figures are ${r.bv}, the answer of «Можно вывести» ${r.say}`);
     await holds(ph, `${w}px, the plan of test 2`);
     await calm(ph, `${w}px, the plan of test 2`);
@@ -4684,8 +4684,8 @@ await run('rv-layout', '«Сегодня» from the top: where the money is, the
   let S = await holds(pg, 'the made-up studio, as it opens');
   const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
   const order = [];
-  for (const sel of ['.td-verdict', '.td-acc', '.td-month', '[aria-label="Ближайшие дни"]', '.td-anl']) order.push(await top(sel));
-  ok(order.every((t, i) => !i || t > order[i - 1]) && (await top('.td-free')) === (await top('.td-month')) && (await top('.td-need')) === (await top('[aria-label="Ближайшие дни"]')), 'from the top: the sentence, «Счета», then the month beside «Можно вывести», then the plan beside «Нужно решить», then «Аналитика»', order);
+  for (const sel of ['.td-verdict', '.kpis', '.td-acc', '.td-month', '[aria-label="Ближайшие дни"]', '.td-anl']) order.push(await top(sel));
+  ok(order.every((t, i) => !i || t > order[i - 1]) && (await top('.td-free')) === (await top('.td-month')) && (await top('.td-need')) === (await top('[aria-label="Ближайшие дни"]')), 'from the top: the sentence, the five figures, «Счета», then the month beside «Можно вывести», then the plan beside «Нужно решить», then «Аналитика»', order);
   // «Счета»: one account to a line — what is on it, in pounds, and what the figure rests on; the last line is the money now
   const rows = await pg.$$eval('#view-today .td-accs .td-ar', (l) => l.map((r) => [...r.children].map((c) => c.textContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())));
   same([rows[0], rows[1], rows[2], rows[4], rows[rows.length - 1].slice(0, 3), rows.length], [['Счёт', 'На счёте', 'В фунтах', 'На чём стоит цифра'], ['Wise GBP', '£21,480', '£21,480', 'вписан 4 окт, Mika'], ['Wise USD', '$6,620', '£4,904', 'вписан 4 окт, Mika'], ['Tochka RUB', '₽654,000', '£5,542', 'вписан 4 окт, Mika'], ['Денег на 4 окт', '', '£54,230'], 7],
@@ -4713,9 +4713,9 @@ await run('rv-layout', '«Сегодня» from the top: where the money is, the
   await pg.click('#view-today [data-td-flip="all"]');
   same((await weeks()).map((w) => w.split(' | ')[0]).join(' '), 'true false false false false', '… and «Свернуть недели» is the page as it opens');
   // «Аналитика»: folded until asked for, and remembered
-  same([await pg.$eval('#view-today .td-anl', (e) => e.open), await text(pg, '#view-today .td-anl > summary'), await pg.isVisible('#td-chart'), await pg.$$eval('#view-today .td-anl .kpi .lbl', (l) => l.map((e) => e.textContent.replace(/\u00a0/g, ' ')))],
-    [false, 'Аналитикапять цифр · остаток по дням · налоги', false, ['Придёт за 30 дней', 'Уйдёт за 30 дней', 'Нижняя точка', 'Ждём и не пришло', 'Можно вывести · на 4 окт']],
-    '«Аналитика» is one line at the foot of the page — the five other figures, the chart and the taxes are under it, out of the way');
+  same([await pg.$eval('#view-today .td-anl', (e) => e.open), await text(pg, '#view-today .td-anl > summary'), await pg.isVisible('#td-chart'), await pg.$$eval('#view-today .td-anl .kpi', (l) => l.length), await pg.$$eval('#view-today .td-verdict + .kpis .kpi .lbl', (l) => l.map((e) => e.textContent.replace(/\u00a0/g, ' ')))],
+    [false, 'Аналитикаостаток по дням · налоги', false, 0, ['Придёт за 30 дней', 'Уйдёт за 30 дней', 'Нижняя точка', 'Ждём и не пришло', 'Можно вывести · на 4 окт']],
+    '«Аналитика» is one line at the foot of the page, with the chart and the taxes under it; the five figures stand right under the sentence, in sight (they were under the fold for an evening, and Mika asked for them back)');
   await pg.click('#view-today .td-anl > summary');
   await pg.waitForSelector('#td-chart path, #td-chart polyline');
   await pg.waitForFunction(() => localStorage.getItem('selfstudio-money-analytics') === '1');
