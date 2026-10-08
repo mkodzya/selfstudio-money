@@ -1680,6 +1680,10 @@ const Cash=(()=>{
    if(r.fixed)z.fixed=true;return z;});});
   V2DOC.forEach(f=>{if(X[f]!==undefined)out[f]=X[f];});
   const P=stamp(Live.upgrade(out,ledgerDoc(),Live.today()));
+  // A repeat of one month — this month or a later one — as a plan saved before 8 October 2026 may hold it, is read
+  // as the ordinary row it is. Like the stamp above it is not a save: it goes to the server with the founder's
+  // next change.
+  Live.single(P,Live.today().slice(0,7));
   // The upgrade gives every row of an old plan an id. A row of a new plan without one cannot be told from its
   // neighbour, so it gets one here.
   LISTS.forEach(k=>P[k].forEach(r=>{if(r.id==null||r.id==="")r.id=uid();}));
@@ -2285,7 +2289,10 @@ const Cash=(()=>{
    cu.line={row:it.id,kind:"tick",tw,sig:sig()};toast(`${it.name||"Строка"}: каждый месяц, с ${monG(it.ym)}`,()=>popUndo());}
   else if(!on&&it.src==="occ"){
    if(!Plan.edit(`${it.name||"строка"}: повтор до ${monG(it.occ.ym)}`,P=>{Live.write.untick(P,it);}))return;
-   cu.line={row:it.row,kind:"untick",ym:it.occ.ym,sig:sig()};toast(`Повтор закончится после ${monG(it.occ.ym)}`,()=>popUndo());}
+   // Taken off the row's first month, the tick leaves an ordinary row: there is no repeat to bring back, only
+   // the tick to put on again.
+   if((anyRow(it.row)||{}).rec){cu.line={row:it.row,kind:"untick",ym:it.occ.ym,sig:sig()};toast(`Повтор закончится после ${monG(it.occ.ym)}`,()=>popUndo());}
+   else toast(`${it.name||"Строка"}: больше не повторяется`,()=>popUndo());}
   // The tick put back on the last month of a repeat that was ended: it goes on.
   else if(on&&it.src==="occ"&&it.occ.last){if(!Plan.edit(`${it.name||"строка"}: повтор продолжается`,P=>{Live.write.resume(P,it);}))return;toast("Повтор продолжается",()=>popUndo());}
   draw();
@@ -2479,6 +2486,8 @@ const Cash=(()=>{
 //  Live.upgrade(plan, ledger, T) → plan             a v1 or v2 plan as v3; a v3 one in shape. Pure: a copy comes back.
 //                                                   The ledger and T are read only for a v2 plan (see THE UPGRADE)
 //  Live.blank(ids) → plan                           a new v3 plan: five accounts (ids[0..4]) and the two tax rules
+//  Live.single(plan, "YYYY-MM") → n                  every repeat of one month, that month or a later one, made the
+//                                                   ordinary row it is; changes the plan it is handed, returns how many
 //  Live.today() → "YYYY-MM-DD"                      the date in London, read from the clock on every call
 //  Live.day(ms) → "YYYY-MM-DD"                      the date in London of a stored moment (a row's c0, a balance's at)
 //  Live.passed(model, accountKey, asOf) → [{id, tick:false, on}]   the list for «Что из этого уже прошло?» (below)
@@ -2600,7 +2609,11 @@ const Cash=(()=>{
 //  tick(P, it)                     «каждый месяц» on a row: rec:{day, from} from its date; a mark or a link it had
 //                                  moves to x[from]; and x[ym].off for every later month that already holds a row of
 //                                  the same label (it.twins) — that month would be counted twice
-//  untick(P, it) / resume(P, it)   the tick taken off a month: rec.to = that month · «Вернуть»: rec.to removed
+//  untick(P, it) / resume(P, it)   the tick taken off a month: rec.to = that month · «Вернуть»: rec.to removed.
+//                                  A repeat left with one month — the tick taken off its first month, or
+//                                  «{ноябрь} и дальше» of a delete in its second — is an ordinary row again: rec
+//                                  goes, and what x[from] held is the row's own (Live.single does the same for a
+//                                  plan saved before this rule)
 //  onward(P, it, v, id, now, by)   «{Октябрь} и дальше»: on the row's first month the row itself changes; later the
 //                                  row is split — the old one gets to = the month before, a copy with id `id`, the
 //                                  new values, the same c0, rec.from = this month, rec.chain and the x of this month
@@ -4039,6 +4052,20 @@ const Live=(()=>{
  // as a new row of that name is (add) — or the constructor kept it, and its sum, under «Налоги» while every
  // figure counted it as dividends.
  const personal=(P,h)=>{if(h.k!=="taxes")return;const f=owner({c:"tax",l:h.r.name});if(!f)return;const r=h.r;r.ptax=true;r.f=f;r.blk="div";delete r.of;P.taxes.splice(P.taxes.indexOf(r),1);if(!Array.isArray(P.div))P.div=[];P.div.push(r);};
+ // A repeat left with one month is a row of that month and nothing more, so it goes back to being one: its date,
+ // and whatever was said of that month — a sum of its own, a mark, a link — on the row itself (what `tick` moved
+ // into x[from], moved back). A row another row continues (rec.chain names it) stays as it is: the two are one
+ // payment through time. Returns whether the row was changed.
+ const flat=(P,r)=>{const rec=r&&r.rec;if(!obj(rec)||!isM(rec.from)||rec.to!==rec.from||rec.chain!=null||LISTS.some(k=>(P[k]||[]).some(q=>q&&obj(q.rec)&&q.rec.chain!=null&&String(q.rec.chain)===String(r.id))))return false;
+  const x=obj(rec.x)&&obj(rec.x[rec.from])?rec.x[rec.from]:{};
+  r.date=isD(x.date)?x.date:dayIn(rec.from,Math.max(1,+rec.day||1));if(x.amt!=null&&isFinite(+x.amt))r.amt=+x.amt;
+  ["paid","tx","closed"].forEach(f=>{if(x[f]!==undefined)r[f]=x[f];});if(x.notx!==undefined)r.notx=arr(r.notx).concat(arr(x.notx));if(x.off)r.on=false;
+  delete r.rec;return true;};
+ // Every such row of the month `ym` or later: what a plan saved before 8 October 2026 may still hold. A month that
+ // has gone by is left as it was written — a payout of a repeat that never came is `missed` and in no figure, the
+ // same payout as a row of its own would be late and counted, and reading a plan must not move a figure. Changes
+ // the plan it is handed.
+ const single=(P,ym)=>{let n=0;LISTS.forEach(k=>(P[k]||[]).forEach(r=>{if(r&&obj(r.rec)&&isM(ym)&&r.rec.from>=ym&&flat(P,r))n++;}));return n;};
  const write={
   // A new row. A tax with a founder in its name is a personal tax and is stored in «Дивиденды»; every inflow says
   // whether its invoice carries VAT; a tax row says what it is (`of`) — an extra bill unless told otherwise.
@@ -4105,8 +4132,10 @@ const Live=(()=>{
    (it.twins||[]).forEach(t=>{x[t.ym]={off:true};});
    ["paid","tx","closed"].forEach(f=>{if(r[f]!==undefined){e[f]=r[f];delete r[f];}});
    r.rec={day:+r.date.slice(8),from:r.date.slice(0,7)};if(Object.keys(e).length)x[r.rec.from]=e;if(Object.keys(x).length)r.rec.x=x;return r;},
-  // R5. The tick taken off a month ends the repeat after that month — on its first month too. `resume` undoes it.
-  untick(P,it){const h=rowIn(P,it.row);if(h&&obj(h.r.rec))h.r.rec.to=it.occ.ym;},
+  // R5. The tick taken off a month ends the repeat after that month; `resume` undoes it. Taken off the row's
+  // first month it leaves that one month, and a repeat of one month is an ordinary row again (flat) — the way back
+  // is then the tick itself.
+  untick(P,it){const h=rowIn(P,it.row);if(h&&obj(h.r.rec)){h.r.rec.to=it.occ.ym;flat(P,h.r);}},
   resume(P,it){const h=rowIn(P,it.row);if(h&&obj(h.r.rec))delete h.r.rec.to;},
   // R4. «{Октябрь} и дальше»: from the row's first month the row itself is changed. From any later month the row
   // is SPLIT — the old one ends the month before, and a copy with a new id, the new values, the same c0 and the
@@ -4125,7 +4154,7 @@ const Live=(()=>{
   same(P,it,id,now,by){return write.onward(P,{row:it.row,occ:{ym:ymAdd(it.occ.ym,1)}},{amt:r2(it.done.got/(it.factor||1))},id,now,by);},
   // «…и дальше» of a delete, of «Не придёт» and of «Не платим»: the repeat ends before this month (the row itself
   // goes if this was its first). `stop` is card 10's «Больше не повторять»: this month is the last and is off.
-  end(P,it){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return;if(it.occ.ym<=h.r.rec.from)P[h.k].splice(h.i,1);else h.r.rec.to=ymAdd(it.occ.ym,-1);},
+  end(P,it){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return;if(it.occ.ym<=h.r.rec.from)P[h.k].splice(h.i,1);else{h.r.rec.to=ymAdd(it.occ.ym,-1);flat(P,h.r);}},
   stop(P,it){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return;h.r.rec.to=it.occ.ym;const s=slot(P,it,true);if(s)s.off=true;},
   // C7.6. The helper's ticked lines become rows a founder owns. A line is model.helper.lines[i], with its amt,
   // day and start as the founder left them; ids[i] is the new row's id. Every month from the start on that
@@ -4171,7 +4200,7 @@ const Live=(()=>{
  // one the rule answers for — which is what rule.from has to become. `rule` is model.taxes.rules[i].
  const perAt=(per,key)=>perOf(per,key.length===4?key+"-12":key[4]==="Q"?key.slice(0,4)+"-"+pad(+key[5]*3):key);
  const fromOf=(rule,k)=>rule&&rule.first?dueOf(rule,perStep(rule.per,perAt(rule.per,String(rule.first)),k)):"";
- return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,day:dayOf,LISTS,perName};
+ return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,perName};
 })();
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
@@ -4458,9 +4487,12 @@ const Ed=(()=>{
  // закончится после {ноября}» — and putting it back on carries the repeat on; on the months before it, «по {ноябрь}».
  const recNote=(date,occ)=>occ?(occ.last?`повтор закончится после ${monG(occ.ym)}`:`${occ.day}-го числа, с ${monG(occ.from)}${occ.until?`, по ${mon(occ.until)}`:""}`):date?`${+date.slice(8)}-го числа, с ${monG(date.slice(0,7))}`:"нужна дата";
  const ticked=it=>it.src==="occ"&&!it.occ.last;
+ // The first month of a repeat: with the tick taken off here nothing of the repeat is left but this month, and the
+ // row is an ordinary one again (Live.write.untick). The card says that, not «закончится после {октября}».
+ const lone=it=>it.src==="occ"&&it.occ.ym===it.occ.from&&it.occ.chain===it.row;
  // What saves the card of a month of a «каждый месяц» row: this month alone, or this month and every month after
  // it. With the tick taken off there is one thing to save, and the button says what it does.
- const saves=(it,on)=>!on&&ticked(it)?`<button class="sm primary" data-ed-save="only">Закончить после ${monG(it.occ.ym)}</button>`
+ const saves=(it,on)=>!on&&ticked(it)?`<button class="sm primary" data-ed-save="only">${lone(it)?"Убрать повтор":`Закончить после ${monG(it.occ.ym)}`}</button>`
   :it.occ.last?'<button class="sm primary" data-ed-save="only">Сохранить</button>'
   :`<button class="sm primary" data-ed-save="only">Только ${mon(it.occ.ym)}</button><button class="sm" data-ed-save="onward">${MONF[+it.occ.ym.slice(5)-1]} и дальше</button>`;
  function fields(v,o){
@@ -4515,7 +4547,7 @@ const Ed=(()=>{
   const onward=was&&mode==="onward"&&v.mon,tw=ch.mon&&v.mon&&!was?twins(it.list,v.name,(v.date||it.date).slice(0,7)):[];
   // The end of a repeat, and its return, are said in the words the constructor uses for them.
   const moved=ch.name&&it.list==="taxes"&&!tax&&!!owner({c:"tax",l:v.name});
-  const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)
+  const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)
    :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}`;
   if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(left?" · «Частично» не записано — ответьте на него заново":""),back);
  }
@@ -4839,7 +4871,7 @@ const Ed=(()=>{
    if(f("vat"))note("vat",vatNote(f("amt").value,f("cur").value,f("vat").checked));
    if(t.dataset.edF==="date"&&it&&it.src==="row")note("monthly",recNote(t.value,null));
    // The tick of a month taken off, or put back: the note and the buttons say what saving will now do.
-   if(t.dataset.edF==="monthly"&&it&&it.src==="occ"){note("monthly",t.checked?recNote("",Object.assign({},it.occ,{last:false,until:it.occ.last?"":it.occ.until})):`повтор закончится после ${monG(it.occ.ym)}`);const b=q(card,"[data-ed-saves]");if(b)b.innerHTML=saves(it,t.checked);}
+   if(t.dataset.edF==="monthly"&&it&&it.src==="occ"){note("monthly",t.checked?recNote("",Object.assign({},it.occ,{last:false,until:it.occ.last?"":it.occ.until})):lone(it)?"строка больше не будет повторяться":`повтор закончится после ${monG(it.occ.ym)}`);const b=q(card,"[data-ed-saves]");if(b)b.innerHTML=saves(it,t.checked);}
    return;}
   const box=t.closest("[data-ed-acct]");if(box){if(t.matches("[data-ed-bamt],[data-ed-bdate]"))touch(box);else drift(box);}
  });

@@ -1095,12 +1095,24 @@ await run('p5', '«каждый месяц»: this month, this month and onward,
   M = await C(L, Q, T, H60);
   same([M.OUT, item(M, 'rB@2026-10').amt, item(M, 'rB@2026-11'), item(M, 'rB2@2026-11').occ.chain, M.helper.have.slice().sort(), M.helper.lines.some((l) => l.label === 'Person B')], [19400, 6000, null, 'rB', ['Client A', 'Client R', 'Tool S', 'Person B', 'HMRC Mika'].sort(), false],
     '… OUT 19,400, October\'s item is unchanged, every month has one occurrence, and the helper shows Person B under «Уже в плане»');
-  // the tick taken off October
+  // the tick taken off October, the row's first month: one month is all that is left of the repeat, and a repeat of
+  // one month is an ordinary row (Mika, 8 October 2026: such a row kept its name locked and said «повтор закончится»)
   Q = await wr(P, 'untick', oct);
-  same(Q.team[0].rec, { day: 20, from: '2026-10', to: '2026-10' }, 'the tick taken off October\'s month: the repeat ends after it');
+  same(['rec' in Q.team[0], Q.team[0].date, Q.team[0].amt], [false, '2026-10-20', 6000], 'the tick taken off the row\'s first month: nothing repeats any more, so the row is an ordinary row of that month again — no rec');
   M = await C(L, Q, T, H60);
-  same([M.OUT, M.items.filter((it) => it.row === 'rB').map((it) => it.id)], [12400, ['rB@2026-10']], '… OUT 12,400, the row lives in that one month');
-  same((await wr(Q, 'resume', oct)).team[0].rec, { day: 20, from: '2026-10' }, '… and «Вернуть» lets it go on');
+  same([M.OUT, M.items.filter((it) => it.row === 'rB').map((it) => [it.id, it.src].join(' '))], [12400, ['rB row']], '… OUT 12,400, and it is one item: the row itself');
+  // … and what had been said of that one month is the row's own again
+  Q = await wr(await wr(await wr(P, 'set', oct, { amt: 6500, date: '2026-10-22' }, TAP, BY), 'mark', oct, T, TAP, BY), 'untick', oct);
+  same(['rec' in Q.team[0], Q.team[0].amt, Q.team[0].date, Q.team[0].paid], [false, 6500, '2026-10-22', { on: T, at: TAP, by: BY }], '… with the sum, the day and the «оплачено» that had been that month\'s alone');
+  // taken off a later month, the repeat ends after it and can be brought back
+  Q = await wr(P, 'untick', nov);
+  same(Q.team[0].rec, { day: 20, from: '2026-10', to: '2026-11' }, 'the tick taken off November\'s month: the repeat ends after it');
+  M = await C(L, Q, T, H60);
+  same(M.items.filter((it) => it.row === 'rB').map((it) => it.id), ['rB@2026-10', 'rB@2026-11'], '… the row lives in those two months');
+  same((await wr(Q, 'resume', nov)).team[0].rec, { day: 20, from: '2026-10' }, '… and «Вернуть» lets it go on');
+  // «Ноябрь и дальше» of a delete leaves October alone — the same ordinary row
+  Q = await wr(P, 'end', nov);
+  same([Q.team.length, 'rec' in Q.team[0], Q.team[0].date], [1, false, '2026-10-20'], '«ноябрь и дальше» of a delete: October is all that is left, and the row is an ordinary row of October');
   // November switched off
   Q = await wr(P, 'off', nov);
   same(Q.team[0].rec.x, { '2026-11': { off: true } }, 'November switched off for itself');
@@ -2399,8 +2411,8 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   S = await holds(pg, 'November\'s Person B switched off');
   same([S.P.team[0].rec.x, item(S.M, 'rB@2026-11').state, item(S.M, 'rB@2026-12').state], [{ '2026-11': { off: true } }, 'off', 'due'], '«только ноябрь» on November\'s Person B: that month is off, December stays');
   await editRow(pg, 'rS@2026-11', { monthly: false });
-  S = await holds(pg, 'Tool S ends after November');
-  same([S.P.other[0].rec, S.M.items.filter((x) => x.row === 'rS').map((x) => x.id)], [{ day: 3, from: '2026-11', to: '2026-11' }, ['rS@2026-11']], '«каждый месяц» unticked on Tool S\'s November: the repeat ends after that month');
+  S = await holds(pg, 'Tool S no longer repeats');
+  same(['rec' in S.P.other[0], S.P.other[0].date, S.M.items.filter((x) => x.row === 'rS').map((x) => x.id), await toastText(pg)], [false, '2026-11-03', ['rS'], 'Tool S: больше не повторяется'], '«каждый месяц» unticked on Tool S\'s November, the month it starts: nothing repeats, so it is an ordinary row of 3 November again — and the page says «больше не повторяется»');
   // The tax the page worked out: its card, and «Сумма по декларации».
   const vat = 't|vat|2026Q3';
   await openRow(pg, vat);
@@ -2953,12 +2965,14 @@ await run('p5 on screen', '«каждый месяц» through the real controls
   same([S.P.team.length, a.id, a.amt, a.rec.to, b.amt, b.rec.from, b.rec.chain, S.fig('out'), item(S.M, 'rB@2026-10').amt, S.M.helper.have.includes('Person B'), S.M.helper.lines.length], [2, 'rB', 6000, '2026-10', 7000, '2026-11', 'rB', 19400, 6000, true, 0],
     '«Ноябрь и дальше», 7,000: two rows of one chain — the old one ends with October, the new one takes over from November — OUT 19,400, October\'s line untouched, and the helper still knows Person B is in the plan');
   await undo(pg);
-  // The tick taken off October ends the repeat after it.
+  // The tick taken off October, the row's first month: the card says the row will not repeat, and it becomes an
+  // ordinary row.
   await openRow(pg, 'rB@2026-10');
   await fill(pg, 'row', { monthly: false });
+  same([await text(pg, K('row') + '[data-ed-n="monthly"]'), await texts(pg, K('row') + '[data-ed-save]')], ['строка больше не будет повторяться', ['Убрать повтор']], 'the tick taken off in the card of the row\'s first month: «строка больше не будет повторяться», and one button, «Убрать повтор» — there is no «после октября» to end it after');
   await save('only');
   S = await holds(pg, '«каждый месяц» unticked on October');
-  same([S.P.team[0].rec, S.fig('out')], [{ day: 20, from: '2026-10', to: '2026-10' }, 12400], '«каждый месяц» unticked on October\'s month: the repeat ends after October, OUT 12,400');
+  same(['rec' in S.P.team[0], S.P.team[0].date, S.fig('out'), await toastText(pg)], [false, '2026-10-20', 12400, 'Person B: больше не повторяется'], '«каждый месяц» unticked on October\'s month: an ordinary row of 20 October, OUT 12,400');
   await undo(pg);
   // «Не платим» on November: this month only.
   await tapRow(pg, 'rB@2026-11', 'skip');
@@ -3025,10 +3039,18 @@ await run('repeat', '«каждый месяц» is a plain control on every kin
   same([stored(S, 'o1').rec, await text(pg, '#cs-sec-other tr.cs-line'), await listed(pg, 'other')], [{ day: 12, from: '2026-10' }, 'Повторяется каждый месяц, 12-го числа.', ['o1@2026-10']], 'ticked on «Thing N»: the row repeats on the 12th from October, and the line under it says so');
   await pg.click(box('other', 'o1@2026-10', 'rec'));
   S = await holds(pg, 'the tick taken off', 'cash');
-  same([stored(S, 'o1').rec, await text(pg, '#cs-sec-other tr.cs-line')], [{ day: 12, from: '2026-10', to: '2026-10' }, 'Вернуть повтор'], 'taken off: the row says «повтор закончится после октября», and the line under it offers [Вернуть повтор]');
+  same(['rec' in stored(S, 'o1'), stored(S, 'o1').date, await pg.$('#cs-sec-other tr.cs-line'), await listed(pg, 'other'), !!(await pg.$(box('other', 'o1', 'name'))), await toastText(pg)], [false, '2026-10-12', null, ['o1'], true, 'Thing N: больше не повторяется'],
+    'taken off in the month it was put on: nothing repeats, so «Thing N» is the ordinary row it was — its name in a box again, no «повтор закончится», and nothing to bring back but the tick itself');
+  // Taken off a later month, the repeat ends after that month, and the line under the row is the way back.
+  await pg.click(box('other', 'o1', 'rec'));
+  await toMonth(pg, '2026-11');
+  await pg.click(box('other', 'o1@2026-11', 'rec'));
+  S = await holds(pg, 'the tick taken off November', 'cash');
+  same([stored(S, 'o1').rec, await text(pg, '#cs-sec-other tr.cs-line')], [{ day: 12, from: '2026-10', to: '2026-11' }, 'Вернуть повтор'], 'taken off November: the row says «повтор закончится после ноября», and the line under it offers [Вернуть повтор]');
   await pg.click('#cs-sec-other tr.cs-line [data-cs-resume]');
   S = await holds(pg, '[Вернуть]', 'cash');
   same(stored(S, 'o1').rec, { day: 12, from: '2026-10' }, '[Вернуть]: the repeat goes on');
+  await toMonth(pg, '2026-10');
   // A sum typed into a month of a row that repeats is that month's alone — and «И дальше так же» makes it the row's.
   await pg.fill(box('team', 'rB@2026-10', 'amt'), '6100');
   await leave(pg);
@@ -4498,8 +4520,8 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
 await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
   // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
   // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
-  // whose repeat ends with October (Person L).
-  const pg = await scene('the cross', ledA(), planW({ team: [row('g', 'Person G', 1000, '2026-10-08'), every('rL', 'Person L', 500, 15, '2026-10', { rec: { day: 15, from: '2026-10', to: '2026-10' } })] }), { H: 60 });
+  // whose repeat, begun in September, ends with October (Person L).
+  const pg = await scene('the cross', ledA(), planW({ team: [row('g', 'Person G', 1000, '2026-10-08'), every('rL', 'Person L', 500, 15, '2026-09', { rec: { day: 15, from: '2026-09', to: '2026-10' } })] }), { H: 60 });
   await pg.click('.nav [data-tab="cash"]');
   const X = (id) => `#cs-sec-team tr[data-cs-id="${id}"] [data-ed-do="del"]`, team = () => pg.evaluate(() => window.__cash.state().team.map((r) => [r.id, r.rec && r.rec.x ? JSON.stringify(r.rec.x) : ''].join(' ')));
   same([await pg.$$eval('#cs-sec-team tr[data-cs-id] [data-ed-do="del"]', (l) => l.length), await pg.$$eval('#cs-sec-taxes tr[data-cs-id] [data-ed-do="del"]', (l) => l.length)], [3, 0], 'every row a founder wrote ends with a cross; a tax the page works out has none — it is not a row to take away');
@@ -4520,6 +4542,39 @@ await run('rv-x', 'a row of the plan is taken away by the cross at its end: one 
   await pg.click('[data-ed-card="row"] [data-ed-go="del-only"]');
   await saved(pg);
   same((await team()).find((r) => r.startsWith('rB')), 'rB {"2026-10":{"off":true}}', '«только октябрь» takes October out of the repeat and leaves the months after it');
+  await finish(pg);
+});
+
+await run('rv-one', 'a repeat left with one month is an ordinary row: its name can be typed, and nothing says a repeat will end', async () => {
+  // Mika, 8 October 2026: «почему я у кого-то могу менять имя, а у кого-то нет». The rows whose name was locked had
+  // been ticked «каждый месяц» and unticked in the same month: a repeat of October alone, which the page drew as a
+  // month of a repeat — the name as text, «повтор закончится после октября» under it. The plan here is stored the
+  // way his was: Person L repeats for October alone, with a sum and a day of that month's own; Person K for
+  // September alone, a month that has gone by; Person N repeats on.
+  const pg = await scene('one month', ledA(), planW({ team: [
+    every('rL', 'Person L', 500, 15, '2026-10', { rec: { day: 15, from: '2026-10', to: '2026-10', x: { '2026-10': { amt: 550, date: '2026-10-16' } } } }),
+    every('rK', 'Person K', 400, 15, '2026-09', { rec: { day: 15, from: '2026-09', to: '2026-09' } }),
+    every('rN', 'Person N', 300, 10, '2026-10')] }), { H: 60 });
+  await pg.click('.nav [data-tab="cash"]');
+  const at = (id) => pg.evaluate((id) => { const r = window.__cash.state().team.find((r) => r.id === id); return !r ? 'gone' : [r.rec ? JSON.stringify(r.rec) : 'a row', r.date, r.amt].join(' | '); }, id);
+  const of = (id) => { const r = store.cash.doc.team.find((r) => r.id === id); return !r ? 'gone' : [r.rec ? JSON.stringify(r.rec) : 'a row', r.name, r.date, r.amt].join(' | '); };
+  await sleep(800);
+  same([await at('rL'), await at('rK'), store.cash.puts], ['a row | 2026-10-16 | 550', '{"day":15,"from":"2026-09","to":"2026-09"} | 2026-09-15 | 400', 0],
+    'a plan stored with a repeat of October alone is read as the ordinary row it is — with the sum and the day that month had; a month that has gone by is left as it was written; and opening the page saves nothing');
+  const list = await listed(pg, 'team');
+  same([list.includes('rL'), list.includes('rL@2026-10'), !!(await pg.$(box('team', 'rL', 'name'))), await pg.isChecked(box('team', 'rL', 'rec')), (await text(pg, cs('team', 'rL') + ' [data-cs-rm]')).includes('повтор')], [true, false, true, false, false],
+    '«Касса»: Person L is a row of October like any other — the name in a box, «каждый месяц» not ticked, and nothing under it about a repeat that will end');
+  // … so the name can be typed, and the row goes to the server as an ordinary row with that change
+  await pg.fill(box('team', 'rL', 'name'), 'Person M');
+  await leave(pg);
+  same([await saved(pg), of('rL'), store.cash.puts > 0], [true, 'a row | Person M | 2026-10-16 | 550', true], 'a new name typed into it is saved: «Person M», an ordinary row of 16 October');
+  // «ноябрь и дальше» of a delete in a repeat's second month leaves its first month alone: the same ordinary row
+  await toMonth(pg, '2026-11');
+  await pg.click(cs('team', 'rN@2026-11') + ' [data-ed-do="del"]');
+  await pg.click('[data-ed-card="row"] [data-ed-go="del-onward"]');
+  await saved(pg);
+  await toMonth(pg, '2026-10');
+  same([of('rN'), !!(await pg.$(box('team', 'rN', 'name'))), await pg.$(cs('team', 'rN@2026-10'))], ['a row | Person N | 2026-10-10 | 300', true, null], 'Person N, taken away from November on: October is all that is left of it, and it is an ordinary row of 10 October');
   await finish(pg);
 });
 
