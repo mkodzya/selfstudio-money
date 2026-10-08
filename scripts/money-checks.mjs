@@ -2226,7 +2226,7 @@ await run('26 on screen', 'day one: an account in use without a balance, and typ
   same([await text(pg, '#view-today .td-say'), S.live.now.t, (await texts(pg, '#view-today .kpi .lbl'))[2], await text(pg, '#view-today .td-at .td-tw'), await pg.$eval('#view-today .td-need .op', (e) => e.dataset.tdCard)],
     ['Нет остатка: Barclays GBP. Без него итог не посчитать. По плану за 30 дней придёт £8,000 и уйдёт £6,120.', '—', 'Нужно на счетах сегодня', 'не хватает остатка: Barclays GBP', '1'],
     'the sentence names the account and tells the flows; «Денег сейчас» is «—»; the fourth figure is «Нужно на счетах сегодня»; the first card is the balance');
-  same([await text(pg, '#view-today [aria-label$="по дням"] h2'), /Barclays GBP — нет остатка/.test(await text(pg, '#view-today .td-accs'))], ['Изменение кассы по днямчерез 30 дней: +£1,880', true], 'the chart is «Изменение кассы по дням», from zero; the line of the account in «Счета» says it has no balance');
+  same([await text(pg, '#view-today [aria-label$="по дням"] h2'), /Barclays GBP\s*—\s*нет остатка/.test(await text(pg, '#view-today .td-accs'))], ['Изменение кассы по днямчерез 30 дней: +£1,880', true], 'the chart is «Изменение кассы по дням», from zero; the line of the account in «Счета» says it has no balance');
   same([await texts(pg, '#view-today .td-verdict button'), (await texts(pg, '#view-today .kpi .hint'))[2], (await texts(pg, '#view-today .td-days .td-dayf')).every((t) => t.includes('от сегодняшнего: ')), await texts(pg, '#view-today .td-acc button')], [['Вписать остатки'], 'чтобы пройти 30 дней без минуса и с запасом £5,000', true, ['Вписать остаток', 'Загрузить выписки']],
     'the sentence offers the one way out there is — «Вписать остатки»: a statement brings no balance yet, so «Загрузить выписки» stays under «Счета»; the fourth figure says it includes the cushion; a day reads «от сегодняшнего: +£…»');
   await calm(pg, 'day one');
@@ -2564,7 +2564,13 @@ await run('kassa figures', '«Касса» stands the same six figures at its he
     const pg = await scene('kassa figures', L0, P, { H: 60 });
     const A = await holds(pg, `${name}, «Сегодня»`);
     const six = (S) => SIX.concat(S.M.v0 ? [] : ['lowday', 'marks'].filter((k) => k in S.live)).map((k) => [k, S.live[k].v, plain(S.live[k].t)].join(' '));
-    const heads = (tab) => pg.$$eval(`#view-${tab} .kpis .kpi`, (l) => l.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+    // On «Сегодня» the first of the six is the last line of «Счета» — the same label, figure and words, set as a
+    // line of a table and not as a tile; so the two are read without regard to capitals.
+    const heads = async (tab) => {
+      const l = await pg.$$eval(`#view-${tab} .kpis .kpi`, (l) => l.map((e) => e.innerText.replace(/\s+/g, ' ').trim().toUpperCase()));
+      if (tab === 'today') l.unshift(await pg.$eval('#view-today .td-at', (e) => ['.td-tl', '[data-live="now"]', '.td-tw'].map((q) => e.querySelector(q).innerText).join(' ').replace(/\s+/g, ' ').trim().toUpperCase()));
+      return l;
+    };
     const today = [six(A), await heads('today'), await text(pg, '#view-today .page-sub')];
     await goCash(pg);
     let B = await holds(pg, `${name}, «Касса · План»`, 'cash');
