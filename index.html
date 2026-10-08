@@ -4313,7 +4313,7 @@ Plan.watch(()=>Cash.draw());
 //    question instead;
 //  · data-ed-tax="<answer>" answers one of the tax cards of «Нужно решить» (12–15): data-ed-c is the card's place
 //    in model.cards;
-//  · Ed.after(root) once its HTML is in the page: the card that has just opened is brought into view;
+//  · Ed.after(root) once its HTML is in the page: the card that has just opened is brought into view if it is not;
 //  · Ed.sum(item) and Ed.remark(item) — a row's figure and the one thing it may say, as every list shows them;
 //  · for a tab whose rows are typed into where they stand (the monthly constructor): Ed.apply(plan, item, row as it
 //    should read, which fields changed, now, who) writes what the card's «Сохранить» would; Ed.does(verb, item id)
@@ -4454,12 +4454,12 @@ const Ed=(()=>{
   if(a)return show({k:"row",id:it.id,at:x.dataset.edAt||(cur&&cur.k==="row"&&cur.id===it.id?cur.at:""),ask:a});
   if(!V||((verb==="tx"||verb==="notx")&&!it.hint)||((verb==="payer"||verb==="nopayer")&&!it.payer)||(verb==="same"&&!(it.occ&&it.done&&it.done.got))||(verb==="tick"&&!(it.src==="row"&&it.date)))return;
   if(verb==="del"&&!x.dataset.armed&&!("edNow" in x.dataset)){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
-  const say=V[0](it);cur=null;if(Plan.edit(say,(P,now,by)=>V[1](P,it,now,by)))toast(say,back);
+  const say=V[0](it);leave(()=>{cur=null;if(Plan.edit(say,(P,now,by)=>V[1](P,it,now,by)))toast(say,back);});
  }
  // The second half of such a press: the answer chosen in the card.
  function go(what,card){
   const it=item(card.dataset.edId);if(!it||Plan.lost())return;
-  const ym=it.occ?it.occ.ym:"",done=(say,fn)=>{cur=null;if(Plan.edit(say,fn))toast(say,back);};
+  const ym=it.occ?it.occ.ym:"",done=(say,fn)=>leave(()=>{cur=null;if(Plan.edit(say,fn))toast(say,back);});
   if(what==="skip-only")return done(`${it.name}: в ${monP(ym)} не жду`,P=>{W.off(P,it);});
   if(what==="del-only")return done(`${it.name}: ${mon(ym)} убран`,P=>{W.off(P,it);});
   if(what==="skip-onward"||what==="del-onward")return done(`${it.name}: с ${monG(ym)} больше не повторяю`,P=>{W.end(P,it);});
@@ -4630,7 +4630,7 @@ const Ed=(()=>{
   // toast says that it was not taken.
   if(!Object.values(ch).some(Boolean)){if(cur&&cur.ask==="part"&&q(card,"[data-ed-part]"))return go("part",card);cur=null;return Plan.redraw();}
   const left=!!cur&&cur.ask==="part"&&["[data-ed-part]","[data-ed-partdate]"].some(s=>q(card,s)&&q(card,s).value!=="");
-  cur=null;
+  const gone=grab();cur=null;
   const onward=was&&mode==="onward"&&v.mon,tw=ch.mon&&v.mon&&!was?twins(it.list,v.name,(v.date||it.date).slice(0,7)):[];
   // The end of a repeat, and its return, are said in the words the constructor uses for them.
   const moved=ch.name&&it.list==="taxes"&&!tax&&!!owner({c:"tax",l:v.name});
@@ -4639,6 +4639,7 @@ const Ed=(()=>{
   const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)
    :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
   if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(left?" · «Частично» не записано — ответьте на него заново":""),back);
+  drop(gone);
  }
  // What a change to a row's fields writes. `v` is the row as it should now read, `ch` names the fields that differ
  // (v.mon is «каждый месяц»; left out, it stays as it was). The card's «Сохранить» writes through here, and so does
@@ -4896,16 +4897,51 @@ const Ed=(()=>{
  function under(id,at){if(!cur||cur.k!=="row"||cur.id!==id||(cur.at||"")!==(at||""))return "";const it=item(id);return it?rowCard(it):"";}
  function sheet(k){return cur&&cur.k===k&&M?(k==="add"?addCard():balCard()):"";}
  function after(root){
+  const ghost=drop(wait);wait=null;
   const card=root.querySelector("[data-ed-card]");if(!card||!fresh||!cur)return;const how=fresh;fresh=false;
-  card.scrollIntoView({block:"center"});
+  // The card is brought into view only when it would not be in it, and by the least that shows it. Opened where its
+  // row stands it is nearly always in sight, and a page thrown to its middle at every press was a page that jumped
+  // (Mika, 9 October 2026: «при открытии страница скачет»). It is measured at its full height, before its motion
+  // starts, and where it will stand once the card that is folding away above it has gone.
+  const box=card.getBoundingClientRect(),g=ghost?ghost.getBoundingClientRect():null,up=g&&g.top<box.top?g.height:0;
+  const bar=document.querySelector(".topbar"),top=bar?Math.max(0,bar.getBoundingClientRect().bottom):0,t=box.top-up,bt=box.bottom-up;
+  const dy=t<top+4||box.height>window.innerHeight-top-24&&bt>window.innerHeight-4?t-top-12:bt>window.innerHeight-4?bt-window.innerHeight+20:0;
+  if(dy)window.scrollBy({top:dy,behavior:CALM()?"auto":"smooth"});
   unfold(how==="new"?card:q(card,"[data-ed-askbox]"));
   const f=cur.ask==="part"?q(card,"[data-ed-part]"):cur.focus?q(card,`[data-ed-f="${cur.focus}"]`):cur.k==="add"&&cur.what?q(card,`[data-ed-f="${cur.draft.name?"amt":"name"}"]`):null;
-  if(f){f.focus();if(cur.focus==="date")try{f.showPicker();}catch(e){}}
+  if(f){f.focus({preventScroll:true});if(cur.focus==="date")try{f.showPicker();}catch(e){}}
   cur.focus="";
  }
  // A card that opens is "new"; the same card drawn again — on a question, on another kind of row to add — is not,
  // and only what has just appeared in it is unfolded.
- const show=c=>{const again=!!cur&&!!c&&cur.k===c.k&&(cur.id||"")===(c.id||"")&&(cur.at||"")===(c.at||"");cur=c;fresh=again?"again":"new";Plan.redraw();};
+ const show=c=>{const again=!!cur&&!!c&&cur.k===c.k&&(cur.id||"")===(c.id||"")&&(cur.at||"")===(c.at||"");wait=again?null:grab();cur=c;fresh=again?"again":"new";Plan.redraw();drop(wait);wait=null;};
+ // ---- a card that goes while the page is drawn afresh ----
+ // The page is drawn from scratch, so a card that was open and is open no longer is simply not drawn - and all that
+ // stood under it leapt up by its height: when another row was pressed, when its «Оплачено» was, when the cursor
+ // went into a sum elsewhere. So a copy of the card is put back where it stood, under its row, and folded away:
+ // what is under it comes up in one motion. The copy is deaf and mute - no id, no data- attribute, nothing a
+ // handler, a check or a reader of the screen would take for a card. Only a row's card on a line of its own is
+ // followed this way; a sheet, or the card of a question in «Нужно решить», goes at once, as before.
+ let wait=null;
+ const pressed=c=>{const id=String(c.id).replace(/["\\]/g,"\\$&"),l=[...document.querySelectorAll(`[data-ed-open="${id}"],[data-cs-id="${id}"]`)].filter(e=>e.getClientRects().length);return l.find(e=>(e.dataset.edAt||"")===(c.at||""))||l[0]||null;};
+ const lineOf=c=>{const a=pressed(c);return a?a.closest("tr[data-cs-id],li[data-cs-li],.td-row"):null;};
+ function grab(){
+  const old=!CALM()&&cur&&cur.k==="row"?document.querySelector('[data-ed-card="row"]'):null,of=old?{id:cur.id,at:cur.at||""}:null,line=of?lineOf(of):null;
+  if(!old||!line||!old.getClientRects().length)return null;
+  const host=old.closest("tr.cs-edrow")||old,g=host.cloneNode(true);
+  [g].concat([...g.querySelectorAll("*")]).forEach(e=>{[...e.attributes].forEach(a=>{if(a.name==="id"||a.name==="for"||a.name==="list"||a.name.startsWith("data-"))e.removeAttribute(a.name);});});
+  g.setAttribute("aria-hidden","true");g.inert=true;
+  return{g,of,inside:line.contains(host)};
+ }
+ // The copy, put back and folding; or nothing, where its row is no longer on the screen or its card is open again.
+ function drop(x){
+  if(!x||x.g.isConnected)return x&&x.g.isConnected?x.g:null;
+  const line=lineOf(x.of);if(!line||(cur&&cur.k==="row"&&cur.id===x.of.id&&(cur.at||"")===x.of.at))return null;
+  if(x.inside)line.appendChild(x.g);else{let at=line;if(at.nextElementSibling&&at.nextElementSibling.matches("tr.cs-line"))at=at.nextElementSibling;at.insertAdjacentElement("afterend",x.g);}
+  fold(x.g.matches(".ed-card")?x.g:x.g.querySelector(".ed-card")||x.g,()=>x.g.remove());return x.g;
+ }
+ // What closes a card by doing something with its row.
+ const leave=fn=>{const g=grab();fn();drop(g);};
  // A card shut by its own button, by a second press on its row or by Escape folds away first. If another card was
  // opened in that fifth of a second, it is left alone.
  const shut=card=>{const was=cur;fold(card||document.querySelector("[data-ed-card]"),()=>{if(cur===was){cur=null;Plan.redraw();}});};
@@ -4991,7 +5027,7 @@ const Ed=(()=>{
  });
  return{use,under,sheet,after,sum,remark,vatWords,names,apply,forecast,NOZERO,does:(verb,id)=>act(verb,{dataset:{edId:id}},true),
   // A row's card opened where the row stands - and shut by the same press on the row it is open under.
-  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return shut();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur){cur=null;Plan.redraw();}},open:()=>cur,twinWords};
+  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return shut();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur)leave(()=>{cur=null;Plan.redraw();});},open:()=>cur,twinWords};
 })();
 
 // ---------- the balance by day, as «Сегодня» and «Касса» both draw it ----------
