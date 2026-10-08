@@ -4475,6 +4475,9 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
       await pg.click('.nav [data-tab="settings"]');
       await pg.waitForSelector('#ed-taxes .ed-rule');
       await shot(pg, 'live-d-settings-taxes');
+      // The two screens «Настройки» opens, reached the way a founder reaches them — and back, for the check below.
+      for (const t of ['upload', 'ledger']) { await pg.click(`main > [id^="view-"]:not([hidden]) .set-nav [data-tabgo="${t}"]`); await shot(pg, `live-d-settings-${t}`); }
+      await pg.click('#view-ledger .set-nav [data-tabgo="settings"]');
     }
     ok((await pg.evaluate(() => document.documentElement.scrollWidth)) <= w, `${w}px: no tab of the three scrolls sideways`);
     await pg.context().close();

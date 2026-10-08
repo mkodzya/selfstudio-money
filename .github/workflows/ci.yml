@@ -454,7 +454,7 @@ jobs:
       # studio when SHOTS is set. They are kept for three days, so that a
       # change to the page can be looked at by eye without a browser at hand.
       - name: The pictures of the screens
-        if: always() && steps.frozen.outputs.present == 'true'
+        if: always() && steps.files.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: page-shots
