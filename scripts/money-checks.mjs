@@ -4467,7 +4467,7 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
   await pg.click('.nav [data-tab="cash"]');
   same(await pg.$$eval('#view-cash [data-cs-dup]', (l) => l.length), 0, 'October offers nothing: the plan holds no row of September');
   await toMonth(pg, '2026-11');
-  same(await pg.$$eval('#view-cash [data-cs-dup]', (l) => l.map((e) => [e.dataset.csDup, plain(e.textContent)].join(': '))), ['inflows: Продублировать с октября · 1 строка', 'team: Продублировать с октября · 1 строка'],
+  same(await pg.$$eval('#view-cash [data-cs-dup]', (l) => l.map((e) => [e.dataset.csDup, e.textContent.replace(/\s+/g, ' ').trim()].join(': '))), ['inflows: Продублировать с октября · 1 строка', 'team: Продублировать с октября · 1 строка'],
     'November: «Поступления» and «Команда» each offer the one row of October they do not hold — what is marked «каждый месяц» is there already — and the lists that held nothing in October offer nothing');
   await pg.click('#cs-sec-team [data-cs-dup]');
   await saved(pg);
