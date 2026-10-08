@@ -37,8 +37,24 @@
 # so at its next run, and so do the words at login
 # (deploy/motd/97-money-test-reseed).
 #
-# Exit status: 0 seeded; 3 the generator is not in the checkout; anything else
-# is a failure, and the lines above it say where.
+# NEVER ON REAL DOCUMENTS. While a person's marker lies in the stand's data
+# directory -
+#
+#   /var/lib/money/test/REAL_DATA
+#
+# - the stand holds real documents, and everything above would destroy them:
+# the seed replaces them and the purge deletes every copy. So with the marker
+# there this refuses before anything else: no generator is run, nothing is
+# seeded, no snapshot is purged, and the status is 4. The marker is made and
+# removed by hand (docs/deploy.md, "The test stand's data"). Behind this
+# refusal stands a second one: `ctl seed` and `ctl purge-snapshots` look for
+# the same file from inside the container and refuse by themselves. That is
+# what holds when this is run by somebody who is not root and cannot look into
+# the data directory.
+#
+# Exit status: 0 seeded; 2 a wrong command line; 3 the generator is not in the
+# checkout; 4 refused, the stand holds real documents; anything else is a
+# failure, and the lines above it say where.
 set -eu
 
 LOCK=/run/lock/money-deploy.lock
@@ -46,6 +62,9 @@ LOCK_WAIT_SECONDS=300
 NODE_IMAGE=node:22-alpine
 # 0: every snapshot goes. See above before raising it.
 KEEP_SNAPSHOT_DAYS=0
+# A person's marker in the data directory: the documents are real
+# (moneyd/store.py, REAL_DATA_FILE).
+REAL_MARKER=REAL_DATA
 
 die() {
   echo "money-seed-test: $*" >&2
@@ -69,6 +88,14 @@ GENERATOR=$ROOT/scripts/money-demo.mjs
 if [ $# -ne 0 ]; then
   echo "usage: money-seed-test" >&2
   exit 2
+fi
+
+# The first question, before the generator, the lock and Docker: are the
+# stand's documents real?
+DATA=$("$STAND_SH" test get MONEY_DATA_HOST_DIR)
+if [ -e "$DATA/$REAL_MARKER" ] || [ -L "$DATA/$REAL_MARKER" ]; then
+  echo "money-seed-test: REFUSED - $DATA/$REAL_MARKER is there: the test stand holds real documents. Nothing was generated, nothing was seeded and no snapshot was purged." >&2
+  exit 4
 fi
 
 if [ ! -f "$GENERATOR" ]; then

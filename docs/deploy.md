@@ -55,7 +55,7 @@ prod anywhere but where the step says.
 | what its containers said | `/var/log/money/prod` | `/var/log/money/test` | standard output |
 | stand file | `deploy/stands/prod.env` | `deploy/stands/test.env` | — |
 | updated by | `money-deploy` **[owner's word]** | `money-deploy-test` | — |
-| holds | the studio's real money | a fabricated studio, reseeded nightly — **since 8 October 2026 the studio's real ledger, and nothing reseeds it** ("The test stand's data") | whatever a test puts there |
+| holds | the studio's real money | a fabricated studio, reseeded nightly — **since 8 October 2026 the studio's real ledger**: under the `REAL_DATA` marker nothing reseeds it, and it is backed up ("The test stand's data") | whatever a test puts there |
 
 One compose file, `deploy/compose.yml`, serves both server stands under an
 explicit project name. `deploy/stand.sh <prod|test> <up|ctl ...|down|logs>`
@@ -87,6 +87,8 @@ The five values of a stand file come from the file and from nowhere else: a
 ```
 STAND                                         the stand's name; a mismatch with MONEY_STAND stops the boot.
                                               The first start writes it last
+REAL_DATA                                     only when a person put it there, by hand: the documents are real.
+                                              Beside it nothing is seeded and no copy is purged
 ledger/current.json                           {"rev":N,"doc":…,"updatedAt":"…Z"} — the GET answer as stored
 ledger/EVER_SAVED                             digits: the highest revision given out, or a higher floor (`ctl floor`).
                                               With it there, a missing current.json is a lost document
@@ -106,8 +108,9 @@ It is a bind mount of a host directory, not a named volume, so
 `docker compose down -v` and `docker volume prune` cannot delete it, and backup
 and hand restore are plain file work. Kept per document: the newest 90 `day-`
 copies and the newest 50 `shrink-` copies; `restore-` copies stay until
-somebody removes them. On test every snapshot is purged after each successful
-nightly reseed.
+somebody removes them. On a test stand that holds the fabricated studio every
+snapshot is purged after each successful nightly reseed; beside `REAL_DATA`
+nothing is purged.
 
 The first start of a stand makes `ledger/`, `plan/` and `auth/` and writes
 `STAND` last. From then on **one of these three that is missing is never made
@@ -253,6 +256,10 @@ systemctl enable --now money-test-reseed.timer
 systemctl list-timers money-test-reseed --no-pager
 ```
 
+That is the setup of a stand that holds the fabricated studio. While the stand
+holds real documents this timer is off and another one is on — the nightly
+backup: "The test stand's data".
+
 **7. The name.** The stand now answers on its loopback port and nowhere else.
 It gets its public name only through the edge — see "The edge", hotfix 1.
 
@@ -341,6 +348,21 @@ ssh root@204.168.164.31 money-deploy-test
 
 While `scripts/money-demo.mjs` is not in the checkout the deploy still
 succeeds: it prints a warning and skips the seeding.
+
+**On a stand that holds real documents** (`REAL_DATA` in its data directory —
+"The test stand's data") steps 5 and 6 are replaced, and the deploy goes the
+way prod's does:
+
+- `money-deploy-test --reseed` is refused before anything is touched:
+  `money-test: FAILED - --reseed is refused: … Nothing was deployed.`;
+- after step 2 a backup is taken (`money-backup test`). A deploy that cannot
+  back up does not go on;
+- nothing is seeded, whatever the stand holds — an empty stand included;
+- nothing is said about a night that did not reseed. A `WARNING` line says,
+  loudly, when `money-test-reseed.timer` is enabled or active, and another
+  when `money-backup-test.timer` is not enabled;
+- the verdict is `money-test: OK - deployed. The stand holds real data (…):
+  nothing was seeded.`
 
 `develop` is never rewound. The server pulls fast-forward only: a branch that
 was moved back leaves the stand on the code it had, without a word, and a
@@ -586,12 +608,15 @@ The whole command line, `python -m moneyd.ctl <command>` inside the container:
 | `restore <ledger\|plan> <snapshot>` | one document back from a snapshot; asks to type the stand's name |
 | `floor <ledger\|plan> <N>` | no later revision of that document is `N` or lower. Loses nothing, lowers nothing; allowed on every stand; exit 0 also when the floor was that high already, and for `N` = 0 |
 | `empty` | exit 0 when both documents are at revision 0, else 1 |
-| `seed <ledger\|plan> [--fresh]` | **test and dev only**: the document on standard input, written through the stand's own save door. Without `--fresh` it fills an empty document only; with it, it replaces what is there. It never deletes a snapshot |
-| `purge-snapshots --older-than-days N` | **test and dev only**; `N` is 0 to 36500, and 0 means all of them |
+| `seed <ledger\|plan> [--fresh]` | **test and dev only, and never beside `REAL_DATA`**: the document on standard input, written through the stand's own save door. Without `--fresh` it fills an empty document only; with it, it replaces what is there. It never deletes a snapshot |
+| `purge-snapshots --older-than-days N` | **test and dev only, and never beside `REAL_DATA`**; `N` is 0 to 36500, and 0 means all of them |
 
 Exit status: 0 done, or "yes"; 1 failed, or "no"; 2 refused before anything
-was changed — a command this stand does not take (`seed` on prod), a setting
-that stops the service too, a wrong command line, a number no command takes.
+was changed — a command this stand does not take (`seed` on prod, `seed` and
+`purge-snapshots` on a stand whose data directory holds `REAL_DATA`), a
+setting that stops the service too, a wrong command line, a number no command
+takes. `doctor` and `verify` name the `REAL_DATA` marker in one line when it
+is there; it is never a problem to them.
 No command prints what a document holds: revisions, row counts, sizes and file
 names only. `doctor` and `verify` name paths as the container sees them
 (`/data/…`); on the host that is the stand's data directory.
@@ -636,21 +661,71 @@ the backup.
 
 **Since 8 October 2026 this stand holds the studio's real ledger** — the
 owner's decision, for the rehearsal before prod (`CLAUDE.md`, "Data rules";
-`docs/handoff.md`, «Настоящие данные на тестовом стенде»). What follows is how
-the stand is filled with the fabricated studio, and so it is the list of what
-must not run there now:
+`docs/handoff.md`, «Настоящие данные на тестовом стенде»). Everything that
+fills the stand with the fabricated studio would now replace real documents
+or delete their copies. A marker says so, and the commands refuse beside it.
 
-- the timer is switched off on the server
-  (`systemctl disable --now money-test-reseed.timer`) and stays off;
-- nobody runs `money-seed-test`, `money-deploy-test --reseed`, `ctl seed` or
-  `ctl purge-snapshots` on it. No command refuses them yet: only the rule
-  holds them back. A lock and a daily backup of this stand are being built;
-- `money-deploy-test` without `--reseed` leaves a stand that holds something
-  alone, and warns at every run that the timer is not switched on. That
-  warning is expected.
+**The marker** is a file named `REAL_DATA` in the root of the stand's data
+directory. That it is there is the fact; what is written in it is for people
+and is never read, and its owner and mode do not matter. A person makes it and
+removes it, by hand — no command does either. **[Mika]**, as root on the
+server:
 
-The rest of this section describes the stand as it was until that day and as
-it is again once the owner returns it to the fabricated studio.
+```sh
+echo "the real ledger, since 8 October 2026" > /var/lib/money/test/REAL_DATA
+```
+
+While it is there:
+
+| | |
+|---|---|
+| `ctl seed`, `ctl purge-snapshots` | refuse, on every stand: exit 2, nothing read and nothing written |
+| `money-seed-test`, and with it the nightly unit | refuses before the generator runs: exit 4, nothing generated, seeded or purged |
+| `money-deploy-test --reseed` | refused before anything is touched: `Nothing was deployed.` |
+| `money-deploy-test` | takes a backup first and stops when that fails; seeds nothing, an empty stand included; warns while `money-test-reseed.timer` is enabled or active and while `money-backup-test.timer` is not enabled |
+| `money-backup test` | writes `/var/backups/money/money-test-<utc>.tar.gz`. Without the marker it writes nothing |
+| `ctl doctor`, `ctl verify`, the words at login | say in one line that the stand holds real data |
+
+`ctl restore` is not refused: it is how one document comes back. The marker
+is looked for on the host by the scripts, as root sees it, and again inside
+the container by `ctl` itself. So a script run by somebody who cannot look
+into the data directory is still stopped at `ctl seed`.
+
+**The nightly backup** of this stand has its own timer, 03:50 Asia/Yerevan —
+ten minutes after prod's. Switched on once, **[Mika]**, after the deploy that
+brought the two unit files into `/opt/money-dev`; the reseed timer is off and
+stays off:
+
+```sh
+ln -sf /opt/money-dev/deploy/systemd/money-backup-test.service \
+       /opt/money-dev/deploy/systemd/money-backup-test.timer \
+       /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now money-backup-test.timer
+systemctl disable --now money-test-reseed.timer
+systemctl list-timers 'money-*' --no-pager
+/opt/money-dev/deploy/bin/money-backup test      # one backup now; it prints the tarball's name
+```
+
+What the tarballs are and how one is used: "Backup and restore".
+
+**Returning the stand to the fabricated studio** — **[owner's word]**, once
+prod is live; **[Mika]** runs it:
+
+```sh
+rm /var/lib/money/test/REAL_DATA
+systemctl disable --now money-backup-test.timer
+systemctl enable --now money-test-reseed.timer
+money-deploy-test --reseed
+```
+
+The reseed replaces both documents and purges every snapshot. The tarballs
+`/var/backups/money/money-test-*.tar.gz` still hold the real ledger: without
+the marker `money-backup test` does nothing, so they do not age out, and they
+are removed by hand when the owner says so.
+
+The rest of this section describes the stand as it was until 8 October 2026
+and as it is again after that return.
 
 - Only the fabricated studio, from `scripts/money-demo.mjs`, which runs as it
   is in a throwaway container with no network:
@@ -690,27 +765,51 @@ it is again once the owner returns it to the fabricated studio.
 
 ### What is backed up
 
-Prod only. `money-backup`, from `money-backup.timer` every night at 03:40
-Asia/Yerevan (ten minutes after the platform's own) and before every prod
-deploy:
+Prod: `money-backup` (or `money-backup prod`), from `money-backup.timer` every
+night at 03:40 Asia/Yerevan (ten minutes after the platform's own) and before
+every prod deploy. The test stand, **only while it holds real documents**:
+`money-backup test`, from `money-backup-test.timer` every night at 03:50
+Asia/Yerevan and before every test deploy. Any other argument is a usage line
+and exit 2. For each stand:
 
-- a tarball of `/var/lib/money/prod` — both documents, their snapshots and
-  markers, `users.json` and its marker, the security log — without
-  `auth/sessions.json` and without temporary files;
+- a tarball of `/var/lib/money/<stand>` — both documents, their snapshots and
+  markers, `users.json` and its marker, the security log, and `REAL_DATA`
+  when it is there — without `auth/sessions.json` and without temporary
+  files;
 - written as a `.part` file, checked (`gzip -t`, `tar -tzf`), then renamed to
-  `/var/backups/money/money-prod-<utc>.tar.gz`; mode 600 in a directory of
+  `/var/backups/money/money-<stand>-<utc>.tar.gz`; mode 600 in a directory of
   mode 700. An interrupted run leaves no half-written file;
-- 14 days kept. Each tarball carries up to 90 day copies, so the tarballs reach
-  further back than 14 days;
+- 14 days kept, each stand's by itself: a run for one stand never removes a
+  tarball of the other. Each tarball carries up to 90 day copies, so the
+  tarballs reach further back than 14 days;
 - no stop and no lock are needed: every file in the data directory is replaced
   whole. `tar` may still see a file vanish while it runs (exit code 1); the
   script tries once more and then fails loudly, leaving no file behind;
 - a stand that has never started has an empty directory, and nothing is written
   for it: an archive of nothing would only look like a backup;
-- `deploy/motd/98-money-backup` speaks at login only when the newest tarball is
-  older than 26 hours. `journalctl -u money-backup` is what a night said.
+- `deploy/motd/98-money-backup` speaks at login only when the newest tarball
+  of prod is older than 26 hours. `journalctl -u money-backup` is what a night
+  said. Nothing watches the age of the test stand's tarballs:
+  `journalctl -u money-backup-test` is what its night said, and a timer that
+  is not switched on is a `WARNING` of the next `money-deploy-test`.
 
-The test stand is not backed up: it is a generated copy by definition.
+A test stand that holds the fabricated studio is not backed up: it is a
+generated copy by definition. `money-backup test` says so, writes nothing and
+ends with 0.
+
+**Putting a backup of the test stand back.** `money-restore` puts back prod's
+tarballs only and refuses one of test. One document comes back from the
+stand's own snapshots, as on prod —
+`/opt/money-dev/deploy/stand.sh test ctl restore <ledger|plan> <snapshot>`
+("One document back from a snapshot"). A whole tarball is for a lost
+directory and is unpacked by hand, **[owner's word]**, not rehearsed:
+`/opt/money-dev/deploy/stand.sh test down`; move `/var/lib/money/test` aside,
+never delete it; `install -d -o 10001 -g 10001 -m 700 /var/lib/money/test`;
+`tar -xzf /var/backups/money/money-test-<utc>.tar.gz -C /var/lib/money/test`;
+`chown -R 10001:10001 /var/lib/money/test`; `money-deploy-test`. The marker
+is in the tarball, so the directory is still marked. The two things hand work
+has to do itself are in "When a directory or the accounts file is lost": the
+floor of each document, and `money-user test retire-links`.
 
 ### One document back from a snapshot
 
@@ -1349,6 +1448,14 @@ Run so far, and against what:
   hotfix's Caddyfile. The first deploy of the test stand was under way when
   this was written — from the work branch as it was pushed then, which did
   **not** yet hold this round's fixes.
+- The `REAL_DATA` marker and what refuses beside it, `money-backup test` and
+  its two units (8 October 2026): the Python tests, and the scripts under
+  `dash` against the stand-ins. **Not on a real Docker, not under systemd, and
+  not on the server**: CI's rehearsal deploys a test stand without the marker,
+  so it proves that such a stand is deployed as before and nothing of the
+  marked one. The marker on the server, and the timer, are **[Mika]**'s lines
+  in "The test stand's data"; whether they have been run is in
+  `docs/handoff.md`.
 
 Not verified anywhere:
 

@@ -665,6 +665,9 @@ def systemctl(argv):
         return 0 if unit in state["plan"].get("failed_units", []) else 1
     if argv[0] == "is-enabled":
         return 0 if unit in state["plan"].get("enabled_units", ["money-test-reseed.timer"]) else 1
+    if argv[0] == "is-active":
+        # A timer somebody started by hand and never enabled: active, and not enabled.
+        return 0 if unit in state["plan"].get("active_units", []) else 3
     return 0
 
 
@@ -711,6 +714,11 @@ def tar(argv):
         forced = take(state, "untar", None)
         if forced is not None:
             sys.stderr.write("(stand-in) tar: told to fail while unpacking\n")
+            return int(forced)
+    if "-czf" in argv:
+        forced = take(state, "pack", None)
+        if forced is not None:
+            sys.stderr.write("(stand-in) tar: told to fail while packing\n")
             return int(forced)
     if "-czf" in argv and state["plan"].get("block") == "tar":
         # A backup that is interrupted while it is being written: the file is begun, and then nothing.

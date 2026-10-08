@@ -46,7 +46,8 @@ and ``ctl`` (another process) may work on the same directory at the same time::
         cut-over: the stored revision is then behind what open pages hold.
         ``Refused`` (403) for a number below 0 or longer than 15 digits.
     store.floor() -> int          the number no later revision goes at or below; 0 when there is none
-    store.purge(older_than_days, stand, who="ctl") -> int      test and dev only, else ``Refused``
+    store.purge(older_than_days, stand, who="ctl") -> int      test and dev only, and never beside
+                                                               ``REAL_DATA``, else ``Refused``
     store.status() -> dict        state, rev, rows, sizes, floor, snapshot counts, the newest snapshot. Never contents.
 
 Every ``StoreError`` is a ``config.Refusal``: ``status``, ``code``, ``message``
@@ -60,6 +61,7 @@ For ``ctl``::
     verify(data_dir, deep=True) -> dict                     the same for any directory, read-only; counts only
     read_stand_marker(data_dir) -> str | None               what <data>/STAND says
     has_run(data_dir) -> bool                               the stand has been through its first start here
+    holds_real_data(data_dir) -> bool                       a person has put <data>/REAL_DATA there
 
 For the HTTP layer's own bodies::
 
@@ -78,6 +80,10 @@ On disk
     <data>/STAND                                  the stand's name; another name stops the boot.
                                                   Written last by the first start: with it there,
                                                   a directory below that is missing was lost
+    <data>/REAL_DATA                              only when a person put it there, by hand: the documents
+                                                  are real. Its presence is the fact, its content is free
+                                                  text and is never read. Nothing here makes or removes it;
+                                                  beside it no copy is purged and ``ctl`` takes no seed
     <data>/<kind>/current.json                    the GET answer
     <data>/<kind>/EVER_SAVED                      ASCII digits and a newline. Written with the first save:
                                                   "missing" then means "lost". The number is the highest
@@ -125,7 +131,8 @@ __all__ = [
     "KINDS", "DocStore", "Envelope", "SaveResult", "RestoreResult", "FloorResult", "Snapshot",
     "StoreError", "BadDoc", "Stale", "TooLarge", "Damaged", "StorageFailed", "NoSpace", "Busy",
     "NoSuchSnapshot", "BadSnapshot", "Refused", "DataDirError", "LockTimeout", "Unsynced",
-    "prepare_data_dir", "read_stand_marker", "has_run", "open_stores", "doctor", "verify", "fields_of",
+    "prepare_data_dir", "read_stand_marker", "has_run", "holds_real_data", "open_stores", "doctor", "verify",
+    "fields_of",
     "parse_json", "json_depth_ok", "atomic_write", "FileLock",
 ]
 
@@ -144,6 +151,9 @@ SPACE_MARGIN = 64 * MIB
 FLOOR_MAX = 10 ** 15 - 1
 
 STAND_FILE = "STAND"
+#: A person's own marker in the root of a data directory: "the documents here are real".
+#: See ``holds_real_data``. The deploy scripts look for the same name on the host.
+REAL_DATA_FILE = "REAL_DATA"
 LAPTOP_LAYOUT = ("db.json", "cash.json", "backups")
 _STAND_OWNED = ("ledger", "plan", "auth", "security.log")
 
@@ -1185,7 +1195,9 @@ class DocStore:
 
         Only for the stands whose data is made up: ``stand`` must be ``test`` or
         ``dev`` **and** be what the directory's own ``STAND`` marker says, else
-        ``Refused``. Returns how many files went. ``current.json`` is never touched.
+        ``Refused`` - and ``Refused`` as well, whatever the stand, while a person's
+        ``REAL_DATA`` marker lies in the directory: the copies are then copies of
+        real documents. Returns how many files went. ``current.json`` is never touched.
         A number of days that reaches further back than the calendar does purges
         nothing: no copy is that old.
         """
@@ -1199,6 +1211,9 @@ class DocStore:
             marker = None
         if marker != stand:
             raise Refused("This data directory is marked %r, not %r; nothing was purged." % (marker, stand))
+        if holds_real_data(self._data_dir):
+            raise Refused("This data directory holds real documents (its %s marker is there); nothing was purged."
+                          % REAL_DATA_FILE)
         now = as_utc(self._clock())
         try:
             cutoff = now - datetime.timedelta(days=older_than_days)  # type: Optional[datetime.datetime]
@@ -1310,6 +1325,28 @@ def has_run(data_dir: str) -> bool:
     the stand that has yet to begin, and nothing makes it anew.
     """
     return os.path.lexists(os.path.join(data_dir, STAND_FILE))
+
+
+def holds_real_data(data_dir: str) -> bool:
+    """Whether a person has marked ``data_dir`` as holding real documents: ``<data>/REAL_DATA`` is there.
+
+    The file's presence is the fact. What it holds is free text - who put it there, and when -
+    and is never read. It is made and removed by a person, by hand; nothing in this program
+    does either. While it is there nothing replaces the documents with made-up ones and
+    nothing deletes their copies: ``ctl seed`` and ``ctl purge-snapshots`` refuse, on every
+    stand, and so does ``DocStore.purge``.
+
+    A marker that cannot be looked at - the directory is closed to this process, the disk
+    does not answer - counts as there: nothing is replaced or deleted on a guess. A
+    directory that does not exist holds nothing.
+    """
+    try:
+        os.lstat(os.path.join(data_dir, REAL_DATA_FILE))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _bare(path: str) -> bool:
@@ -1473,10 +1510,13 @@ def doctor(data_dir: str, stand: Optional[str] = None, clock: Clock = utcnow) ->
     For a damaged document the sentence names the newest snapshot that reads
     back (the copy of the highest revision; one that does not unpack is passed
     over, and said to be). Read-only. No member of a document is ever in the answer.
+
+    ``realData`` says whether a person's ``REAL_DATA`` marker is there. It is a
+    fact about the directory and never a problem.
     """
     report = {
         "dataDir": data_dir, "exists": os.path.isdir(data_dir), "stand": None, "expectedStand": stand,
-        "laptopLayout": [], "freeBytes": None, "documents": {}, "problems": [],
+        "realData": False, "laptopLayout": [], "freeBytes": None, "documents": {}, "problems": [],
     }  # type: Dict[str, Any]
     problems = report["problems"]
     if not report["exists"]:
@@ -1488,6 +1528,7 @@ def doctor(data_dir: str, stand: Optional[str] = None, clock: Clock = utcnow) ->
         problems.append(str(error))
     if stand is not None and report["stand"] != stand:
         problems.append("The STAND marker says %r, and this stand is %r." % (report["stand"], stand))
+    report["realData"] = holds_real_data(data_dir)
     report["laptopLayout"] = [name for name in LAPTOP_LAYOUT if os.path.lexists(os.path.join(data_dir, name))]
     if report["laptopLayout"]:
         problems.append("The directory holds the laptop tool's files: %s." % ", ".join(report["laptopLayout"]))
