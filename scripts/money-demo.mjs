@@ -106,18 +106,19 @@ const TEAM = [
   { n: 'Bruno',  b: 'Wise',   base: 900,  sp: 0.3,  day: 20, dr: 6, until: 5 },
 ];
 
-// Subscriptions do not drift: the same day, the same sum, give or take a rate.
+// Subscriptions do not drift: the same day, the same sum, give or take a rate. `s` marks what the plan keeps in
+// «Подписки»; the office and the accountant are fixed costs of another kind and stay in «Прочие расходы».
 const FIXED = [
-  { n: 'Office',   b: 'Barclays', a: 594, day: 20 },
-  { n: 'Claude',   b: 'Wise',     a: 154, day: 15, wob: 0.3 },
-  { n: 'Figma',    b: 'Wise',     a: 122, day: 5,  wob: 0.08 },
-  { n: 'Google',   b: 'Wise',     a: 96,  day: 2 },
-  { n: 'Hetzner',  b: 'Wise',     a: 70,  day: 25, wob: 0.08 },
-  { n: 'Slack',    b: 'Wise',     a: 60,  day: 14 },
-  { n: 'Adobe',    b: 'Wise',     a: 48,  day: 11 },
-  { n: 'Notion',   b: 'Wise',     a: 32,  day: 18 },
-  { n: 'Github',   b: 'Wise',     a: 15,  day: 10, wob: 0.4 },
-  { n: 'Readymag', b: 'Wise',     a: 12,  day: 18 },
+  { n: 'Office',   b: 'Barclays', a: 640, day: 20 },
+  { n: 'Claude',   b: 'Wise',     a: 154, day: 15, wob: 0.3, s: 1 },
+  { n: 'Figma',    b: 'Wise',     a: 122, day: 5,  wob: 0.08, s: 1 },
+  { n: 'Google',   b: 'Wise',     a: 96,  day: 2, s: 1 },
+  { n: 'Hetzner',  b: 'Wise',     a: 70,  day: 25, wob: 0.08, s: 1 },
+  { n: 'Slack',    b: 'Wise',     a: 60,  day: 14, s: 1 },
+  { n: 'Adobe',    b: 'Wise',     a: 48,  day: 11, s: 1 },
+  { n: 'Notion',   b: 'Wise',     a: 32,  day: 18, s: 1 },
+  { n: 'Github',   b: 'Wise',     a: 15,  day: 10, wob: 0.4, s: 1 },
+  { n: 'Readymag', b: 'Wise',     a: 12,  day: 18, s: 1 },
   { n: 'Accountant', b: 'Barclays', a: 250, day: 28 },
 ];
 
@@ -321,7 +322,7 @@ export function demoPlan(todayISO) {
     row('p3', 'Saffron Row', 1900, 'Wise', plus(-18), 'Mika', { blk: 'rev', vat: false, c0: moment(-30, '08:10') }),
   );
   const team = TEAM.filter((p) => active(p, 1) && active(p, 0)).map((p) => every('t-' + slug(p.n), p.n, native(p.base, p.cur), p.b, p.day, 'Misha', { blk: 'cogs', cur: p.cur || 'GBP', sk: 'cogs|' + p.n.toLowerCase(), skBy: 'hand' }));
-  const other = FIXED.map((f) => every('f-' + slug(f.n), f.n, f.a, f.b, f.day, 'Vanya', { blk: 'fixed', sk: 'fixed|' + f.n.toLowerCase(), skBy: 'hand' }));
+  const other = FIXED.map((f) => every('f-' + slug(f.n), f.n, f.a, f.b, f.day, 'Vanya', Object.assign({ blk: 'fixed', sk: 'fixed|' + f.n.toLowerCase(), skBy: 'hand' }, f.s ? { sub: true } : {})));
   // A first payment of corporation tax, which no rule works out: a bill of its own.
   const taxes = [row('p4', 'Corporation tax — первый взнос', 2400, 'Barclays', plus(13), 'Vanya', { blk: 'tax', of: false, c0: moment(-2, '08:10') })];
   // One withdrawal a month, which the founders take in many transfers; and the two personal taxes.
