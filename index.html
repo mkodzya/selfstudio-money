@@ -678,6 +678,7 @@ table.grp{min-width:560px}table.rws{min-width:620px}
     <div class="topbar-right"><span id="sync" class="sync wait">загружаю</span></div>
   </header>
   <main class="main">
+    <div id="ledLost" class="banner" hidden><span><b id="ledLostHead"></b> <span id="ledLostText"></span></span><button id="ledReload" class="sm">Обновить страницу</button></div>
     <div id="demoBanner" class="banner" hidden><span><b>В расчёте есть строки примера.</b> Они помечены «пример» и не сохраняются.</span><button id="demoOff" class="sm">Убрать пример</button></div>
     <div id="view-today" class="stack"><div class="empty"><b>Загружаю данные</b>Здесь появится главное: сколько денег сейчас и хватит ли их на ближайшие недели.</div></div>
     <div id="view-dashboard" class="stack" hidden></div>
@@ -769,14 +770,22 @@ const real=r=>r.s!=="demo";
 function localSave(){try{localStorage.setItem(LS,JSON.stringify({tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders}));}catch(e){}}
 const dump=()=>({v:1,savedAt:new Date().toISOString(),tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders,aliases:S.aliases||{},lastpdf:S.lastpdf||null,base:S.rev||0});
 let putT=null,putBusy=false,putAgain=false,stale=false;
+// The table was saved from another window, or the sign-in ran out: from here on nothing done to the table in this
+// window reaches the server. The pill alone used to say so, and it was not enough — on 8 October 2026 a week of
+// statements was dropped into such a window and sorted there, and none of it was kept. So it is said once out loud,
+// it stands in a band over every tab until the page is reloaded, and no file is taken meanwhile (handleFiles).
+const LEDLOST={rev:["Таблица изменилась в другом окне.","Всё, что вы загружаете, разбираете и правите в этом окне, больше не сохраняется. Обновите страницу — последние файлы придётся загрузить заново.","таблица изменилась в другом окне"],
+ auth:["Вход закончился.","Всё, что вы загружаете, разбираете и правите в этом окне, больше не сохраняется. Обновите страницу и войдите заново.","вход закончился"]};
+let staleWhy="";
+function ledLost(why){const first=!stale;stale=true;staleWhy=why;$("#ledLostHead").textContent=LEDLOST[why][0];$("#ledLostText").textContent=LEDLOST[why][1];$("#ledLost").hidden=false;if(first)toast(`Не сохранено: ${LEDLOST[why][2]} — обновите страницу`);}
 async function put(){
  if(putBusy){putAgain=true;return;}putBusy=true;putT=null;
  try{
   const d=dump(),base=d.base;delete d.base;
   const r=API?await fetch(API,{method:"PUT",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({base,doc:JSON.stringify(d)})})
    :await fetch("/api/data",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign(d,{base}))});
-  if(r.status===409){stale=true;putBusy=false;return sync("данные изменились в другом окне — обновите страницу","bad");}
-  if(r.status===401||r.status===403){stale=true;putBusy=false;return sync("вход закончился — войдите заново и обновите страницу","bad");}
+  if(r.status===409){ledLost("rev");putBusy=false;return sync("данные изменились в другом окне — обновите страницу","bad");}
+  if(r.status===401||r.status===403){ledLost("auth");putBusy=false;return sync("вход закончился — войдите заново и обновите страницу","bad");}
   if(!r.ok)throw new Error(r.status);const j=await r.json();if(j&&j.rev)S.rev=j.rev;sync(API?"сохранено":"сохранено на диск","ok");}
  catch(e){sync(API?"не сохранено — проверьте связь":"не сохранено — запустите «Запустить Money»","bad");}
  putBusy=false;if(putAgain){putAgain=false;put();}
@@ -1116,6 +1125,8 @@ function ingest(parsed,file,src){
  return{added,dup};
 }
 async function handleFiles(list){
+ // A window that no longer saves takes no file: read here, a statement would be sorted and then lost.
+ if(stale)return toast(`Файлы не взяты: ${LEDLOST[staleWhy||"rev"][2]} — сначала обновите страницу`);
  for(const f of list){
   const rec={id:uid(),name:f.name,bank:"",cur:"GBP",added:0,dup:0};
   try{
@@ -5285,6 +5296,7 @@ document.addEventListener("click",ev=>{
  // The switch of «Настройки» is drawn anew in the screen it opens: the keyboard stays on the button that was pressed.
  if((x=c("[data-tabgo]"))){setTab(x.dataset.tabgo);if(x.closest(".set-nav")){const b=$(`#view-${ui.tab} .set-nav [aria-pressed="true"]`);if(b)b.focus({preventScroll:true});}return;}
  if(c("[data-demo]"))return demo();
+ if(c("#ledReload"))return location.reload();
  if(c("#demoOff"))return demoOff();
  if(c("#toastUndo")){$("#toast").hidden=true;const f=toast.back;toast.back=null;return f?f():undo();}
  if((x=c("[data-repgroup]"))){rp.group=x.dataset.repgroup;saveRep();return renderReports();}

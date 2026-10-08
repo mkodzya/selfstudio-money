@@ -4495,6 +4495,46 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
   await finish(pg);
 });
 
+await run('rv-stale', 'a window whose table was saved from elsewhere says so over every tab, and takes no more files', async () => {
+  // 8 October 2026: a week of statements was dropped into a window that had gone stale — the table had been saved
+  // from another one — and sorted there. The page said so in the pill in the corner and nowhere else, took the
+  // files, and none of it reached the server.
+  const file = (name, memo) => ({ name, mimeType: 'text/csv', buffer: Buffer.from(`Number,Date,Account,Amount,Subcategory,Memo\n ,06/10/2026,20-00-00 10000002,-60.00,PAYMENT,${memo}\n`) });
+  const taken = () => pg.$$eval('#view-upload .file', (l) => l.length);
+  const kept = () => (store.led.doc.inbox || []).length;
+  serve(ledger([]), null);
+  const pg = await open('a stale window', undefined, { hash: '#upload', quiet: /409/ });
+  same(await pg.isHidden('#ledLost'), true, 'a window that is up to date carries no band');
+  // the table is saved from another window; then a statement is dropped into this one
+  store.led.rev++;
+  await pg.setInputFiles('#fileIn', file('one.csv', 'EXAMPLE SHOP'));
+  await pg.waitForSelector('#ledLost:not([hidden])');
+  same([await text(pg, '#ledLostHead'), await text(pg, '#ledLostText'), await text(pg, '#ledReload'), await toastText(pg), await text(pg, '#sync'), kept()],
+    ['Таблица изменилась в другом окне.', 'Всё, что вы загружаете, разбираете и правите в этом окне, больше не сохраняется. Обновите страницу — последние файлы придётся загрузить заново.', 'Обновить страницу', 'Не сохранено: таблица изменилась в другом окне — обновите страницу', 'данные изменились в другом окне — обновите страницу', 0],
+    'the save is refused, and the page says so where it cannot be missed: a band with [Обновить страницу], and «Не сохранено: …» out loud — not the pill alone');
+  await shot(pg, 'rv-stale');
+  // the band is over every tab, for as long as the window is stale
+  await pg.click('.nav [data-tab="inbox"]');
+  const overInbox = await pg.isVisible('#ledLost');
+  await pg.click('.nav [data-tab="today"]');
+  same([overInbox, await pg.isVisible('#ledLost')], [true, true], 'the band stands over «Разбор» and over «Сегодня» alike');
+  // and no file is taken meanwhile
+  const had = await taken();
+  await pg.setInputFiles('#fileIn', file('two.csv', 'ANOTHER SHOP'));
+  await sleep(300);
+  same([had, await taken(), await toastText(pg)], [1, 1, 'Файлы не взяты: таблица изменилась в другом окне — сначала обновите страницу'], 'a second statement dropped into that window is not read at all: sorted here, it would be lost');
+  // [Обновить страницу] reads the table again, and the same file is taken and kept
+  const loaded = pg.waitForEvent('load');
+  await pg.click('#ledReload');
+  await loaded;
+  await pg.waitForFunction(() => !document.querySelector('#sync').textContent.includes('загружаю') && window.__cash && window.__cash.state());
+  same(await pg.isHidden('#ledLost'), true, '[Обновить страницу]: the page is read again, and the band is gone');
+  await pg.setInputFiles('#fileIn', file('one.csv', 'EXAMPLE SHOP'));
+  for (let i = 0; i < 80 && kept() !== 1; i++) await sleep(50);
+  same([kept(), await pg.isHidden('#ledLost')], [1, true], '… and the statement, dropped again, is read and reaches the server');
+  await pg.context().close();
+});
+
 await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
   // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
   // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
