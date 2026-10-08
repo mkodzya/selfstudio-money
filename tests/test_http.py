@@ -31,11 +31,11 @@ import socket
 import struct
 import time
 import unittest
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from unittest import mock
 
 from tests import _harness
-from tests._harness import PASSWORD, ledger, plan
+from tests._harness import HELD, NEVER, PASSWORD, PATIENCE, ledger, plan, until
 
 CHECKOUT = _harness.CHECKOUT
 API_MD = os.path.join(CHECKOUT, "docs", "api.md")
@@ -126,16 +126,6 @@ def tags(markup: str, name: str) -> List[Dict[str, str]]:
     return found
 
 
-def until(probe: Callable[[], Any], seconds: float = 3.0, every: float = 0.01) -> Any:
-    """Ask ``probe`` until it says something true, for ``seconds`` at most."""
-    deadline = time.monotonic() + seconds
-    while True:
-        value = probe()
-        if value or time.monotonic() > deadline:
-            return value
-        time.sleep(every)
-
-
 # ---------------------------------------------------------------------------
 # The wire: what http.client would hide
 # ---------------------------------------------------------------------------
@@ -187,9 +177,13 @@ def _whole(data: bytes) -> bool:
 
 
 class Wire:
-    """One raw connection to a stand."""
+    """One raw connection to a stand.
 
-    def __init__(self, stand: Any, timeout: float = 5.0):
+    What is waited for here - an answer, the server hanging up - is waited for ``PATIENCE`` seconds
+    and comes long before: the wait is how long a failure takes, not how long the test does.
+    """
+
+    def __init__(self, stand: Any, timeout: float = PATIENCE):
         self.sock = socket.create_connection(("127.0.0.1", stand.port), timeout=timeout)
         self.received = b""
         self.ended = False      # the server closed its side
@@ -222,7 +216,7 @@ class Wire:
         self.received += chunk
         return True
 
-    def answer(self, wait: float = 5.0) -> Optional[Answer]:
+    def answer(self, wait: float = PATIENCE) -> Optional[Answer]:
         """The answer, as soon as it is whole - without waiting for the server to hang up.
         None when the server said nothing within ``wait`` seconds, or closed without a word."""
         deadline = time.monotonic() + wait
@@ -247,7 +241,7 @@ class Wire:
             self.sock.setblocking(True)
         return self.received
 
-    def hangs_up(self, within: float = 5.0) -> bool:
+    def hangs_up(self, within: float = PATIENCE) -> bool:
         """Whether the server closes the connection within so many seconds."""
         deadline = time.monotonic() + within
         while self._more(deadline):
@@ -259,7 +253,7 @@ class Wire:
             self.sock.close()
 
 
-def exchange(stand: Any, data: bytes, done: bool = True, wait: float = 5.0) -> Optional[Answer]:
+def exchange(stand: Any, data: bytes, done: bool = True, wait: float = PATIENCE) -> Optional[Answer]:
     """Send ``data`` on a connection of its own and return the answer (None: closed without one)."""
     wire = Wire(stand)
     try:
@@ -971,7 +965,7 @@ class HostTests(Case):
         cookie = stand.session("mika")
         wire = self.wire(self.head("PUT", LEDGER, "Host: evil.example", "Origin: " + stand.origin,
                                    "Content-Type: application/json", "Content-Length: 5000", cookie=cookie, host=""))
-        self.assertRefused(wire.answer(3.0), 421, "misdirected")       # and not one byte of the body was sent
+        self.assertRefused(wire.answer(), 421, "misdirected")       # and not one byte of the body was sent
         self.assertNothingStored()
 
     def test_what_a_proxy_says_the_host_was_is_not_asked(self):
@@ -1124,7 +1118,7 @@ class CrossSiteTests(Case):
             with self.subTest(method=method, path=path):
                 wire = self.wire(self.head(method, path, "Origin: https://evil.example", "Content-Type: application/json",
                                            "Content-Length: 4000", cookie=self.cookie))
-                self.assertRefused(wire.answer(3.0), 403, "bad_origin")     # the body was never sent
+                self.assertRefused(wire.answer(), 403, "bad_origin")     # the body was never sent
                 wire.done()
         self.assertUntouched()
 
@@ -1234,7 +1228,7 @@ class BodyGateTests(Case):
             with self.subTest(path=path):
                 wire = self.wire(self.head(method, path, "Origin: " + self.stand.origin, "Content-Type: text/plain",
                                            "Content-Length: 3000", cookie=cookie))
-                self.assertRefused(wire.answer(3.0), 415, "bad_content_type")       # the body was never sent
+                self.assertRefused(wire.answer(), 415, "bad_content_type")       # the body was never sent
                 wire.done()
 
     # -- Transfer-Encoding ------------------------------------------------------
@@ -1295,7 +1289,7 @@ class BodyGateTests(Case):
                 wire = self.wire(self.head(method, path, "Origin: " + self.stand.origin, "Content-Type: application/json",
                                            "Content-Length: %d" % (limit + 1), cookie=cookie))
                 # Only the head was sent. The answer comes all the same: the body was not waited for.
-                self.assertRefused(wire.answer(3.0), 413, "body_too_large")
+                self.assertRefused(wire.answer(), 413, "body_too_large")
                 wire.done()
         self.assertNothingStored()
 
@@ -1308,7 +1302,7 @@ class BodyGateTests(Case):
                 wire = self.wire(self.head(method, path, "Origin: " + self.stand.origin,
                                            "Content-Type: application/json", "Content-Length: %d" % length,
                                            cookie=cookie))
-                answer = wire.answer(3.0)
+                answer = wire.answer()
                 wire.done()
                 got = None if answer is None else "%d %s" % (answer.status, answer.json().get("error"))
                 if got != "413 body_too_large":
@@ -1323,7 +1317,7 @@ class BodyGateTests(Case):
                     wire = self.wire(self.head(method, path, "Origin: " + self.stand.origin,
                                                "Content-Type: application/json", "Content-Length: " + "9" * digits,
                                                cookie=cookie))
-                    self.assertRefused(wire.answer(3.0), 413, "body_too_large")
+                    self.assertRefused(wire.answer(), 413, "body_too_large")
                     wire.done()
         self.assertEqual(self.events("exception"), [])
         self.assertNothingStored()
@@ -1366,25 +1360,26 @@ class BodyGateTests(Case):
             with self.subTest(path=path, limit=limit):
                 lines = ("Origin: " + self.stand.origin, "Content-Type: application/json", "Expect: 100-continue")
                 wire = self.wire(self.head(method, path, "Content-Length: %d" % limit, *lines, cookie=cookie))
-                answer = wire.answer(3.0)
+                answer = wire.answer()
                 self.assertIsNotNone(answer)
                 self.assertEqual(answer.status, 100, answer.raw[:200])
                 wire.close()
                 over = self.wire(self.head(method, path, "Content-Length: %d" % (limit + 1), *lines, cookie=cookie))
-                self.assertRefused(over.answer(3.0), 413, "body_too_large")
+                self.assertRefused(over.answer(), 413, "body_too_large")
                 over.close()
         self.assertTrue(until(lambda: self.stand.server.in_flight() == 0))
         self.assertNothingStored()
 
     def test_a_refused_request_does_not_keep_its_connection_waiting_for_the_body(self):
-        # A document's body has 20 seconds and more to arrive. A request that was refused has none of that.
+        # A document's body has 20 seconds and more to arrive (this one two minutes), and a caller who
+        # says nothing is given 30. A request that was refused has none of that: the server hangs up
+        # while this test still waits - and it waits less than any of those.
         stand = self.stand
+        self.assertLess(PATIENCE, min(stand.settings.socket_timeout, stand.settings.put_deadline(1000000)))
         wire = self.wire(self.head("PUT", LEDGER, "Origin: " + stand.origin, "Content-Type: application/json",
                                    "Content-Length: 1000000"))
-        began = time.monotonic()
-        self.assertRefused(wire.answer(3.0), 401, "unauthenticated")
-        self.assertTrue(wire.hangs_up(4.0), "the server kept the connection of a request it had refused")
-        self.assertLess(time.monotonic() - began, 3.0)
+        self.assertRefused(wire.answer(), 401, "unauthenticated")
+        self.assertTrue(wire.hangs_up(), "the server kept the connection of a request it had refused")
         self.assertTrue(until(lambda: stand.server.connections() == 0))
 
 
@@ -1393,6 +1388,13 @@ class BodyGateTests(Case):
 # ---------------------------------------------------------------------------
 
 class DeadlineTests(Case):
+    """A deadline is tuned to a third of a second and met on a real socket, so these tests do read a clock.
+    What they say about it holds on any machine: nothing is cut before its deadline (the clock here is
+    started before the server starts its own), and it is that deadline which cuts it - the connection
+    closes while the test still waits, and the test waits less than the 30 seconds after which a stand
+    lets go of a silent caller anyway. How soon after the deadline is not asserted: that is the
+    machine's business."""
+
     def setUp(self):
         pass
 
@@ -1419,13 +1421,13 @@ class DeadlineTests(Case):
         stand = self.new_stand(tune={"auth_body_deadline": 0.3, "signed_out_body_slots_per_address": 3})
         began = time.monotonic()
         wires = {door: self.wire(self.half(stand, "POST", door), stand) for door in AUTH_DOORS}
+        self.assertLess(PATIENCE, stand.settings.socket_timeout)
         for door, wire in wires.items():
             with self.subTest(door=door):
-                self.assertTrue(wire.hangs_up(4.0), "the connection was not closed")
+                self.assertTrue(wire.hangs_up(), "the connection was not closed")
                 waited = time.monotonic() - began
                 self.assertEqual(wire.received, b"", "a body that misses its deadline gets no answer")
                 self.assertGreater(waited, 0.25, "it was cut before its deadline")
-                self.assertLess(waited, 3.0)
         said = until(lambda: len([line for line in stand.log_lines() if line.get("status") == 408]) == 3 and
                      [line for line in stand.log_lines() if line.get("status") == 408])
         self.assertEqual(sorted(line["path"] for line in said), sorted(AUTH_DOORS))
@@ -1437,19 +1439,18 @@ class DeadlineTests(Case):
         stand = self.new_stand(tune={"auth_body_deadline": 0.4})
         wire = self.wire(lines_of(stand, "POST", LOGIN, "Origin: " + stand.origin, "Content-Type: application/json",
                                   "Content-Length: 4000"), stand)
+        # A byte every twentieth of a second: at that pace the 4000 would take more than three minutes,
+        # and a deadline that started anew with every read would never come.
         began = time.monotonic()
-        cut = None
-        while time.monotonic() - began < 4.0:
+        cut = False
+        while not cut and time.monotonic() - began < PATIENCE:
             try:
                 wire.send(b" ")             # every read of the server succeeds; the deadline is not per read
             except OSError:
-                cut = time.monotonic() - began
-                break
-            if wire.hangs_up(0.05):
-                cut = time.monotonic() - began
-                break
-        self.assertIsNotNone(cut, "a body that never stops trickling was never cut")
-        self.assertLess(cut, 2.5)
+                cut = True
+            else:
+                cut = wire.hangs_up(0.05)
+        self.assertTrue(cut, "a body that never stops trickling was never cut")
         self.assertEqual(wire.received, b"")
 
     def test_a_save_that_stalls_is_cut_at_its_own_deadline_and_nothing_is_stored(self):
@@ -1461,7 +1462,7 @@ class DeadlineTests(Case):
                  for path, _kind, _limit in DOCUMENTS}
         for path, wire in wires.items():
             with self.subTest(path=path):
-                self.assertTrue(wire.hangs_up(4.0))
+                self.assertTrue(wire.hangs_up())
                 self.assertEqual(wire.received, b"")
                 self.assertGreater(time.monotonic() - began, 0.25)
         self.assertEqual(sorted(line["path"] for line in stand.log_lines() if line.get("status") == 408),
@@ -1476,10 +1477,9 @@ class DeadlineTests(Case):
         wires = [self.wire(data, stand) for data in begun]
         for data, wire in zip(begun, wires):
             with self.subTest(begun=data[:20]):
-                self.assertTrue(wire.hangs_up(4.0))
+                self.assertTrue(wire.hangs_up())
                 self.assertEqual(wire.received, b"")
                 self.assertGreater(time.monotonic() - began, 0.25)
-                self.assertLess(time.monotonic() - began, 3.0)
         self.assertEqual(stand.get("/login").status, 200)
         self.assertEqual(self.events("exception", stand), [])
 
@@ -1596,18 +1596,24 @@ class HeadersTests(Case):
         self.assertEqual(sorted(setting), ["a password set", "a sign-in"])
 
     def test_the_answers_to_a_full_server_carry_the_headers_and_say_when_to_come_back(self):
-        stand = self.new_stand(tune={"signed_out_slots": 1, "max_connections_per_address": 2})
+        stand = self.new_stand(tune=dict(HELD, signed_out_slots=1, max_connections_per_address=2))
         cookie = stand.session("mika")
         stalled = ("Origin: " + stand.origin, "Content-Type: application/json", "Content-Length: 40")
         self.wire(lines_of(stand, "POST", LOGIN, *stalled), stand)
-        # The one signed-out slot is taken by a body that never comes: the next request that brings a body is told so.
-        busy = until(lambda: (lambda a: a if a.status == 503 else None)(stand.post(LOGIN, {})))
+        # The one signed-out slot is taken by a body that never comes: the next request that brings a body
+        # is told so. The slot is seen taken before that request is sent: sent at once, it can reach the
+        # slot first, and then it is the stalled sign-in that is turned away and nobody is ever told 503.
+        self.assertTrue(until(lambda: stand.server.signed_out() == 1), "the stalled sign-in was not let in")
+        busy = stand.post(LOGIN, {})
         self.assertRefused(busy, 503, "busy")
         self.assertFixedHeaders(busy)
         self.assertEqual(busy.header("Retry-After"), "1")
+        # The address may have two connections. The one that was just turned away is counted until the
+        # server has let go of it, a moment after its answer: only then is there room for the save.
+        self.assertTrue(until(lambda: stand.counted() == 1), "the request that was turned away is still counted")
         self.wire(lines_of(stand, "PUT", LEDGER, *stalled, cookie=cookie), stand)
-        full = until(lambda: (lambda a: a if a.json().get("error") == "too_many_connections" else None)(
-            stand.get(ME, cookie=cookie)))
+        self.assertTrue(until(lambda: stand.counted() == 2), "the stalled save was not let in")
+        full = stand.get(ME, cookie=cookie)
         self.assertRefused(full, 503, "too_many_connections")
         self.assertFixedHeaders(full)
         self.assertEqual(full.header("Retry-After"), "1")
@@ -1658,16 +1664,16 @@ class HeadersTests(Case):
         one = self.head("GET", "/robots.txt", "Connection: keep-alive")
         # Asked to keep the connection, the server answers, says "Connection: close" and hangs up.
         wire = self.wire(one)
-        answer = wire.answer(3.0)
+        answer = wire.answer()
         self.assertEqual((answer.status, answer.all("Connection")), (200, ["close"]))
-        self.assertTrue(wire.hangs_up(4.0), "every answer says Connection: close, and the server keeps its word")
+        self.assertTrue(wire.hangs_up(), "every answer says Connection: close, and the server keeps its word")
         self.assertEqual(wire.received.count(b"HTTP/1.1 "), 1)
         # Three requests sent in one breath: one is served. (Whether the caller still gets to read that one
         # answer is the network's business once the server has hung up on the other two; what was served is
         # in the log.)
         served = len([line for line in stand.log_lines() if line.get("path") == "/robots.txt"])
         wire = self.wire(one + one + one)
-        self.assertTrue(wire.hangs_up(4.0))
+        self.assertTrue(wire.hangs_up())
         self.assertLessEqual(wire.received.count(b"HTTP/1.1 "), 1, "a second request on the connection was answered")
         self.assertEqual(len([line for line in stand.log_lines() if line.get("path") == "/robots.txt"]), served + 1)
         # A request hidden in what a GET announces as its body is never served either.
@@ -2284,6 +2290,10 @@ class ForwardedForTests(Case):
 # ---------------------------------------------------------------------------
 
 class CapacityTests(Case):
+    """What is held here is held until the test lets go of it: the stands are tuned ``HELD``, so that a body
+    that never comes is waited for as long as the test runs, and not for the five seconds after which a
+    busy machine would find the slots free again. The five seconds themselves are ``DeadlineTests``'."""
+
     EDGE = {"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"}     # the tests' own address stands in for the edge: it says who asks
 
     def setUp(self):
@@ -2299,16 +2309,20 @@ class CapacityTests(Case):
         return lines_of(stand, "PUT", LEDGER, "Origin: " + stand.origin, "Content-Type: application/json",
                         "Content-Length: 40", *more, cookie=cookie)
 
-    def hold(self, stand: Any, count: int, data: bytes, already: int = 0) -> List[Wire]:
-        """``count`` more connections that have sent ``data``, on top of the ``already`` held, all taken in."""
+    def hold(self, stand: Any, count: int, data: bytes, already: int = 0, saves: bool = False) -> List[Wire]:
+        """``count`` more connections that have sent ``data``, on top of the ``already`` held - and every one
+        of them let in before this returns: a stalled sign-in holds a signed-out slot, a founder's stalled
+        save (``saves``) is counted for its address. Not merely begun: between a request's first line and
+        the limit it is counted under, whatever the test sends next can overtake it - and is then let in
+        in its place, while the one that was meant to be held is turned away."""
         wires = [self.wire(data, stand) for _number in range(count)]
-        self.assertTrue(until(lambda: stand.server.in_flight() >= already + count),
-                        "the stalled requests were not taken in")
+        taken = stand.counted if saves else stand.server.signed_out
+        self.assertTrue(until(lambda: taken() == already + count), "the stalled requests were not let in")
         return wires
 
     def assertWaitedFor(self, wires: List[Wire], why: str) -> None:
-        """None of these connections has been answered: the server is still waiting for each body."""
-        self.assertEqual([wire.peek() for wire in wires], [b""] * len(wires), why)
+        """None of these connections has been answered or closed: the server is still waiting for each body."""
+        self.assertEqual([(wire.peek(), wire.ended) for wire in wires], [(b"", False)] * len(wires), why)
 
     def test_the_numbers_are_the_documented_ones(self):
         settings = self.new_stand(start=False).settings
@@ -2331,26 +2345,27 @@ class CapacityTests(Case):
         return wires
 
     def test_eight_stalled_sign_ins_keep_no_founder_waiting_and_the_ninth_body_gets_503_at_once(self):
-        stand = self.new_stand(env=self.EDGE)       # nothing tuned: eight slots, two an address, five seconds a body
+        # The numbers are the stand's own: eight slots, two an address. Only the bodies are waited for longer.
+        stand = self.new_stand(env=self.EDGE, tune=HELD)
         cookie = stand.session("mika")
         wires = self.fill(stand)
-        began = time.monotonic()
+        # Signed-in requests never wait behind signed-out ones: each is answered while all eight still stall.
         self.assertEqual(stand.get(ME, cookie=cookie).json()["firstName"], "Mika")
         self.assertEqual(len(stand.get("/", cookie=cookie).body), os.path.getsize(INDEX))
         self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json(), {"rev": 1})
         self.assertEqual(stand.get("/data", cookie=cookie).status, 200)
         self.assertEqual(stand.get("/login", cookie=cookie).status, 200)
         self.assertEqual(stand.post(LOGOUT, {}, cookie=stand.session("vanya")).status, 200)
-        self.assertLess(time.monotonic() - began, 3.0, "signed-in requests never wait behind signed-out ones")
+        self.assertEqual(stand.server.signed_out(), 8, "a founder was served by letting go of a stranger")
         ninth = {"X-Forwarded-For": "203.0.113.9"}  # an address that holds no slot of its own
         for method, path in (("POST", LOGIN), ("POST", SETUP), ("POST", LOGOUT), ("PUT", LEDGER), ("PUT", "/nothing"),
                              ("POST", "/login")):
             with self.subTest(ninth="%s %s" % (method, path)):
-                began = time.monotonic()
+                # 503 at once, not after somebody's deadline: nobody's deadline comes on this stand.
                 answer = stand.request(method, path, {"base": 0, "doc": ledger()}, headers=ninth)
                 self.assertRefused(answer, 503, "busy")
                 self.assertEqual(answer.header("Retry-After"), "1")
-                self.assertLess(time.monotonic() - began, 2.5, "503 at once, not after somebody's deadline")
+                self.assertEqual(stand.server.signed_out(), 8)
         # A body announced on a door that takes none is still a body somebody may dawdle over.
         odd = exchange(stand, lines_of(stand, "GET", "/login", "Content-Length: 2", "X-Forwarded-For: 203.0.113.9") + b"{}")
         self.assertRefused(odd, 503, "busy")
@@ -2364,7 +2379,7 @@ class CapacityTests(Case):
         # Once its head is read, a request without a body cannot make the server wait: it is answered
         # whatever is stalled. So the sign-in page, its script and stylesheet and every refusal stay
         # reachable - a founder who opens /login during an attack sees the page, not a line of JSON.
-        stand = self.new_stand(env=self.EDGE)
+        stand = self.new_stand(env=self.EDGE, tune=HELD)
         wires = self.fill(stand)
         for who in ("203.0.113.9", "203.0.113.1"):  # a bystander, and an address that holds its two slots
             mine = {"X-Forwarded-For": who}
@@ -2394,21 +2409,20 @@ class CapacityTests(Case):
     def test_one_address_holds_two_slots_and_cannot_shut_the_sign_in_or_the_way_out_of_a_lock_out(self):
         # The reviewers' attack: eight sign-ins whose bodies never come, from ONE address, renewed as they
         # are cut. It used to keep every stranger - a founder on a new phone - at 503, the one-time link included.
-        stand = self.new_stand(env=self.EDGE)
+        stand = self.new_stand(env=self.EDGE, tune=HELD)
         stand.set_password("mika")
         token = stand.invite("misha")
         attacker = "X-Forwarded-For: 203.0.113.7"
         held = self.hold(stand, 2, self.stalled_sign_in(stand, attacker))
-        for _more in range(6):                      # the other six are turned away at once, each of them
-            began = time.monotonic()
+        for _more in range(6):                      # the other six are turned away at once, each of them:
             wire = self.wire(self.stalled_sign_in(stand, attacker), stand)
-            answer = wire.answer(3.0)
+            answer = wire.answer()                  # answered with no body sent, and no deadline to wait out
             self.assertRefused(answer, 503, "busy")
             self.assertEqual(answer.header("Retry-After"), "1")
-            self.assertLess(time.monotonic() - began, 2.5)
             wire.close()
         self.assertWaitedFor(held, "the address keeps the two slots it may hold")
-        self.assertTrue(until(lambda: stand.server.in_flight() == 2))
+        self.assertEqual((stand.server.signed_out(), stand.server.signed_out("203.0.113.7")), (2, 2))
+        self.assertTrue(until(lambda: stand.server.in_flight() == 2), "the six that were turned away are not gone")
         # Everybody else is served: the page, the sign-in, and the link that is the way out of a lock-out.
         founder = {"X-Forwarded-For": "203.0.113.8"}
         self.assertEqual(stand.get("/login", headers=founder).status, 200)
@@ -2428,64 +2442,68 @@ class CapacityTests(Case):
         # And when its two are over, the address is taken in again: its share is given back.
         for wire in held:
             wire.close()
-        self.assertTrue(until(lambda: stand.server.in_flight() == 2))
+        self.assertTrue(until(lambda: stand.server.signed_out("203.0.113.7") == 0))
         again = self.hold(stand, 2, self.stalled_sign_in(stand, attacker), already=2)
         self.assertWaitedFor(again, "the address did not get its two slots back")
+        self.assertEqual(stand.server.signed_out("203.0.113.7"), 2)
 
     def test_without_a_trusted_proxy_a_header_gets_an_address_no_more_slots(self):
-        stand = self.new_stand()                    # nobody is believed about who is asking: one address, the peer's
+        stand = self.new_stand(tune=HELD)           # nobody is believed about who is asking: one address, the peer's
         held = self.hold(stand, 2, self.stalled_sign_in(stand, "X-Forwarded-For: 198.51.100.1"))
         for forwarded in ("198.51.100.2", "10.0.0.1", "::1"):
             answer = stand.post(LOGIN, {}, headers={"X-Forwarded-For": forwarded})
             self.assertRefused(answer, 503, "busy")
         self.assertWaitedFor(held, "the peer's own two")
 
-    def test_a_slot_is_given_back_however_its_request_ended(self):
-        # One address may take all eight on this stand, so that what is counted is the eight themselves.
-        stand = self.new_stand(tune={"auth_body_deadline": 0.3, "signed_out_body_slots_per_address": 8})
-        ends = {
-            "the caller hung up": lambda wires: [wire.close() for wire in wires],
-            "the body missed its deadline": lambda wires: [wire.hangs_up(4.0) for wire in wires],
-            "the body came": lambda wires: [wire.send(b" " * 40) and wire.hangs_up(4.0) for wire in wires],
-        }
-        for how, end in ends.items():
+    def given_back(self, stand: Any, count: int, lost: str) -> None:
+        """``count`` stalled sign-ins are as many as this stand lets in at once. They end in each of the three
+        ways a request can end, and each time ``count`` more are let in - not one fewer."""
+        def taken(why: str) -> List[Wire]:
+            wires = self.hold(stand, count, self.stalled_sign_in(stand))
+            self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
+            self.assertWaitedFor(wires, why)
+            return wires
+
+        for how in ("the caller hung up", "the body missed its deadline", "the body came"):
             with self.subTest(how=how):
-                wires = self.hold(stand, 8, self.stalled_sign_in(stand))
-                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
-                end(wires)
+                if how == "the body missed its deadline":
+                    # A deadline that comes cannot be held still while the slots are counted: a third of a
+                    # second is nothing to a machine that is busy elsewhere. So these are not counted at one
+                    # moment. Each is seen let in - it is not answered - and cut: the server hangs up.
+                    stand.retune(auth_body_deadline=0.3)
+                    wires = [self.wire(self.stalled_sign_in(stand), stand) for _number in range(count)]
+                    for wire in wires:
+                        self.assertTrue(wire.hangs_up(), "a body that missed its deadline was not cut")
+                        self.assertEqual(wire.received, b"", "one of them was turned away, or answered")
+                    stand.retune(auth_body_deadline=NEVER)
+                else:
+                    wires = taken("one of them was turned away")
+                    for wire in wires:
+                        if how == "the caller hung up":
+                            wire.close()
+                        else:
+                            self.assertTrue(wire.send(b" " * 40).hangs_up(), "a body that came was not answered")
                 self.assertTrue(until(lambda: stand.server.connections() == 0))
-                # All eight are free again - not seven: eight more strangers can be served at the same time.
-                again = self.hold(stand, 8, self.stalled_sign_in(stand))
-                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
-                self.assertWaitedFor(again, "one of the eight was turned away: a slot was not given back")
+                self.assertEqual((stand.server.signed_out(), stand.server.signed_out("127.0.0.1")), (0, 0))
+                # All of them are free again: as many more strangers can be served at the same time.
+                again = taken(lost)
                 for wire in again:
                     wire.close()
                 self.assertTrue(until(lambda: stand.server.connections() == 0))
                 self.assertRefused(stand.post(LOGIN, {}), 400, "missing_credentials")
-
-    def test_an_address_gets_its_two_back_however_its_requests_ended(self):
-        stand = self.new_stand(tune={"auth_body_deadline": 0.2})
-        ends = {
-            "the caller hung up": lambda wires: [wire.close() for wire in wires],
-            "the body missed its deadline": lambda wires: [wire.hangs_up(4.0) for wire in wires],
-            "the body came": lambda wires: [wire.send(b" " * 40) and wire.hangs_up(4.0) for wire in wires],
-        }
-        for how, end in ends.items():
-            with self.subTest(how=how):
-                wires = self.hold(stand, 2, self.stalled_sign_in(stand))
-                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
-                end(wires)
-                self.assertTrue(until(lambda: stand.server.connections() == 0))
-                again = self.hold(stand, 2, self.stalled_sign_in(stand))
-                self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
-                self.assertWaitedFor(again, "one of the two was turned away: the address's share was not given back")
-                for wire in again:
-                    wire.close()
-                self.assertTrue(until(lambda: stand.server.connections() == 0))
         self.assertEqual((stand.server.signed_out(), stand.server.signed_out("127.0.0.1")), (0, 0))
 
+    def test_a_slot_is_given_back_however_its_request_ended(self):
+        # One address may take all eight on this stand, so that what is counted is the eight themselves.
+        stand = self.new_stand(tune=dict(HELD, signed_out_body_slots_per_address=8))
+        self.given_back(stand, 8, "one of the eight was turned away: a slot was not given back")
+
+    def test_an_address_gets_its_two_back_however_its_requests_ended(self):
+        stand = self.new_stand(tune=HELD)
+        self.given_back(stand, 2, "one of the two was turned away: the address's share was not given back")
+
     def test_a_request_that_is_refused_gives_its_slot_back_too(self):
-        stand = self.new_stand(tune={"signed_out_body_slots_per_address": 8})
+        stand = self.new_stand(tune=dict(HELD, signed_out_body_slots_per_address=8))
         body = ("Content-Type: application/json", "Content-Length: 2")
         for _round in range(3):
             for request in (self.head("GET", ME, stand=stand), self.head("GET", "/nothing", stand=stand),
@@ -2506,18 +2524,21 @@ class CapacityTests(Case):
                 answered = exchange(stand, request)
                 self.assertGreaterEqual(answered.status, 300)
                 self.assertNotEqual(answered.status, 503, "a slot was lost on the way")
+                # Given back a moment after the answer: a refused request is let go of once it is answered.
+                self.assertTrue(until(lambda: stand.server.signed_out() == 0), "a refused request kept its slot")
             # ... and a body sent to a door that takes none: served, the body never read, its slot given back.
             self.assertEqual(exchange(stand, self.head("GET", "/login", *body, stand=stand) + b"{}").status, 200)
+            self.assertTrue(until(lambda: stand.server.signed_out() == 0), "a body nobody read kept its slot")
         self.assertTrue(until(lambda: stand.server.connections() == 0))
         again = self.hold(stand, 8, self.stalled_sign_in(stand))
         self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
         self.assertWaitedFor(again, "a refused request kept a slot")
 
     def test_twelve_connections_of_one_address_and_the_thirteenth_is_turned_away(self):
-        stand = self.new_stand(env={"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"})    # the edge says who is asking
+        stand = self.new_stand(env=self.EDGE, tune=HELD)        # the edge says who is asking
         cookie = stand.session("mika")
         seven, eight, nine = ({"X-Forwarded-For": "203.0.113.%d" % last} for last in (7, 8, 9))
-        first = self.hold(stand, 12, self.stalled_save(stand, cookie, "X-Forwarded-For: 203.0.113.7"))
+        first = self.hold(stand, 12, self.stalled_save(stand, cookie, "X-Forwarded-For: 203.0.113.7"), saves=True)
         for who in (cookie, None):
             answer = stand.get(ME if who else "/login", cookie=who, headers=seven)
             self.assertRefused(answer, 503, "too_many_connections")
@@ -2528,18 +2549,19 @@ class CapacityTests(Case):
         # Everybody else is served: the cap is the client's, not the edge's.
         self.assertEqual(stand.get(ME, cookie=cookie, headers=eight).status, 200)
         self.assertEqual(stand.get("/login", headers=eight).status, 200)
-        more = self.hold(stand, 12, self.stalled_save(stand, cookie, "X-Forwarded-For: 203.0.113.8"), already=12)
+        more = self.hold(stand, 12, self.stalled_save(stand, cookie, "X-Forwarded-For: 203.0.113.8"), already=12,
+                         saves=True)
         self.assertRefused(stand.get(ME, cookie=cookie, headers=eight), 503, "too_many_connections")
         self.assertWaitedFor(more, "twelve of another address are let in beside the first twelve")
         self.assertEqual(stand.get(ME, cookie=cookie, headers=nine).status, 200)
         self.assertWaitedFor(first, "the twelfth connection of an address is still let in")
 
     def test_the_twelve_are_counted_for_an_ipv6_subscriber_as_a_whole(self):
-        stand = self.new_stand(env={"MONEY_TRUSTED_PROXIES": "127.0.0.0/8"})
+        stand = self.new_stand(env=self.EDGE, tune=HELD)
         cookie = stand.session("mika")
         wires = [self.wire(self.stalled_save(stand, cookie, "X-Forwarded-For: 2001:db8:1:2::%x" % (number + 1)), stand)
                  for number in range(12)]
-        self.assertTrue(until(lambda: stand.server.in_flight() >= 12))
+        self.assertTrue(until(lambda: stand.counted() == 12), "the stalled saves were not let in")
         same = stand.get(ME, cookie=cookie, headers={"X-Forwarded-For": "2001:db8:1:2:aaaa::9"})
         self.assertRefused(same, 503, "too_many_connections")
         other = stand.get(ME, cookie=cookie, headers={"X-Forwarded-For": "2001:db8:1:3::1"})
@@ -2547,9 +2569,9 @@ class CapacityTests(Case):
         self.assertWaitedFor(wires, "twelve addresses of one /64 are twelve connections of one caller, all let in")
 
     def test_without_a_trusted_proxy_a_header_gets_an_address_no_more_connections(self):
-        stand = self.new_stand()
+        stand = self.new_stand(tune=HELD)
         cookie = stand.session("mika")
-        wires = self.hold(stand, 12, self.stalled_save(stand, cookie))
+        wires = self.hold(stand, 12, self.stalled_save(stand, cookie), saves=True)
         for forwarded in ("198.51.100.77", "10.0.0.1", "::1"):
             answer = stand.get(ME, cookie=cookie, headers={"X-Forwarded-For": forwarded})
             self.assertRefused(answer, 503, "too_many_connections")
@@ -2558,18 +2580,19 @@ class CapacityTests(Case):
             wire.close()
         self.assertTrue(until(lambda: stand.server.connections() == 0))
         self.assertEqual(stand.get(ME, cookie=cookie).status, 200)
-        again = self.hold(stand, 12, self.stalled_save(stand, cookie))
+        again = self.hold(stand, 12, self.stalled_save(stand, cookie), saves=True)
         self.assertRefused(stand.get(ME, cookie=cookie), 503, "too_many_connections")
         self.assertWaitedFor(again, "the address did not get its twelve back")
 
     def test_with_no_thread_free_the_answer_is_a_bare_503(self):
-        stand = self.new_stand()                    # 32 threads
+        # 32 threads, each kept by a caller that says nothing - for as long as the test runs, not for 30 seconds.
+        stand = self.new_stand(tune={"socket_timeout": NEVER})
         cookie = stand.session("mika")
         idle = [self.wire(stand=stand) for _number in range(32)]
         self.assertTrue(until(lambda: stand.server.connections() == 32))
         for _who in ("a stranger", "a founder"):
             wire = self.wire(stand=stand)
-            self.assertTrue(wire.hangs_up(4.0))
+            self.assertTrue(wire.hangs_up())
             self.assertTrue(wire.received.startswith(b"HTTP/1.1 503 "), wire.received[:80])
             head, blank, body = wire.received.partition(b"\r\n\r\n")
             self.assertEqual((blank, body), (b"\r\n\r\n", b""), "bare: a status and no body")
@@ -2769,12 +2792,14 @@ class MalformedTests(Case):
         return data
 
     def served_in(self, data: bytes) -> float:
-        """The quickest of three: how long the server takes over this request, in seconds."""
+        """The quickest of three: what this request costs, in seconds of this process's own work (the
+        server is a thread of it). Not seconds on the wall: those also count every moment the machine
+        gave to somebody else, and a line of blanks is not slow because a neighbour is busy."""
         took = []
         for _run in range(3):
-            began = time.monotonic()
+            began = time.process_time()
             answer = exchange(self.stand, data)
-            took.append(time.monotonic() - began)
+            took.append(time.process_time() - began)
             self.assertEqual(answer.status, 200, answer.raw[:120])
         return min(took)
 
@@ -2837,7 +2862,7 @@ class MalformedTests(Case):
         for data in (b"",):
             wire = self.wire(data)
             wire.done()
-            self.assertTrue(wire.hangs_up(4.0))
+            self.assertTrue(wire.hangs_up())
             self.assertEqual(wire.received, b"")
         self.assertEqual([line for line in stand.log_lines() if "path" in line], [], "and nothing is written down")
 
@@ -2904,7 +2929,7 @@ class MalformedTests(Case):
                     data[at:at] = dice.choice(spice)
                 else:
                     del data[at:]
-            answer = exchange(stand, bytes(data), wait=5.0)
+            answer = exchange(stand, bytes(data))
             status = answer.status if answer is not None else 0
             statuses[status] = statuses.get(status, 0) + 1
             if answer is not None and answer.status >= 500:
@@ -2919,11 +2944,13 @@ class MalformedTests(Case):
         # Every thread, every slot and every count is back where it was: the eight signed-out slots can all
         # be taken again (this stand lets one address take them all, so that the count of all is what is seen).
         self.assertEqual(stand.get("/login").status, 200)
+        self.assertEqual((stand.server.signed_out(), stand.counted()), (0, 0))
+        stand.retune(**HELD)        # from here on: what is held stays held until the test ends
         wires = [self.wire(lines_of(stand, "POST", LOGIN, "Origin: " + stand.origin, "Content-Type: application/json",
                                     "Content-Length: 40"), stand) for _slot in range(8)]
-        self.assertTrue(until(lambda: stand.server.in_flight() == 8))
+        self.assertTrue(until(lambda: stand.server.signed_out() == 8), "a slot was lost on the way")
         self.assertRefused(stand.post(LOGIN, {}), 503, "busy")
-        self.assertEqual([wire.peek() for wire in wires], [b""] * 8, "a slot was lost on the way")
+        self.assertEqual([(wire.peek(), wire.ended) for wire in wires], [(b"", False)] * 8, "a slot was lost on the way")
         self.assertIn(stand.get(LEDGER, cookie=stand.session("vanya")).json()["rev"], (0, 1))
 
 

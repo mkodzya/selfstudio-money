@@ -28,14 +28,13 @@ import os
 import re
 import socket
 import stat
-import time
 import unittest
 from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Set, Tuple
 from unittest import mock
 
 from moneyd import auth, config, httpd, store
 from tests import _harness
-from tests._harness import PASSWORD, ledger, plan
+from tests._harness import HELD, NEVER, PASSWORD, PATIENCE, ledger, plan, until
 
 DOC = os.path.join(_harness.CHECKOUT, "docs", "api.md")
 KIB = 1024
@@ -273,15 +272,6 @@ def pair(answer: Any) -> Tuple[int, Optional[str]]:
     return answer.status, code
 
 
-def until(probe: Callable[[], Any], seconds: float = 3.0, every: float = 0.01) -> Any:
-    deadline = time.monotonic() + seconds
-    while True:
-        value = probe()
-        if value or time.monotonic() > deadline:
-            return value
-        time.sleep(every)
-
-
 @contextlib.contextmanager
 def read_only(directory: str) -> Iterator[None]:
     """The directory refuses new files for as long as the ``with`` lasts: a disk that refuses a write."""
@@ -332,7 +322,7 @@ def bare(data: bytes) -> Bare:
 @contextlib.contextmanager
 def held(stand: Any, data: bytes) -> Iterator[socket.socket]:
     """A connection that has sent ``data`` and stays open for as long as the ``with`` lasts."""
-    connection = socket.create_connection(("127.0.0.1", stand.port), timeout=5)
+    connection = socket.create_connection(("127.0.0.1", stand.port), timeout=PATIENCE)
     try:
         if data:
             connection.sendall(data)
@@ -1146,25 +1136,30 @@ class EveryRequestTests(unittest.TestCase):
             with open(os.path.join(stand.data_dir, "auth", "users.json"), "wb") as handle:
                 handle.write(b"{")
             out["the accounts file is damaged"] = stand.get("/api/me", cookie=cookie)
-        with _harness.Stand(tune={"signed_out_slots": 1, "max_connections_per_address": 2}) as stand:
+        # What is held on these two stands is held until the ``with`` lets go of it, and the request
+        # that is to be turned away is sent when the server holds what came before it - not at once
+        # after: it is served by another thread, which may reach the limit first.
+        with _harness.Stand(tune=dict(HELD, signed_out_slots=1, max_connections_per_address=2)) as stand:
             cookie = stand.session("mika")
             lines = ("Origin: " + stand.origin, "Content-Type: application/json", "Content-Length: 40")
             # A sign-in whose body never comes holds the one signed-out slot: the next request without a
             # session that brings a body is turned away (one that brings none is not - it cannot stall).
             with held(stand, head(stand, "POST", LOGIN, *lines)):
-                out["no signed-out slot"] = until(
-                    lambda: (lambda a: a if a.status == 503 else None)(stand.post(LOGIN, {})))
+                self.assertTrue(until(lambda: stand.server.signed_out() == 1), "the stalled sign-in was not let in")
+                out["no signed-out slot"] = stand.post(LOGIN, {})
                 # ... and with a founder's save that stalls as well, the address has its two connections.
+                # (The request that was just turned away is counted until the server has let go of it, a
+                # moment after its answer: the save is sent when there is room for it.)
+                self.assertTrue(until(lambda: stand.counted() == 1), "the request turned away is still counted")
                 with held(stand, head(stand, "PUT", LEDGER, *lines, cookie=cookie)):
-                    out["too many connections of one address"] = until(
-                        lambda: (lambda a: a if pair(a) == (503, "too_many_connections") else None)(
-                            stand.get("/api/me", cookie=cookie)))
-        with _harness.Stand(tune={"max_connections": 1}) as stand:
+                    self.assertTrue(until(lambda: stand.counted() == 2), "the stalled save was not let in")
+                    out["too many connections of one address"] = stand.get("/api/me", cookie=cookie)
+        with _harness.Stand(tune={"max_connections": 1, "socket_timeout": NEVER}) as stand:
             with held(stand, b""):
-                sent = until(lambda: (lambda raw: raw if raw.startswith(b"HTTP/1.1 503 ") else None)(
-                    stand.raw(b"", half_close=True)))
-        out["no thread"] = bare(sent or b"")
-        out["no thread, as it was sent"] = sent or b""
+                self.assertTrue(until(lambda: stand.server.connections() == 1), "the one thread was not taken")
+                sent = stand.raw(b"", half_close=True)
+        out["no thread"] = bare(sent)
+        out["no thread, as it was sent"] = sent
         return out
 
     def answered(self) -> Dict[str, Any]:
