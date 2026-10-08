@@ -764,18 +764,26 @@ and a request id; the detail is in the log.
 Gates. Money's prod is not cut over, and the real ledger is not loaded into it,
 until each of these is done or decided:
 
-- [ ] an independent security review of `moneyd`'s sign-in and HTTP code and of
+- [x] an independent security review of `moneyd`'s sign-in and HTTP code and of
       its tests has **passed**. What has happened so far is the verification
       of 7 October described at the top, by the studio's own sessions, and one
       round of fixes that nobody has re-reviewed. Whether that is the review
-      this gate means, or a person from outside is, is the owner's decision;
+      this gate means, or a person from outside is, is the owner's decision.
+      **Decided 8 October 2026: the owner launches on the verification of
+      7 October.** Nobody from outside has read the code; that is accepted, not
+      done, and a reader from outside is still wanted after the launch. The
+      same ledger was by then on the test stand, behind the same code;
 - [ ] a backup of the prod stand has been taken **and a restore of it
       rehearsed** (`money-restore --rehearse`) — once on the empty stand, and
       again on the first backup that holds the real ledger;
-- [ ] the **off-host copy** is decided by the owner: where a copy of the backups
-      lives outside this machine, or an explicit acceptance of same-disk only;
-- [ ] the **second factor** is decided by the owner: password only for now, or a
-      one-time code before the real ledger is hosted.
+- [x] the **off-host copy** is decided by the owner: where a copy of the backups
+      lives outside this machine, or an explicit acceptance of same-disk only.
+      **Decided 8 October 2026: same disk only, accepted.** A dead disk takes
+      the stand and its backups together; what is then left is whatever a
+      founder last took with «Скачать» on `/data`;
+- [x] the **second factor** is decided by the owner: password only for now, or a
+      one-time code before the real ledger is hosted. **Decided 8 October
+      2026: password only for now.**
 
 ## Next
 

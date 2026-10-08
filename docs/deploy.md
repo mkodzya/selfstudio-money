@@ -1157,6 +1157,19 @@ urgent platform fix in that time goes as its own hotfix off `main`.
 to move, and it moves **before** the name does. New prod is never emptier than
 old prod.
 
+**Changed by the owner on 8 October 2026.** What prod receives is not the
+platform's ledger but what the test stand holds - the ledger reconciled with
+the founders' sheet and the plan built on it that day - and the owner carries
+it himself, through the pages: «Скачать» for both documents on the test
+stand's `/data`, then the page's own «Загрузить данные из файла» and `/data`
+on prod. So steps 11 and 12 below are not taken as written: nothing is
+exported from the platform, and the import command stays unbuilt. Two things
+follow. The upload needs a prod that answers under its name, so the name moves
+(step 14) before the data arrives, and for those minutes prod is empty - with
+one login on it, the owner's. And the floor of step 12 is still set first,
+above the platform's revision: an old tab of the platform's Money must not be
+able to save over what is uploaded.
+
 | # | Step | Who | State / reversible |
 |---|---|---|---|
 | 1 | Server probes | **[session]** | done 7 Oct; read-only |
