@@ -41,8 +41,10 @@ want=$(version playwright "$ROOT/package.json")
 have=$(version version "$TOOLS/node_modules/playwright/package.json")
 [ -n "$want" ] && [ "$want" = "$have" ] || { echo "check-one: Playwright under $TOOLS is $have; package.json names $want" >&2; exit 2; }
 
-# One run at a time: the checks listen on one port, and one browser is what the Mac was promised.
-if pgrep -f "scripts/money-checks\.mjs" >/dev/null 2>&1; then
+# One run at a time: the checks listen on one port, and one browser is what the Mac was promised. What is looked
+# for is a run of the copy this script makes - not any command that names the file, or an editor, a grep or the
+# shell that started this script would count as one.
+if pgrep -f "/run\.[A-Za-z0-9]*/scripts/money-checks\.mjs" >/dev/null 2>&1; then
   echo "check-one: a run of the checks is already going" >&2
   exit 2
 fi
