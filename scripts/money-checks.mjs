@@ -4488,6 +4488,34 @@ await run('rv-dup', 'a list of the month can be written again from the month bef
   await finish(pg);
 });
 
+await run('rv-x', 'a row of the plan is taken away by the cross at its end: one press, and «Отменить» beside what it says', async () => {
+  // Mika, 8 October 2026, with eight rows of November he did not want: deleting was «ещё», then «Удалить», then
+  // «Точно удалить?». October here holds a row of its own (Person G), a row that repeats on (Person B) and a row
+  // whose repeat ends with October (Person L).
+  const pg = await scene('the cross', ledA(), planW({ team: [row('g', 'Person G', 1000, '2026-10-08'), every('rL', 'Person L', 500, 15, '2026-10', { rec: { day: 15, from: '2026-10', to: '2026-10' } })] }), { H: 60 });
+  await pg.click('.nav [data-tab="cash"]');
+  const X = (id) => `#cs-sec-team tr[data-cs-id="${id}"] [data-ed-do="del"]`, team = () => pg.evaluate(() => window.__cash.state().team.map((r) => [r.id, r.rec && r.rec.x ? JSON.stringify(r.rec.x) : ''].join(' ')));
+  same([await pg.$$eval('#cs-sec-team tr[data-cs-id] [data-ed-do="del"]', (l) => l.length), await pg.$$eval('#cs-sec-taxes tr[data-cs-id] [data-ed-do="del"]', (l) => l.length)], [3, 0], 'every row a founder wrote ends with a cross; a tax the page works out has none — it is not a row to take away');
+  // a row of its own: gone at once
+  await pg.click(X('g'));
+  await saved(pg);
+  same([await team(), await toastText(pg), await pg.$('[data-ed-card="row"]')], [['rB ', 'rL '], 'Удалено: Person G', null], 'a row of its own goes with one press — no card, no «Точно удалить?» — and the page says «Удалено: Person G», with «Отменить»');
+  await pg.click('#toastUndo');
+  await saved(pg);
+  same((await team()).length, 3, '… which brings it back');
+  // the last month of a repeat is just a row of this month
+  await pg.click(X('rL@2026-10'));
+  await saved(pg);
+  same([(await team()).find((r) => r.startsWith('rL')), await pg.$('[data-ed-card="row"]')], ['rL {"2026-10":{"off":true}}', null], 'the last month of a repeating row goes the same way: there is no «и дальше» to ask about');
+  // a month of a repeat that goes on has two answers, so the press asks — under the row, as «ещё → Убрать» did
+  await pg.click(X('rB@2026-10'));
+  same([await pg.$$eval('[data-ed-card="row"] [data-ed-askbox="del"] [data-ed-go]', (l) => l.map((e) => [e.dataset.edGo, e.textContent.trim()].join(': '))), (await team()).find((r) => r.startsWith('rB'))], [['del-only: только октябрь', 'del-onward: октябрь и дальше'], 'rB '], 'a month of a row that repeats on is asked about first — «только октябрь» or «октябрь и дальше» — and nothing is written until the answer');
+  await pg.click('[data-ed-card="row"] [data-ed-go="del-only"]');
+  await saved(pg);
+  same((await team()).find((r) => r.startsWith('rB')), 'rB {"2026-10":{"off":true}}', '«только октябрь» takes October out of the repeat and leaves the months after it');
+  await finish(pg);
+});
+
 await run('rv-small', 'the rest of the review: a save the server did not take, the wordmark, a paid row made to repeat, a name the table knows, a tax row renamed after a founder, an unsorted receipt in «Можно вывести»', async () => {
   // A save the server fails is said out loud and tried again by itself.
   serve(ledP(), await plan2());
