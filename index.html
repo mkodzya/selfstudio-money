@@ -1051,7 +1051,10 @@ const COLS={
  partyId:{exact:["инн получателя"],has:[]},
  partyBank:{exact:["наименование банка получателя"],has:[]},
  id:{exact:["id","transferwise id","transaction id","номер документа","номер"],has:["transaction id","wise id"]},
- holder:{exact:["card holder full name","cardholder","card holder"],has:["card holder","cardholder"]}
+ holder:{exact:["card holder full name","cardholder","card holder"],has:["card holder","cardholder"]},
+ // What the account stood at after the row, where a statement prints it (Wise: «Running Balance»).
+ // (Any column that names a balance is tried: stmtEnds believes it only when it adds up with the rows.)
+ bal:{exact:["running balance","balance","остаток","баланс","остаток после операции","исходящий остаток"],has:["balance","остаток","баланс"],not:["opening","start","входящ","начал"]}
 };
 function mapCols(hdr){
  const h=hdr.map(x=>String(x||"").trim().toLowerCase()),m={};
@@ -1125,17 +1128,33 @@ function parseGrid(grid,name){
   // two accounts in one bank can tell which of them the row moved.
   const mine=(g("account")||(map.payerAcc!=null&&map.partyAcc!=null?g(a<0?"payerAcc":"partyAcc"):"")).replace(/\D/g,"");
   if(mine.length>=4)accs[mine]=(accs[mine]||0)+1;
-  rows.push({d,a,cur:CURS.includes(cur)?cur:"",hasCur:!!cur,t:g("desc"),p:a>0?(g("payer")||g("party")):toBank?shop.trim():(g("party")||g("merchant")||g("payer")),h:g("holder"),tid:g("id"),own});
+  rows.push({d,a,cur:CURS.includes(cur)?cur:"",hasCur:!!cur,t:g("desc"),p:a>0?(g("payer")||g("party")):toBank?shop.trim():(g("party")||g("merchant")||g("payer")),h:g("holder"),tid:g("id"),own,rb:map.bal!=null?parseNum(r[map.bal]):NaN});
  }
  if(!rows.length)return{error:"Колонки нашла, но операций в файле нет."};
+ stmtEnds(rows);
  return{bank,defCur,rows:foldFees(rows),cols:Object.keys(map).length,acn:Object.keys(accs).sort((x,y)=>accs[y]-accs[x])[0]||""};
+}
+// The statement's own balance (the owner's decision of 9 October 2026: «бери остатки из выписок»). A statement that
+// prints what the account stood at after every row says, by its last row, what the account holds - nobody has to
+// type it, and nobody has to guess which payments of a day came before a typed figure and which after. The column
+// is believed only when it adds up: every row's balance is the one before it plus the row's own sum, all the way
+// through, in one direction. That also says which way the file runs (Wise: the newest row first). The row the file
+// ends at is marked with that balance (`eb`); a file that does not add up marks nothing, and is read as before.
+function stmtEnds(rows){
+ const by={};rows.forEach(r=>{(by[r.cur]||(by[r.cur]=[])).push(r);});
+ Object.keys(by).forEach(k=>{const g=by[k],n=g.length,near=(x,y)=>Math.abs(x-y)<0.006;
+  if(!g.every(r=>isFinite(r.rb)))return;
+  let fwd=true,rev=true;for(let i=1;i<n;i++){if(!near(g[i].rb,g[i-1].rb+g[i].a))fwd=false;if(!near(g[i-1].rb,g[i].rb+g[i-1].a))rev=false;}
+  const last=n===1?g[0]:fwd&&!rev?g[n-1]:rev&&!fwd?g[0]:null;
+  if(last&&!g.some(r=>r.d>last.d))last.eb=round2(last.rb);});
+ rows.forEach(r=>{delete r.rb;});
 }
 
 // Wise prints its fee as a row of its own; the sheet records the payment with the fee inside.
 function foldFees(rows){
  const ref=r=>(/^FEE-(.+)$/i.exec(r.tid||"")||/wise charges for:\s*(\S+)/i.exec(r.t||"")||[])[1],byId={};
  rows.forEach(r=>{if(r.tid&&!ref(r))byId[r.tid]=r;});
- return rows.filter(r=>{const id=ref(r),par=id&&byId[id];if(!par||par.cur!==r.cur||r.a>0)return true;par.a=round2(par.a+r.a);par.fee=round2((par.fee||0)-r.a);return false;});
+ return rows.filter(r=>{const id=ref(r),par=id&&byId[id];if(!par||par.cur!==r.cur||r.a>0)return true;par.a=round2(par.a+r.a);par.fee=round2((par.fee||0)-r.a);if(r.eb!=null)par.eb=r.eb;return false;});
 }
 // ---------- pdf statements ----------
 function loadScript(src){return new Promise((res,rej)=>{const e=document.createElement("script");e.src=src;e.onload=res;e.onerror=()=>rej(new Error("script"));document.head.appendChild(e);});}
@@ -1194,6 +1213,9 @@ function parsePdfLines(lines,name){
  if(!rows.length)return{error:col?"Таблицу в PDF нашла, но операций в ней не прочитала.":"Не нашла в PDF таблицу операций с колонками «ушло» и «пришло»."};
  const sum=rows.reduce((a,r)=>a+r.a,0),check=open!=null&&close!=null?(Math.abs(round2(open+sum-close))<0.005?"ok":round2(open+sum-close)):null;
  rows.forEach(r=>{delete r.pg;delete r.ly;delete r.n;});
+ // (A PDF whose rows add up from its opening balance to its closing one: the closing one is what the account stood
+ // at after the last day in it. Any row of that day carries it - the engine asks only for the day.)
+ if(check==="ok"){const to=rows.reduce((a,r)=>r.d>a?r.d:a,""),end=rows.filter(r=>r.d===to).pop();if(end)end.eb=round2(close);}
  const bank=/barclays/i.test(all+name)?"Barclays":/revolut/i.test(all+name)?"Revolut":/\bwise\b/i.test(all+name)?"Wise":guessBank(name,[])||"Barclays";
  const nums={};(all.match(/Account No\.?\s*\d{8}/gi)||[]).forEach(z=>{const n=z.slice(-8);nums[n]=(nums[n]||0)+1;});
  const ownAccs=Object.keys(nums),acc=ownAccs.slice().sort((a,b)=>nums[b]-nums[a])[0]||"";
@@ -1244,7 +1266,7 @@ const keyOfText=r=>(norm(r.o&&r.o.p)||norm(String((r.o&&r.o.t)||"").replace(/\(f
 const seenKey=r=>{const k=keyOf(r);return k.length>=4?r.b+"|"+(r.o.a<0?"out":"in")+"|"+k:"";};
 // Looked up as the map's own key only: a label «constructor» or «__proto__» must not be answered by Object's.
 const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.hasOwnProperty.call(a,k.toLowerCase())?a[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
-const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
+const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
@@ -1265,13 +1287,19 @@ function unpair(r){if(!r.pair)return;const m=S.inbox.find(q=>q.pair===r.pair&&q!
 // Every row is stamped with the moment it was uploaded. The forecast lets a statement row close a line of the plan
 // only if the row came after the line was typed: a payment that was already on the page is not the one still awaited.
 function ingest(parsed,file,src){
- const keys=new Set(S.tx.concat(S.inbox).map(r=>r.key)),at=Date.now();let added=0,dup=0;
+ const keys=new Map(S.tx.concat(S.inbox).map(r=>[r.key,r])),at=Date.now(),ends=[],months=new Set();let added=0,dup=0;
+ // (`o.bal`, `o.balAt`: what the statement says the account stood at after this row, and when the page read that.
+ // The row may have been here already, from an earlier file or from before balances were read: it is marked all the
+ // same - what a statement says of the account after a row does not depend on which file brought the row.)
+ const mark=(r,p)=>{if(p.eb==null||!r.o)return;ends.push({cur:r.o.cur,d:r.d,v:p.eb});if(r.o.bal===p.eb&&r.o.balAt>0)return;r.o.bal=p.eb;r.o.balAt=at;if(S.tx.includes(r))months.add(r.d.slice(0,7));};
  parsed.rows.forEach(p=>{
   const cur=p.cur||file.cur,key=[file.bank+(file.acc?"·"+file.acc:""),p.d,p.a,cur,p.tid||norm(p.t+" "+p.p).slice(0,60)].join("|");
-  if(keys.has(key)){dup++;return;}keys.add(key);
+  if(keys.has(key)){dup++;mark(keys.get(key),p);return;}
   const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||file.acn||"",dir:p.a>0?1:-1,a:0,o:Object.assign({a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},p.own?{own:true}:{}),key,s:src,at};
+  keys.set(key,r);mark(r,p);
   reprice(r);classify(r);r.twin=findTwin(r);S.inbox.push(r);added++;});
- return{added,dup};
+ if(months.size)saveMonths([...months]);
+ return{added,dup,end:ends.map(e=>(e.v<0?"−":"")+fmt(Math.abs(e.v),2,SYM[e.cur]||"")+(SYM[e.cur]?"":" "+e.cur)+" на "+dRu(e.d)).join(", ")};
 }
 async function handleFiles(list){
  if(RO)return toast(RO_SAY);
@@ -1634,7 +1662,7 @@ function renderUpload(){
  ${S.files.length?`<section class="card"><h2>Загружено в этот раз${ui.lastTr?`<span class="note">переводов между своими убрано без вашего участия: ${ui.lastTr}</span>`:""}</h2><div class="files">${S.files.map(f=>f.error?
    `<div class="file err"><div class="fn">${esc(f.name)}</div><div>${esc(f.error)}</div></div>`:
    `<div class="file"><div class="fn" title="${esc(f.name)}">${esc(f.name)}${f.demo?' <span class="pill info">пример</span>':""}</div>
-    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc||f.acn?" · счёт ·"+esc((f.acc||f.acn).slice(-4)):""}${f.left?" · не взято: "+esc(f.left):""}</div>
+    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc||f.acn?" · счёт ·"+esc((f.acc||f.acn).slice(-4)):""}${f.left?" · не взято: "+esc(f.left):""}${f.end?" · остаток по выписке: "+esc(f.end):""}</div>
     <div class="row"><span class="pill ok">новых ${f.added}</span>${f.dup?`<span class="pill">уже были ${f.dup}</span>`:""}${f.pdf?(f.check==="ok"?'<span class="pill ok">сошлось с остатками выписки</span>':f.check==null?'<span class="pill">остатки в выписке не найдены</span>':`<span class="pill dup">расходится с остатками на ${fmt(Math.abs(f.check),2)}</span>`):""}</div>
     <div class="row"><label class="lbl" for="fb-${f.id}">Банк</label><select id="fb-${f.id}" data-fbank="${f.id}">${opt(BANKS.map(b=>[b,b]),f.bank)}</select>
     ${f.needCur?`<label class="lbl" for="fc-${f.id}">Валюта</label><select id="fc-${f.id}" data-fcur="${f.id}">${opt(CURS.map(b=>[b,b]),f.cur)}</select>`:""}</div></div>`).join("")}</div></section>`:""}
@@ -2966,7 +2994,10 @@ const Cash=(()=>{
 //    id, bank, cur, name, title    plan row id (null if not in the plan); name is "Wise GBP", title the row's own name
 //    inPlan, active, material      active: its bank has a ledger row in the last 60 days or an open written line
 //                                  names it. material: active and worth ≥ 10% of now, or has an open line within 14 days
-//    anchor                        null | {amt (native), asOf, at, by} — the typed balance
+//    anchor                        null | {amt (native), asOf, at, by, file?} — the balance the account stands on: the
+//                                  typed one, or (`file`) the one its statement prints after its last row, when that
+//                                  is the fresher - of a later day, or entered later on the same day
+//    typed                         null | {amt, asOf, at, by} — what a founder typed, whichever of the two is in force
 //    legacy, old                   a v1 balance waiting to be confirmed, and its amount (native) to pre-fill
 //    after, marks, est             native: statement rows dated after asOf; hand marks counted; anchor+after+marks
 //    same                          native, ≤ 0: the part of `after` that is payments OUT dated on the balance's own
@@ -3308,7 +3339,7 @@ const Live=(()=>{
    return{id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0};};
   const pool=txs.filter(r=>r.c&&r.c!=="skip").map(r=>row(r,false)).concat(inb.filter(isProv).map(r=>row(r,true))).sort(byDate);
   const poolIds=new Set(pool.map(r=>r.id)),anyRow={};all.forEach(r=>{anyRow[String(r.id)]=r;});
-  const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:r.c==="skip"||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,"")})).sort(byDate);
+  const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:r.c==="skip"||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,""),bal:isFinite(r.o.bal)&&r.o.bal!==null&&+r.o.balAt>0?+r.o.bal:null,balAt:+r.o.balAt||0})).sort(byDate);
   // Banks are named by the ledger, and a ledger may name one «constructor»: the maps keyed by a bank have no
   // prototype to answer for it.
   let sheetEnd="";const lastOf=Object.create(null),ups=Object.create(null);
@@ -4044,12 +4075,23 @@ const Live=(()=>{
   // with, moves the first — as every row did while a plan had no way to tell two such accounts apart.
   const rowHome=new Map();facts.forEach(f=>{const base=accOf[f.b+"|"+f.cur];
    rowHome.set(f,base&&f.ac?ACC.find(a=>a.bank===f.b&&a.cur===f.cur&&a.ac.length>=3&&(f.ac.endsWith(a.ac)||a.ac.endsWith(f.ac)))||base:base);});
+  // The statement's own word (the owner's decision of 9 October 2026). A row may carry what its statement says the
+  // account stood at after it (`bal`, read at `balAt`). The latest such row of an account is a balance like a typed
+  // one - and the fresher of the two is the one the account stands on: the one of the later day, and on one day the
+  // one entered later. A typed balance stays what a founder typed (`typed`); it is taken again as soon as one is
+  // typed for a later day, or later on the same day. After a statement's balance nothing is guessed: a row of its
+  // day that came with a later file is after it, whichever way the money went - the file that carried the balance
+  // ended at that row.
+  ACC.forEach(a=>{a.typed=a.anchor;let end=null;
+   facts.forEach(f=>{if(f.bal==null||rowHome.get(f)!==a)return;if(!end||f.d>end.d||(f.d===end.d&&f.balAt>end.balAt))end=f;});
+   if(end&&(!a.anchor||end.d>a.anchor.asOf||(end.d===a.anchor.asOf&&end.balAt>a.anchor.at)))a.anchor={amt:end.bal,asOf:end.d,at:end.balAt,by:"",file:true};});
   ACC.forEach(a=>{const A=a.anchor;a.cov=cov(a.bank);a.after=0;a.same=0;a.marks=0;a.est=null;a.gbp=null;
    a.active=!!(lastOf[a.bank]&&lastOf[a.bank]>=recent)||items.some(it=>asks(it)&&it.acct===a.key);
    if(!A)return;
    const ownDay=A.at>0&&dayOf(A.at)===A.asOf;
    facts.forEach(f=>{if(rowHome.get(f)!==a)return;const p=tookMark.get(f.id);
-    if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)))a.after+=f.a;
+    if(A.file){if(f.d>A.asOf||(f.d===A.asOf&&f.at>A.at))a.after+=f.a;}
+    else if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)))a.after+=f.a;
     else if(f.d===A.asOf&&!p&&ownDay&&f.at>A.at&&f.a<0){a.after+=f.a;a.same+=f.a;}});
    items.forEach(it=>{if(it.acct!==a.key||!it.done||it.done.by!=="mark")return;const p=it.paid;
     it.counts=later(p,A);
@@ -4058,7 +4100,7 @@ const Live=(()=>{
   const missing=ACC.filter(a=>a.active&&!a.anchor),v0=missing.length>0,nowRaw=ACC.reduce((s,a)=>s+(a.gbp||0),0),soon=plus(T,14);
   ACC.forEach(a=>{const A=a.anchor;a.through=A&&A.asOf>a.cov?A.asOf:a.cov;if(a.through>T)a.through=T;a.age=a.through?dn(T)-dn(a.through):null;
    a.material=a.active&&((!!A&&Math.abs(a.gbp)>0&&Math.abs(a.gbp)>=0.1*Math.abs(nowRaw))||items.some(it=>it.acct===a.key&&it.open&&it.date<=soon));
-   a.stale=a.material&&a.age!=null?(a.age>=16?"old":a.age>=9?"ask":""):"";a.handDays=A?dn(T)-dn(A.asOf):null;a.handOld=!!(a.material&&A&&a.handDays>30);});
+   a.stale=a.material&&a.age!=null?(a.age>=16?"old":a.age>=9?"ask":""):"";a.handDays=A?dn(T)-dn(A.asOf):null;a.handOld=!!(a.material&&A&&!A.file&&a.handDays>30);});
   const mat=ACC.filter(a=>a.material&&a.through),ref=(mat.length?mat:ACC.filter(a=>a.anchor&&a.through)).slice().sort((a,b)=>a.through<b.through?-1:a.through>b.through?1:0)[0];
   const nowDate=ref?ref.through:"",nowIsToday=!!nowDate&&nowDate>=plus(T,-1),nowApprox=marksN>0||ACC.some(a=>a.stale||a.handOld);
 
@@ -4279,7 +4321,7 @@ const Live=(()=>{
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
     wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
-  const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
+  const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
   const outItems=items.map(outItem),mins=days.reduce((m,x)=>Math.min(m,x.e),0);
   const outPer=X=>({key:X.key,rule:X.rule.id,per:X.per,name:X.rule.name+" за "+pname(X),pname:pname(X),start:X.start,end:X.end,due:X.due,date:X.d0,accF:r2(X.accF),accN:r2(X.accN),sheet:!!X.sheet,accP:r2(X.accP),
@@ -4781,7 +4823,7 @@ const Ed=(()=>{
   if((a==="skip"||a==="del")&&it.src==="occ"){const ym=it.occ.ym;
    return `<div class="ed-ask" data-ed-askbox="${a}"><span>${a==="del"?"Убрать":inn?"Не придёт":"Не платим"}:</span><div class="row"><button class="sm primary" data-ed-go="${a}-only">только ${mon(ym)}</button><button class="sm" data-ed-go="${a}-onward">${mon(ym)} и дальше</button>${x}</div></div>`;}
   if(a==="paid"){const A=inBal(it);
-   if(A)return `<div class="ed-ask" data-ed-askbox="paid"><span>Остаток ${esc(acName(A))} вписан на ${dRu(A.anchor.asOf)}, а строка — от ${dRu(it.date)}. Эти деньги:</span><div class="row"><button class="sm primary" data-ed-go="paid-in">уже в остатке</button><button class="sm" data-ed-go="paid-after">${inn?"пришли":"ушли"} позже</button>${x}</div></div>`;}
+   if(A)return `<div class="ed-ask" data-ed-askbox="paid"><span>Остаток ${esc(acName(A))} ${A.anchor.file?"— по выписке на":"вписан на"} ${dRu(A.anchor.asOf)}, а строка — от ${dRu(it.date)}. Эти деньги:</span><div class="row"><button class="sm primary" data-ed-go="paid-in">уже в остатке</button><button class="sm" data-ed-go="paid-after">${inn?"пришли":"ушли"} позже</button>${x}</div></div>`;}
   // «Оплачено» on a tax first shows the payments to the tax authority that nothing has claimed: one of them may be it.
   if(a==="pay"&&it.src==="tax")return `<div class="ed-ask" data-ed-askbox="pay"><span>Какой из платежей — этот налог?</span>
    ${(it.pays||[]).map(p=>`<div class="ed-pay"><span>${esc(p.label||"Платёж")} · ${fmt(p.gbp,p.gbp%1?2:0)} · ${dRu(p.d)}</span><span class="row"><button class="sm" data-ed-payrow="${esc(p.id)}" data-ed-whole="1">Это он — весь</button><button class="sm" data-ed-payrow="${esc(p.id)}">Это часть</button></span></div>`).join("")}
@@ -4953,7 +4995,7 @@ const Ed=(()=>{
  function balCard(){
   const T=M.T,rank=a=>a.active&&!a.anchor?0:a.active?1:2,list=M.accounts.filter(a=>a.inPlan||a.active).sort((a,b)=>rank(a)-rank(b));
   const rows=list.map(a=>{const sym=SYM[a.cur]||"",A=a.anchor,old=a.legacy&&a.old;
-   const hint=A?`по расчёту ${nat(a.est,a.cur)} · вписан ${dRu(A.asOf)}${A.by?", "+A.by:""}`:old?`в старой Кассе было ${nat(a.old,a.cur)} — подтвердите сумму и дату`:a.active?"остатка нет":"счёт не используется";
+   const hint=A?`по расчёту ${nat(a.est,a.cur)} · ${A.file?"по выписке на "+dRu(A.asOf)+(a.typed?" — она свежее остатка, вписанного "+dRu(a.typed.asOf):""):"вписан "+dRu(A.asOf)+(A.by?", "+A.by:"")}`:old?`в старой Кассе было ${nat(a.old,a.cur)} — подтвердите сумму и дату`:a.active?"остатка нет":"счёт не используется";
    return `<div class="ed-acct" data-ed-acct="${esc(a.key)}"><div class="ed-an"><b>${esc(acName(a))}</b><span class="note">${esc(hint)}</span>${a.inPlan&&a.id!=null?`<button class="sm ghost ed-drop" data-ed-drop="${esc(a.id)}" aria-label="Убрать счёт ${esc(acName(a))} из плана">Убрать счёт из плана</button>`:""}</div>
     <label class="fld"><span>Остаток, ${esc(sym.trim()||a.cur)}</span><input type="number" step="any" inputmode="decimal" data-ed-bamt value="${A?a.est:old?a.old:""}" aria-label="Остаток ${esc(acName(a))}"></label>
     <label class="fld"><span>На дату</span><input type="date" data-ed-bdate max="${T}" value="${A||!old?T:""}" aria-label="Дата остатка ${esc(acName(a))}"></label>
@@ -5453,7 +5495,7 @@ const Today=(()=>{
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
   const A=M.accounts.filter(a=>a.inPlan||a.active),known=M.accounts.filter(a=>a.anchor).length,miss=M.missing.map(k=>acc(k).name);
   const row=a=>{const A0=a.anchor,words=[];
-   if(A0){words.push(`вписан ${dRu(A0.asOf)}${A0.by?", "+A0.by:""}`);if(a.cov&&a.cov>A0.asOf)words.push(`выписки по ${dRu(a.cov)}`);
+   if(A0){words.push(A0.file?`по выписке на ${dRu(A0.asOf)}`:`вписан ${dRu(A0.asOf)}${A0.by?", "+A0.by:""}`);if(A0.file)words.push("остаток после последнего платежа взят из самой выписки");if(a.cov&&a.cov>A0.asOf)words.push(`выписки по ${dRu(a.cov)}`);
     // Payments of the balance's own day that came with a later statement are taken to have left after it was typed.
     if(a.same<-0.005)words.push(`платежи за ${dRu(A0.asOf)} (${natv(round2(-a.same),a.cur)}) вычтены: считаю, что прошли после остатка`);
     if(a.stale)words.push(a.stale==="old"?`устарел · ${a.age} дн. без выписки`:`${a.age} дн. без выписки`);else if(a.handOld)words.push(`вписан ${a.handDays} дн. назад — сверьте с банком`);}
