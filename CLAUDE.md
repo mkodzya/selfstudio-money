@@ -279,6 +279,19 @@ a deploy:
   document is added to `ACT` in `index.html`**: that list is what a reader's
   page hides, shuts and ignores, and the check `rv-reader` walks every tab for
   a control that is in neither.
+- **The exchange rates come from the stand, by day** (the owner's decision of
+  9 October 2026). The page asks `GET /api/rates` once when it opens and never
+  again; nothing asks on a timer, and the page itself still speaks to no other
+  host - it is the server that asks the source (`moneyd/rates.py`; a dev stand
+  asks nobody). What has already happened is counted at the rate of its own
+  day and is never counted over when today's rate moves: a statement row is
+  turned into pounds once, when it is read, and carries the rate it was read
+  at (`o.r`); a row marked paid is counted by the table's rate of that day.
+  Only what is still ahead, and what the accounts hold today, follows the
+  latest rate - or a rate somebody typed over it (`fxo` in the ledger
+  document, beside the typed rates `fx`, which stay as they are for the days
+  before the table began). **A change to how the page counts must keep this**:
+  the check `rv-rates` moves today's rate and holds every figure of the past.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
   `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
   `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them
