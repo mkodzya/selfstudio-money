@@ -104,14 +104,22 @@ Since 9 October 2026 (the owner's decision: «я хочу сам создать 
   switching off, no link for the owner's own login. Nobody could undo the
   first two from there; and a way back in for an owner who has lost the
   password is made on the server, by somebody who can reach it.
-- **Before a link is made the owner's password is asked for again**, and
-  counted like a failed sign-in when it is wrong (10 per address, 30 per login
-  in 15 minutes): a link signs its holder in for thirty days and sets their
-  password, so a page somebody walked away from must not be enough to make
-  one, nor a way to guess the password without a limit.
+- **Before a link is made the owner's password is asked for again**, and a
+  wrong one is counted (10 per address, in the sign-in door's own count; 30
+  per login in 15 minutes, in a count of its own): a link signs its holder in
+  for thirty days and sets their password, so a page somebody walked away from
+  must not be enough to make one, nor a way to guess the password without a
+  limit. The count per login is not the sign-in door's, on purpose: a stranger
+  who keeps failing to sign in as the owner must not be able to shut the
+  owner's own doors.
 - **Anybody changes their own password** at a door of its own, which asks for
   the current one, closes every sign-in of that login and opens a new one for
-  the browser that asked.
+  the browser that asked. Should the new sign-in fail to be written, the
+  answer says that the password was changed all the same
+  (`503 password_changed`), and the log has its line.
+- **A sign-in that was open when a login was shut out never works again**:
+  the sessions are closed when a login is disabled, and once more before it is
+  enabled.
 - Every one of these — a person added, a role, a name, a link issued, a login
   switched off or on, a password changed, a password asked for again and not
   given — is a line in the security log with who did it.

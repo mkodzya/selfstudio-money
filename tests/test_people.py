@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from tests import _harness
 from tests._harness import PASSWORD, ledger, plan
 
-from moneyd import auth
+from moneyd import auth, store
 
 ME = "/api/me"
 LEDGER = "/api/founder/money"
@@ -338,6 +338,26 @@ class PeopleTests(Case):
         self.assertEqual(stand.post(LOGIN, {"login": "misha", "password": PASSWORD}).status, 200, "the password was kept")
         self.assertRefused(stand.get(ME, cookie=cookie), 401, "unauthenticated")     # what was closed stays closed
 
+    def test_a_sign_in_that_was_open_when_a_login_was_shut_out_never_works_again(self):
+        # review, 9 October 2026: the login was disabled, the sessions file would not be written, the
+        # session stayed on file - dead while the login was disabled, alive again once it was enabled.
+        stand = self.stand
+        cookie = self.sign_in_through_a_link("misha")
+        patient = stand.auth.sessions
+        stand.auth.sessions = auth.Sessions(stand.data_dir, stand.clock, lock_timeout=0.05)
+        with store.FileLock(os.path.join(stand.data_dir, "auth", ".sessions.json.lock")):
+            refused = stand.post(UPDATE, {"login": "misha", "disabled": True}, cookie=self.owner)
+        stand.auth.sessions = patient
+        self.assertRefused(refused, 503, "busy")
+        self.assertTrue(self.people()["misha"]["disabled"], "the login is shut out all the same")
+        self.assertRefused(stand.get(ME, cookie=cookie), 401, "unauthenticated")
+        self.assertEqual([(entry["login"], entry.get("detail")) for entry in self.events("user-disabled")],
+                         [("misha", "its sessions could not be closed; disable it again")])
+        self.assertEqual(len([s for s in stand.auth.sessions.list() if s.login == "misha"]), 1, "the session is still on file")
+        self.assertEqual(stand.post(UPDATE, {"login": "misha", "disabled": False}, cookie=self.owner).status, 200)
+        self.assertRefused(stand.get(ME, cookie=cookie), 401, "unauthenticated")     # enabling hands nothing back
+        self.assertEqual([s for s in stand.auth.sessions.list() if s.login == "misha"], [])
+
 
 # ---------------------------------------------------------------------------
 # A one-time link, issued from the page
@@ -484,6 +504,53 @@ class PasswordTests(Case):
     def test_the_door_asks_a_session(self):
         answer = self.stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD})
         self.assertRefused(answer, 401, "unauthenticated")
+
+    def test_a_password_that_was_stored_is_never_told_as_nothing_happened(self):
+        # review, 9 October 2026: the password was stored, the sessions file would not be written, and
+        # the caller was told 503 "busy" - with the new password in force and no line in the log.
+        stand = self.stand
+        stand.auth.sessions = auth.Sessions(stand.data_dir, stand.clock, lock_timeout=0.05)
+        with store.FileLock(os.path.join(stand.data_dir, "auth", ".sessions.json.lock")):
+            answer = stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD}, cookie=self.owner)
+        self.assertRefused(answer, 503, "password_changed")
+        self.assertEqual(answer.all("Set-Cookie"), [], "no sign-in was opened, and none is promised")
+        self.assertRefused(stand.get(ME, cookie=self.owner), 401, "unauthenticated")     # void, whatever the file holds
+        self.assertRefused(stand.post(LOGIN, {"login": "mika", "password": PASSWORD}), 401, "invalid_credentials")
+        self.assertEqual(stand.post(LOGIN, {"login": "mika", "password": NEW_PASSWORD}).status, 200)
+        self.assertEqual([(entry["login"], entry.get("detail")) for entry in self.events("password-changed")],
+                         [("mika", "no new sign-in could be opened")], "the change is in the log all the same")
+
+    def test_a_login_shut_out_while_its_new_password_was_being_made_gets_neither_password_nor_session(self):
+        # review, 9 October 2026: the current password is checked, then the new hash is made - and in
+        # between the owner may have disabled the login.
+        stand = self.stand
+        stand.set_password("misha")
+        old = stand.auth.users.password_hash("misha")
+        stand.auth.set_disabled("misha", True, by="mika")
+        with self.assertRaises(auth.Busy):
+            stand.auth.users.change_password("misha", old, auth.hash_password(NEW_PASSWORD, stand.settings.kdf))
+        self.assertEqual(stand.auth.users.password_hash("misha"), old)
+
+    def test_a_strangers_failed_sign_ins_do_not_shut_the_owners_own_doors(self):
+        # review, 9 October 2026: the password asked for again was counted in the sign-in door's count
+        # per login, which anybody fills from three addresses.
+        stand = self.stand
+        for attempt in range(30):
+            with self.assertRaises(auth.InvalidCredentials):
+                stand.auth.sign_in("mika", "wrong " + PASSWORD, "198.51.100.%d" % (attempt // 10 + 1))
+        with self.assertRaises(auth.TooManyAttempts):
+            stand.auth.sign_in("mika", PASSWORD, "203.0.113.9")           # the sign-in door is shut for the login
+        self.assertEqual(stand.post(LINK, {"login": "misha", "password": PASSWORD}, cookie=self.owner).status, 200)
+        self.assertEqual(stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD}, cookie=self.owner).status, 200)
+
+    def test_the_password_asked_again_has_thirty_tries_per_login_whatever_the_address(self):
+        stand = self.stand
+        for attempt in range(30):
+            with self.assertRaises(auth.WrongPassword):
+                stand.auth.confirm_password("mika", "wrong " + PASSWORD, "198.51.100.%d" % (attempt // 10 + 1))
+        with self.assertRaises(auth.TooManyAttempts) as refused:
+            stand.auth.confirm_password("mika", PASSWORD, "203.0.113.9")
+        self.assertEqual(refused.exception.key, "recheck")
 
 
 # ---------------------------------------------------------------------------

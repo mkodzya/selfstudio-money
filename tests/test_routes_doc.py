@@ -952,6 +952,15 @@ def refusals_of_password(case: unittest.TestCase) -> Dict[str, Any]:
         for _attempt in range(12):
             last = stand.post(PASSWORD_DOOR, {"current": "wrong " + PASSWORD, "password": NEW_PASSWORD}, cookie=cookie)
         out["after ten failures"] = last
+    with _harness.Stand() as stand:
+        stand.set_password("misha")
+        cookie = stand.session("misha")
+        # The password is stored, and then the sessions file cannot be written: its lock is held by
+        # somebody else (ctl is a second process) for longer than the door waits.
+        stand.auth.sessions = auth.Sessions(stand.data_dir, stand.clock, lock_timeout=0.05)
+        with store.FileLock(os.path.join(stand.data_dir, "auth", ".sessions.json.lock")):
+            out["the new sign-in cannot be written"] = stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD},
+                                                                  cookie=cookie)
     return out
 
 

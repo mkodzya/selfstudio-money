@@ -81,7 +81,8 @@ EVENTS = {
     "link-blocked": "the limiter refused the set-password door; once per address and window (addr, retryAfter)",
     "password-set": "a password was set through a link; the login's other sessions were closed (login, addr, count)",
     "password-changed": "a signed-in person chose a new password; the login's other sessions were closed "
-                        "(login, addr, count)",
+                        "(login, addr, count) - or, where no new sign-in could be written, are void all the "
+                        "same (login, addr, detail)",
     "password-check-failed": "a signed-in person was asked for their own password again and gave another - before "
                              "a link was issued (what: link) or a password changed (what: password) (login, addr, what, n)",
     "user-added": "the owner added a person from the page: a login that only looks, without a password (login, by)",

@@ -379,18 +379,23 @@ A signed-in person chooses a new password. The body is
   session of that login is closed — the one that asked included — and a new
   one is opened for this browser.
 - `403 wrong_password` — `current` is absent, not a string, or not the
-  password. It is counted like a failed sign-in, for the address and for the
-  login: a session somebody walked away from is not a way to guess the password
-  without a limit. `403` and not `401`: the page reads `401` as "the sign-in
-  has ended".
+  password. It is counted: for the address in the sign-in door's own count,
+  for the login in a count of its own (30 in 15 minutes as well). So a session
+  somebody walked away from is not a way to guess the password without a
+  limit, and a stranger who keeps failing to sign in as somebody cannot shut
+  this door for the person it belongs to. `403` and not `401`: the page reads
+  `401` as "the sign-in has ended".
 - `400 weak_password`, with `min: 12` — the rules of the set-password door.
   Nothing is changed.
-- `429 too_many_attempts`, with `retryAfter` and `Retry-After` — the sign-in
-  door's own counts.
+- `429 too_many_attempts`, with `retryAfter` and `Retry-After`.
+- `503 password_changed` — the new password is stored, and with it every
+  sign-in of the login is void, but no new sign-in could be written for this
+  browser (the disk refused the sessions file, or its lock stayed taken). It
+  is not "nothing happened": the person signs in again, with the new password.
 - `401 unauthenticated`.
 
-A disk that refuses the write and a lock that stays taken answer as they do at
-the sign-in door; nothing is half-changed.
+A disk that refuses the write of the password itself and a lock that stays
+taken answer as they do at the sign-in door, and then nothing was changed.
 
 ## The page and its files
 
@@ -544,7 +549,7 @@ password — a session somebody walked away from must not be enough to make one.
   token in its fragment; it works once, until `expires`, and retires the link
   issued for that login before it. It is in this answer and nowhere else: the
   server keeps its sha256.
-- `403 wrong_password` — counted like a failed sign-in of the owner.
+- `403 wrong_password` — counted, as at `POST /api/auth/password`.
 - `429 too_many_attempts`, with `retryAfter` and `Retry-After`.
 - `404 unknown_login`.
 - `409 login_disabled` — enable the login first.

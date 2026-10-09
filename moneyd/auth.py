@@ -22,7 +22,8 @@ Almost everything goes through one object::
     auth.sign_out(token, addr=None) -> bool
     auth.change_password(identity, current, password, addr, agent="") -> NewSession
         WrongPassword 403 | TooManyAttempts 429 | WeakPassword 400 | Busy 503 | AuthDamaged 503 |
-        AuthStorageFailed 507. The login's other sessions are closed; the answer carries a new one.
+        AuthStorageFailed 507 | PasswordChanged 503. The login's other sessions are closed; the answer
+        carries a new one. PasswordChanged: the password is stored, the new session could not be opened.
 
   Who may do what (see "Roles" below). The owner's own doors, each with ``by`` = the owner's login::
 
@@ -126,7 +127,7 @@ __all__ = [
     "Auth", "Identity", "NewSession", "Users", "User", "Invites", "Sessions", "Session", "Limiter", "Attempt",
     "AuthError", "MissingCredentials", "InvalidCredentials", "TooManyAttempts", "Busy", "InvalidLink",
     "WeakPassword", "AuthDamaged", "AuthStorageFailed", "UnknownLogin", "LoginDisabled",
-    "WrongPassword", "BadPerson", "LoginTaken", "TooManyPeople", "OwnerFixed", "Person", "ROLES", "PEOPLE_MAX",
+    "WrongPassword", "PasswordChanged", "BadPerson", "LoginTaken", "TooManyPeople", "OwnerFixed", "Person", "ROLES", "PEOPLE_MAX",
     "hash_password", "verify_password", "Verdict", "check_password", "normalize_password",
     "client_address", "address_key", "is_loopback", "host_ok", "origin_ok", "fetch_site_ok", "api_refusal",
     "is_json", "cookie_token", "session_cookie", "clear_session_cookie", "has_legacy_cookie",
@@ -247,6 +248,15 @@ class WrongPassword(AuthError):
     status = 403
     code = "wrong_password"
     sentence = "That is not your password."
+
+
+class PasswordChanged(AuthError):
+    """The new password is stored and every sign-in of the login is void, but no new sign-in could be
+    opened for the browser that asked (the sessions file would not be written). It is not "nothing
+    happened": the caller signs in again, with the new password."""
+    status = 503
+    code = "password_changed"
+    sentence = "The password was changed, but a new sign-in could not be opened. Sign in with the new password."
 
 
 class BadPerson(AuthError):
@@ -1029,8 +1039,10 @@ class Users:
         """
         def change(records: Dict[str, Any]) -> Tuple[bool, User]:
             record = records.get(login)
-            if record is None or record["hash"] != old_hash:
-                raise Busy("That password has just been changed from somewhere else; sign in again.")
+            # ... and only for an account that may still sign in: one the owner shut out while the new
+            # hash was being made gets no new password and no new session.
+            if record is None or record["hash"] != old_hash or record["disabled"] or not self._listed(login, record):
+                raise Busy("That sign-in has just been changed from somewhere else; sign in again.")
             record.update(hash=new_hash, gen=record["gen"] + 1, setAt=iso(self._clock()), invite=None)
             return True, self._user(login, record)
         return self._change(None, change)
@@ -1469,7 +1481,7 @@ class Limiter:
         self._max_keys = max(8, int(max_keys))
         self._hash_wait = float(hash_wait)
         self._slots = threading.BoundedSemaphore(max(1, int(hash_slots)))
-        self._pinned = frozenset(("login", login) for login in pinned_logins)
+        self._pinned = frozenset((kind, login) for login in pinned_logins for kind in ("login", "recheck"))
         self._lock = threading.Lock()
         # key -> [moments of the counted attempts, oldest first; when a refusal was last reported]
         self._table = collections.OrderedDict()  # type: collections.OrderedDict
@@ -1479,6 +1491,19 @@ class Limiter:
         return self._begin([
             (("address", address_key(addr)), self._per_address),
             (("login", login), self._per_login),
+        ])
+
+    def begin_recheck(self, login: str, addr: str) -> Attempt:
+        """Count a signed-in person's own password, asked for again. Raises ``TooManyAttempts``.
+
+        For the address it is the count of the sign-in door: whoever guesses from there has filled
+        it or not, at either door. For the login it is a count of its own (30 as well): a stranger
+        who keeps failing to sign in as somebody must not be able to shut that person's own doors,
+        and a stolen session still gets no more guesses than these.
+        """
+        return self._begin([
+            (("address", address_key(addr)), self._per_address),
+            (("recheck", login), self._per_login),
         ])
 
     def begin_setup(self, addr: str) -> Attempt:
@@ -1806,13 +1831,15 @@ class Auth:
     def _check_current(self, login: str, password: Any, addr: str, what: str) -> Tuple[User, str]:
         """The account and the hash its current password was just checked against. Raises ``WrongPassword``.
 
-        Counted like a sign-in, for the address and for the login, before anything is hashed:
-        a stolen session must not be a way to guess the password without a limit.
+        Counted before anything is hashed - for the address in the sign-in door's own count, for
+        the login in a count of its own (``Limiter.begin_recheck``): a stolen session must not be a
+        way to guess the password without a limit, and a stranger's failed sign-ins must not be a
+        way to shut these doors for the person they belong to.
         """
         if not isinstance(password, str) or not password:
             raise WrongPassword()
         try:
-            attempt = self.limiter.begin_login(login, addr)
+            attempt = self.limiter.begin_recheck(login, addr)
         except TooManyAttempts as refusal:
             if refusal.first:
                 self._refused("sign-in-blocked", addr=addr, login=login, reason=refusal.key,
@@ -1848,16 +1875,22 @@ class Auth:
         the login is closed, and a new one is opened for this browser.
 
         Raises ``WrongPassword``, ``TooManyAttempts``, ``WeakPassword``, ``Busy``, ``AuthDamaged``,
-        ``AuthStorageFailed``. Nothing is changed unless the whole of it went through.
+        ``AuthStorageFailed``: then nothing was changed. And ``PasswordChanged``: the password is stored
+        - which voids every sign-in of the login, whatever the sessions file holds - but no new sign-in
+        could be written for this browser. The line in the security log is written either way.
         """
         login = identity.login
         user, stored = self._check_current(login, current, addr, "password")
         check_password(password, login, user.first_name)
         with self.limiter.hash_slot():
             new_hash = hash_password(password, self.settings.kdf)
-        user = self.users.change_password(login, stored, new_hash)
-        closed = self.sessions.close_login(login)
-        token, session = self.sessions.create(login, addr, agent, gen=user.gen)
+        user = self.users.change_password(login, stored, new_hash)      # from here on the password is the new one
+        try:
+            closed = self.sessions.close_login(login)
+            token, session = self.sessions.create(login, addr, agent, gen=user.gen)
+        except AuthError:
+            self._note("password-changed", login=login, addr=addr, detail="no new sign-in could be opened")
+            raise PasswordChanged()
         self._note("password-changed", login=login, addr=addr, count=closed)
         return NewSession(token, self._identity(user, session))
 
@@ -1938,15 +1971,27 @@ class Auth:
         return logins
 
     def set_disabled(self, login: str, disabled: bool, by: str = "ctl") -> User:
-        """Disable or enable a login. Disabling closes its sessions and retires its pending link."""
+        """Disable or enable a login. Disabling closes its sessions and retires its pending link.
+
+        A sign-in that was open when a login was shut out never works again: the sessions are closed
+        when it is disabled, and once more before it is enabled - so that a disabling whose sessions
+        could not be written away (a full disk, a lock that stayed taken) does not hand them back
+        later. Such a disabling is in the log all the same, and raises: it is done again.
+        """
         if not isinstance(login, str) or (login not in self.settings.logins and self.users.get(login) is None):
             raise UnknownLogin()
-        user = self.users.set_disabled(login, disabled)
-        if disabled:
-            closed = self.sessions.close_login(login)
-            self._note("user-disabled", login=login, by=by, count=closed)
-        else:
+        if not disabled:
+            self.sessions.close_login(login)        # first: an account is not let back in over sessions of before
+            user = self.users.set_disabled(login, False)
             self._note("user-enabled", login=login, by=by)
+            return user
+        user = self.users.set_disabled(login, True)     # from here on the login cannot sign in, and its sessions are void
+        try:
+            closed = self.sessions.close_login(login)
+        except AuthError:
+            self._note("user-disabled", login=login, by=by, detail="its sessions could not be closed; disable it again")
+            raise
+        self._note("user-disabled", login=login, by=by, count=closed)
         return user
 
     def close_sessions(self, login: Optional[str] = None, by: str = "ctl") -> int:

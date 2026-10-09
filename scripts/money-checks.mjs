@@ -5412,8 +5412,13 @@ await run('rv-people', '«Настройки → Люди»: the owner adds a pe
     'the door was asked for misha\'s link, with a password each time');
   await shot(pg, 'rv-people-link');
   const held = await pg.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]));
-  await pg.click('#view-people [data-pp-x]');
-  same([held.includes('set-password'), (await pg.content()).includes('set-password#t=')], [false, false], 'the link is kept in no storage, and is gone from the page when its card is shut');
+  // The owner goes to another tab without shutting the card: the link does not stay behind in a screen nobody looks at.
+  await pg.click('.nav [data-tab="today"]');
+  same([held.includes('set-password'), (await pg.content()).includes('set-password#t=')], [false, false], 'the link is kept in no storage, and is gone from the page the moment «Люди» is left');
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="people"]');
+  await pg.waitForSelector('#view-people .ppl-row >> nth=2');
+  same([await pg.$('#view-people [data-pp-card]'), (await metas(pg))[1]], [null, `misha · только смотрит · ссылка выдана, действует до ${ends}`], 'coming back, every card is shut, and the line still says that a link is out');
   // what a person may do; the switch
   await pg.click('#view-people [data-pp-open="vanya"]');
   await pg.selectOption('#pp-role', 'editor');

@@ -882,8 +882,13 @@ async function load(){
   // offers. It is waited for - a moment - because the page saves by itself when it opens (transfers between the
   // studio's own accounts are put away, an older plan is rewritten), and a reader's page must not try. Without an
   // answer the page is what it was before there were readers; a save the server then refuses says so (put, push).
-  try{const q=await fetch("/api/me",{credentials:"same-origin",cache:"no-store"}),me=q.ok?await q.json():null;
-   if(me&&typeof me==="object"){ME=me;if(me.firstName)Plan.name(me.firstName);if(me.canWrite===false)readOnly();if(ui.tab==="people")People.show();}}catch(e){}
+  // It is asked twice at most, eight seconds each: a page must not hang on it, nor take one lost answer for "may save".
+  for(let n=0;n<2&&!ME;n++){
+   const stop=new AbortController(),t=setTimeout(()=>stop.abort(),8000);
+   try{const q=await fetch("/api/me",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),me=q.ok?await q.json():null;if(me&&typeof me==="object")ME=me;}catch(e){}
+   clearTimeout(t);
+  }
+  if(ME){if(ME.firstName)Plan.name(ME.firstName);if(ME.canWrite===false)readOnly();if(ui.tab==="people")People.show();}
  }
  if(DISK){try{const r=await fetch("/api/data",{cache:"no-store"});if(r.ok){applyState(await r.json());disk=true;sync("сохранено на диск","ok");}}catch(e){}}
  if(!disk){
@@ -5682,13 +5687,14 @@ const People=(()=>{
   if(t.id==="pp-own")return issue();if(t.id==="pp-cur"||t.id==="pp-new")return pwSave();if(t.id==="pp-add-name"||t.id==="pp-add-login")return add();
   if(t.matches("[data-pp-name]"))t.blur();
  });
- return{draw,show(){forget();st.adding=false;draw();load();}};
+ // Leaving the screen shuts its cards: a link that was shown is not left standing in a screen nobody is looking at.
+ return{draw,show(){forget();st.adding=false;draw();load();},leave(){if(!st.open&&!st.adding)return;forget();st.adding=false;draw();}};
 })();
 
 const TABS=["today","cash","inbox","upload","dashboard","reports","ledger","settings","people"];
 // A screen that has no button in the bar lights the one it is opened from.
 const UNDER={upload:"settings",ledger:"settings",people:"settings"};
-function setTab(t){if(t==="upload"&&RO)t="settings";ui.tab=t;Ed.close();const lit=UNDER[t]||t;document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===lit);b.setAttribute("aria-current",b.dataset.tab===lit?"page":"false");});
+function setTab(t){if(t==="upload"&&RO)t="settings";if(ui.tab==="people"&&t!=="people")People.leave();ui.tab=t;Ed.close();const lit=UNDER[t]||t;document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===lit);b.setAttribute("aria-current",b.dataset.tab===lit?"page":"false");});
  TABS.forEach(v=>$("#view-"+v).hidden=v!==t);
  try{history.replaceState(null,"","#"+t);}catch(e){}
  window.scrollTo(0,0);

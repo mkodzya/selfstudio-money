@@ -503,7 +503,7 @@
     version: 'версия', csp: 'политика', detail: 'что', by: 'кем', floor: 'следующие ревизии выше', was: 'было',
     file: 'что записано', role: 'может', what: 'перед чем',
   };
-  const VALUES = { ledger: 'выписки', plan: 'план кассы', address: 'адреса', login: 'логина', setup: 'адреса', ctl: 'с сервера', all: 'все', reader: 'только смотреть', editor: 'смотреть и править', link: 'выдачей ссылки', password: 'сменой пароля' };
+  const VALUES = { ledger: 'выписки', plan: 'план кассы', address: 'адреса', login: 'логина', setup: 'адреса', recheck: 'логина', ctl: 'с сервера', all: 'все', reader: 'только смотреть', editor: 'смотреть и править', link: 'выдачей ссылки', password: 'сменой пароля' };
 
   function journal() {
     const table = $('journal');
