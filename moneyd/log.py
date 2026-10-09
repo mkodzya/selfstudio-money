@@ -105,6 +105,12 @@ EVENTS = {
                         "the write is what everybody now reads (file: ledger, plan, users.json or sessions.json; "
                         "for a document also rev, by)",
     "snapshots-purged": "snapshots were deleted on a test or dev stand (doc, count, days, by)",
+    "rates-refused": "the source of the exchange rates answered for a day with something that is not believed - "
+                     "another day, no rates, a rate out of bounds or too far from the day before - and the "
+                     "answer was thrown away; once per day and reason (day, reason)",
+    "rates-moved": "a day's rates stood further from the table than a market moves in a day, and were believed all "
+                   "the same: two other days of the source said as much (day)",
+    "rates-damaged": "the table of exchange rates could not be read and was moved aside; it begins anew (detail)",
 }
 
 _EVENT_NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")

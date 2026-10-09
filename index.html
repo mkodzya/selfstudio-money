@@ -689,6 +689,21 @@ body.ro select:disabled{background-image:none}
 body.ro button:disabled{opacity:1;cursor:default}
 body.ro [data-ed-bal],body.ro #view-ledger tr[data-row]{cursor:default}
 body.ro .cs-helpbar,body.ro .cs-addrow:empty,body.ro .cs-how,body.ro #ownIn{display:none}
+/* ---- «Курсы валют»: a rate is one quiet line; the box at its end is for a rate of one's own ---- */
+.fxl-rows{border-top:1px solid var(--border);margin-top:12px}
+.fxl-row{display:grid;grid-template-columns:38px 78px 36px minmax(0,1fr) 108px;column-gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+.fxl-c,.fxl-u{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+.fxl-v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:13.5px}
+.fxl-m{font-size:12px;color:var(--text-muted);min-width:0;line-height:1.35}
+.fxl-row input{height:28px;padding:4px 7px;font-family:var(--mono);font-size:13px;text-align:right;width:100%;min-width:0}
+.fxl-own .fxl-v{color:var(--text-muted);text-decoration:line-through}
+.rc-t{min-width:600px}
+.rc-t td.rc-was{color:var(--text-muted)}
+.rc-t td.rc-new{font-weight:600}
+.rc-t tr.rc-tot td{font-weight:600;border-top:1px solid var(--text-primary)}
+.rc-t tr.rc-tot+tr.rc-tot td{border-top:0}
+.rc-t tr.rc-tot td.rc-was{font-weight:400}
+@media (max-width:620px){.fxl-row{grid-template-columns:38px 78px minmax(0,1fr) 100px}.fxl-m{grid-column:1/-1;grid-row:2}.fxl-m:empty{display:none}}
 /* ---- «Люди»: a person is one quiet line; a press opens the card ---- */
 .ppl{max-width:780px}
 .ppl-row{display:grid;grid-template-columns:minmax(0,1fr) 24px;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer}
@@ -767,7 +782,30 @@ const OWN=/converted|conversion|сконвертировано|конверта�
 
 // The rates the page starts from, until the ledger document brings its own. The forecast engine reads them too.
 const FX0={USD:1.35,EUR:1.17,RUB:118,AMD:525};
-const S={tx:[],inbox:[],rules:[],history:{},fx:Object.assign({},FX0),files:[],loaded:false,own:["self studio"],ownSeen:[],holders:{}};
+// The rate of a day (the owner's decision of 9 October 2026: «я не хочу чтобы по смене курса сегодня менялись все
+// показатели предыдущие»). What one pound cost in `cur` on the day `d`, by the table of rates the stand keeps by day
+// (`days`: {"2026-10-07":{USD:1.32,…}}, from GET /api/rates): its latest day not after `d`. Where the table has no
+// such day - a day before it began, a home that has no table - it is the rate typed into the page (`typed`), which
+// is what such a day was counted by when it happened. So what has already happened is counted once, at the rate of
+// its own day, and does not move when today's rate does. Pure (the sorted days of a table are remembered beside
+// it); the forecast engine counts by it too. fxDayOn is the day of the table that answers for `d`, or "".
+const fxSorted=new WeakMap();
+const fxAt=(days,d)=>{
+ if(!days||typeof days!=="object"||typeof d!=="string")return null;
+ let k=fxSorted.get(days);if(!k){k=Object.keys(days).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)).sort();fxSorted.set(days,k);}
+ let lo=0,hi=k.length-1,at=-1;while(lo<=hi){const m=(lo+hi)>>1;if(k[m]<=d){at=m;lo=m+1;}else hi=m-1;}
+ return{k,at};};
+function fxOn(days,typed,cur,d){
+ if(!cur||cur==="GBP")return 1;
+ const f=fxAt(days,d);if(f)for(let i=f.at;i>=0;i--){const v=+((days[f.k[i]]||{})[cur]);if(v>0)return v;}
+ return +(typed&&Object.prototype.hasOwnProperty.call(typed,cur)?typed[cur]:FX0[cur])||1;
+}
+function fxDayOn(days,cur,d){const f=fxAt(days,d);if(f)for(let i=f.at;i>=0;i--)if(+((days[f.k[i]]||{})[cur])>0)return f.k[i];return "";}
+// The table of rates by day, as the stand handed it over when the page opened ({} where there is none), and the
+// first day it is kept for: what was filed before that is the founders' sheet, in pounds as the sheet had it.
+let RATES={days:{},asked:null};
+const FX_FROM="2026-10-01";
+const S={tx:[],inbox:[],rules:[],history:{},fx:Object.assign({},FX0),fxo:{},fxk:false,files:[],loaded:false,own:["self studio"],ownSeen:[],holders:{}};
 const ui={tab:"today",month:null,quarter:null,edit:null,lastTr:0,trOpen:false};
 let db=null,disk=false;
 // Who is signed in and what they may do, as the stand's /api/me says it. A reader is sent both documents and saves
@@ -804,7 +842,46 @@ const dUTC=d=>Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10)),dAdd=(d,n)=
 // at the start of the next reads as two things.
 const dRu=d=>(+d.slice(8))+"\u00a0"+MONG[+d.slice(5,7)-1],dRuW=d=>DOWS[new Date(dUTC(d)).getUTCDay()]+" "+dRu(d),dRuF=d=>(+d.slice(8))+"\u00a0"+MONGF[+d.slice(5,7)-1];
 const plural=(n,one,few,many)=>{const a=Math.abs(n)%100,k=a%10;return a>10&&a<20?many:k===1?one:k>=2&&k<=4?few:many;};
-const toGBP=(a,cur)=>cur==="GBP"?a:a/(+S.fx[cur]||1);
+// A statement row is turned into pounds at the rate of its own day, once: from then on the sum is the row's. Where
+// the table gave the rate, the row says so (`o.r`): a row without it was counted by a rate somebody typed.
+const rowRate=(cur,d)=>fxOn(RATES.days,S.fx,cur,d);
+// (`o.rd` is the day of the table that answered. It is the row's own day - or an earlier one, when the row's day was
+// not in the table yet: today's rate is out some hours into the day. Such a row is counted over, once, when its own
+// day has come in: settleRates, below.)
+function reprice(r){const cur=r.o.cur,day=cur==="GBP"?"":fxDayOn(RATES.days,cur,r.d);r.a=round2(Math.abs(cur==="GBP"?r.o.a:r.o.a/rowRate(cur,r.d)));if(day){r.o.r=rowRate(cur,r.d);r.o.rd=day;}else{delete r.o.r;delete r.o.rd;}return r;}
+// A row that was read before its own day was in the table took the latest day before it. Once the table has a
+// nearer day, the row is counted by that - here, when the page opens. Nothing is saved for it: the change goes to
+// the server with the next thing somebody changes, and until then every page works it out the same way.
+// (`o.hand`: somebody typed the row's pounds in «Таблица» - they are that person's, and no rate is put over them.
+// Not `o.h`: on a row still in «Разбор» that is the name on the card. A row whose day was moved back while the page
+// had no table carries a later day than its own: that one is counted over too.)
+function settleRates(){
+ S.tx.concat(S.inbox).forEach(r=>{const o=r.o;if(!o||!o.cur||o.cur==="GBP"||!(o.r>0)||!o.rd||o.hand||o.rd===r.d)return;
+  const day=fxDayOn(RATES.days,o.cur,r.d);
+  if(day&&(o.rd>r.d||day>o.rd)){const was=Math.abs(r.a),sign=r.a<0?-1:1;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);r.a*=sign;}});
+}
+// The table as the stand has it now. Asked when the page opens and - by somebody's own act - before a statement is
+// read whose days the page's copy of the table does not hold yet. Never on a timer.
+let ratesMissed=false;
+async function askRates(ms){
+ const stop=new AbortController(),t=setTimeout(()=>stop.abort(),ms||8000);let ok=false;
+ try{const q=await fetch("/api/rates",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),j=q.ok?await q.json():null;if(j&&j.days&&typeof j.days==="object"&&!Array.isArray(j.days)){RATES={days:j.days,asked:j.asked||null};ok=true;}}catch(e){}
+ clearTimeout(t);ratesMissed=!ok;return ok;
+}
+// (A page without a table: the door said it has none - a stand that asks nobody - and is not asked again; or the
+// door did not answer when the page opened, and is tried once more here: a row read without the table is counted by
+// a typed rate and carries no day. A door that does not answer is waited for once, four seconds.)
+async function ratesFor(days){
+ if(!API)return;
+ if(!Object.keys(RATES.days).length&&(!ratesMissed||!(await askRates(4000))))return;
+ const T=Live.today(),lack=()=>days.some(d=>typeof d==="string"&&d>=FX_FROM&&d<=T&&!RATES.days[d]);
+ // (The second asking is for a refresh the first one began on the stand: `asked` has moved. Where it has not, the
+ // stand is not asking the source just now, and a second asking would bring what the first did.)
+ for(let n=0;n<2&&lack();n++){const was=RATES.asked;if(n)await new Promise(r=>setTimeout(r,1500));if(!(await askRates(4000))||RATES.asked===was)return;}
+}
+// What the forecast engine is handed of the ledger: its rows, and the rates - the typed ones (`fx`), the table by
+// day (`fxd`) and what a person typed over it for looking ahead (`fxo`).
+const ledIn=()=>({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,fxd:RATES.days,fxo:S.fxo,history:S.history,aliases:S.aliases||{}});
 const round2=v=>Math.round(v*100)/100;
 const opt=(list,v)=>list.map(x=>`<option value="${esc(x[0])}"${x[0]===v?" selected":""}>${esc(x[1])}</option>`).join("");
 // «Отменить» takes back the ledger's last action; a change to the plan hands over its own way back instead.
@@ -821,8 +898,8 @@ function sync(t,c,who){
 let chain=Promise.resolve(),pending=0;
 const LS="selfstudio-transactions-v1";
 const real=r=>r.s!=="demo";
-function localSave(){try{localStorage.setItem(LS,JSON.stringify({tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders}));}catch(e){}}
-const dump=()=>({v:1,savedAt:new Date().toISOString(),tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders,aliases:S.aliases||{},lastpdf:S.lastpdf||null,base:S.rev||0});
+function localSave(){try{localStorage.setItem(LS,JSON.stringify({tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,fxo:S.fxo,fxk:S.fxk,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders}));}catch(e){}}
+const dump=()=>({v:1,savedAt:new Date().toISOString(),tx:S.tx.filter(real),inbox:S.inbox.filter(real),rules:S.rules,fx:S.fx,fxo:S.fxo,fxk:S.fxk,history:S.history,own:S.own,ownSeen:S.ownSeen,holders:S.holders,aliases:S.aliases||{},lastpdf:S.lastpdf||null,base:S.rev||0});
 let putT=null,putBusy=false,putAgain=false,stale=false;
 // The table was saved from another window, or the sign-in ran out: from here on nothing done to the table in this
 // window reaches the server. The pill alone used to say so, and it was not enough — on 8 October 2026 a week of
@@ -859,7 +936,7 @@ function gate(st){
 window.addEventListener("pagehide",()=>{if(disk&&!API&&putT&&navigator.sendBeacon){clearTimeout(putT);putT=null;navigator.sendBeacon("/api/data",new Blob([JSON.stringify(dump())],{type:"application/json"}));}});
 // Whether a refusal carries this code. (The answer is read from a copy: whoever asked may read it again.)
 async function refusedAs(r,code){try{const j=await r.clone().json();return !!j&&j.error===code;}catch(e){return false;}}
-function applyState(x){S.tx=x.tx||[];S.inbox=x.inbox||[];S.rules=x.rules||[];S.history=x.history||{};Object.assign(S.fx,x.fx||{});if(Array.isArray(x.own))S.own=x.own;if(Array.isArray(x.ownSeen))S.ownSeen=x.ownSeen;if(x.holders)S.holders=x.holders;S.lastpdf=x.lastpdf||null;S.rev=x.rev||0;S.aliases=x.aliases||{};}
+function applyState(x){S.tx=x.tx||[];S.inbox=x.inbox||[];S.rules=x.rules||[];S.history=x.history||{};Object.assign(S.fx,x.fx||{});S.fxo=x.fxo&&typeof x.fxo==="object"&&!Array.isArray(x.fxo)?x.fxo:{};S.fxk=!!x.fxk;if(Array.isArray(x.own))S.own=x.own;if(Array.isArray(x.ownSeen))S.ownSeen=x.ownSeen;if(x.holders)S.holders=x.holders;S.lastpdf=x.lastpdf||null;S.rev=x.rev||0;S.aliases=x.aliases||{};}
 function write(path,data){
  if(RO)return;
  if(disk){if(stale)return;sync("сохраняю","wait");clearTimeout(putT);putT=setTimeout(put,400);return;}
@@ -871,7 +948,7 @@ function saveMonths(yms){[...new Set(yms)].forEach(ym=>write("ledger/"+ym,{rows:
 let inboxT=null;
 function saveInbox(){clearTimeout(inboxT);inboxT=setTimeout(()=>write("meta/inbox",{rows:S.inbox.filter(real)}),700);}
 const saveRules=()=>write("meta/rules",{rules:S.rules});
-const saveSettings=()=>write("meta/settings",{fx:S.fx,own:S.own,ownSeen:S.ownSeen,holders:S.holders});
+const saveSettings=()=>write("meta/settings",{fx:S.fx,fxo:S.fxo,fxk:S.fxk,own:S.own,ownSeen:S.ownSeen,holders:S.holders});
 async function load(){
  const clone=x=>JSON.parse(JSON.stringify(x));
  if(API){
@@ -888,6 +965,10 @@ async function load(){
    try{const q=await fetch("/api/me",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),me=q.ok?await q.json():null;if(me&&typeof me==="object")ME=me;}catch(e){}
    clearTimeout(t);
   }
+  // The rates by day, once. The door answers at once with what the stand has (it waits for today's a moment);
+  // without an answer the page counts by the rates typed into it, as it did before there was a table.
+  if(!(await askRates()))await askRates();
+  settleRates();
   if(ME){if(ME.firstName)Plan.name(ME.firstName);if(ME.canWrite===false)readOnly();if(ui.tab==="people")People.show();}
  }
  if(DISK){try{const r=await fetch("/api/data",{cache:"no-store"});if(r.ok){applyState(await r.json());disk=true;sync("сохранено на диск","ok");}}catch(e){}}
@@ -901,7 +982,7 @@ async function load(){
      if(d.id==="rules"&&Array.isArray(x.rules))S.rules=x.rules;
      if(d.id==="history"&&x.months)S.history=x.months;
      if(d.id==="inbox"&&Array.isArray(x.rows))S.inbox=x.rows;
-     if(d.id==="settings"){if(x.fx)Object.assign(S.fx,x.fx);if(Array.isArray(x.own))S.own=x.own;if(Array.isArray(x.ownSeen))S.ownSeen=x.ownSeen;if(x.holders)S.holders=x.holders;}});
+     if(d.id==="settings"){if(x.fx)Object.assign(S.fx,x.fx);if(x.fxo&&typeof x.fxo==="object")S.fxo=x.fxo;S.fxk=!!x.fxk;if(Array.isArray(x.own))S.own=x.own;if(Array.isArray(x.ownSeen))S.ownSeen=x.ownSeen;if(x.holders)S.holders=x.holders;}});
     sync("сохранено","ok");
    }catch(e){db=null;sync("база недоступна — работаю в этом браузере","bad");}
   }
@@ -1163,7 +1244,7 @@ const keyOfText=r=>(norm(r.o&&r.o.p)||norm(String((r.o&&r.o.t)||"").replace(/\(f
 const seenKey=r=>{const k=keyOf(r);return k.length>=4?r.b+"|"+(r.o.a<0?"out":"in")+"|"+k:"";};
 // Looked up as the map's own key only: a label «constructor» or «__proto__» must not be answered by Object's.
 const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.hasOwnProperty.call(a,k.toLowerCase())?a[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
-const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
+const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
@@ -1188,8 +1269,8 @@ function ingest(parsed,file,src){
  parsed.rows.forEach(p=>{
   const cur=p.cur||file.cur,key=[file.bank+(file.acc?"·"+file.acc:""),p.d,p.a,cur,p.tid||norm(p.t+" "+p.p).slice(0,60)].join("|");
   if(keys.has(key)){dup++;return;}keys.add(key);
-  const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||file.acn||"",dir:p.a>0?1:-1,a:round2(Math.abs(toGBP(p.a,cur))),o:Object.assign({a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},p.own?{own:true}:{}),key,s:src,at};
-  classify(r);r.twin=findTwin(r);S.inbox.push(r);added++;});
+  const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||file.acn||"",dir:p.a>0?1:-1,a:0,o:Object.assign({a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},p.own?{own:true}:{}),key,s:src,at};
+  reprice(r);classify(r);r.twin=findTwin(r);S.inbox.push(r);added++;});
  return{added,dup};
 }
 async function handleFiles(list){
@@ -1213,6 +1294,7 @@ async function handleFiles(list){
    if(!p)p=parseGrid(grid,f.name);if(p.error)throw new Error(p.error);rec.pdf=!!p.pdf;rec.check=p.check;rec.acc=p.acc||"";rec.acn=p.acn||"";
    const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length){S.own.push(...fresh);saveSettings();}
    rec.bank=p.bank;rec.cur=p.defCur;rec.total=p.rows.length;rec.from=p.rows.reduce((a,r)=>r.d<a?r.d:a,"9");rec.to=p.rows.reduce((a,r)=>r.d>a?r.d:a,"0");rec.needCur=p.rows.some(r=>!r.hasCur);rec.left=p.left||"";
+   await ratesFor(p.rows.map(r=>r.d));
    Object.assign(rec,ingest(p,rec,"file"));
   }catch(e){rec.error=e.message||"Не получилось прочитать файл.";}
   S.files.unshift(rec);
@@ -1569,13 +1651,63 @@ function ruleRows(){
  const q=(ui.ruleQ||"").toLowerCase(),list=S.rules.map((x,i)=>[x,i]).filter(([x])=>!q||(x.k+" "+x.l+" "+(CAT[x.c]?CAT[x.c].ru:"")).toLowerCase().includes(q));
  return list.map(([x,i])=>`<tr><td class="m">${esc(x.k)}</td><td>${CAT[x.c]?CAT[x.c].name:esc(x.c)}</td><td>${esc(x.l)}${x.any?' <span class="pill">в обе стороны</span>':""}</td><td class="r"><button class="x" data-rule="${i}" aria-label="Удалить правило" title="Удалить">×</button></td></tr>`).join("")||`<tr><td colspan="4" class="note">Ничего не найдено.</td></tr>`;
 }
+// «Курсы валют». Where the stand keeps a table of rates by day, a currency is one line: the day's rate as it came,
+// and at the end of the line a box for a rate of one's own - while it holds a number the page looks ahead by it
+// (the rows still in the plan, what the accounts hold today); what has already happened stays at the rate of its
+// day. Where there is no table (the laptop tool, an artifact, a dev stand) the four rates are typed, as before.
+const FXC=["USD","EUR","RUB","AMD"];
+function fxCard(){
+ const T=Live.today(),tabled=FXC.some(c=>fxDayOn(RATES.days,c,T));
+ if(!tabled)return `<section class="card"><h2>Курсы валют</h2><p class="note" style="margin:0 0 12px">Таблица ведётся в фунтах. Операции в другой валюте пересчитываются по этому курсу.</p>
+   <div class="fxrow">${FXC.map(c=>`<label class="fld" for="fx-${c}"><span>£1 = ${c}</span><input id="fx-${c}" data-fx="${c}" type="number" step="any" value="${S.fx[c]}"></label>`).join("")}</div></section>`;
+ const day=FXC.map(c=>fxDayOn(RATES.days,c,T)).filter(Boolean).sort().pop();
+ return `<section class="card" id="fx-card"><h2>Курсы валют<span class="note mono">на ${dRu(day)}</span></h2>
+   <p class="note" style="margin:0">Курс приходит сам раз в день. Счета и план считаются по сегодняшнему курсу, оплаченное — по курсу своего дня. Свой курс страница берёт вместо живого, пока поле не очистят.</p>
+   <div class="fxl-rows">${FXC.map(c=>{const live=fxOn(RATES.days,S.fx,c,T),own=+S.fxo[c]>0?+S.fxo[c]:0;
+    return `<div class="fxl-row${own?" fxl-own":""}"><span class="fxl-c">£1 =</span><span class="fxl-v">${+live.toFixed(4)}</span><span class="fxl-u">${c}</span><span class="fxl-m">${own?"берётся свой курс":""}</span><input type="number" step="any" min="0" inputmode="decimal" id="fxo-${c}" data-fxo="${c}" value="${own||""}" placeholder="свой курс" aria-label="Свой курс ${c}"></div>`;}).join("")}</div>
+   <p class="note" style="margin:10px 0 0">${day<T?`Сегодняшний курс ещё не пришёл: страница считает по курсу ${dRu(day)}.`:"Не придёт новый курс — страница считает по последнему, что есть, и скажет об этом здесь."}</p></section>`;
+}
+// The rows in another currency that were filed since the table began and counted by a rate somebody had typed.
+// Asked once (the owner's choice of 9 October 2026, «А»): count them over at the rate of their own day, or leave
+// them. What was filed before the table began is the founders' sheet, and is not touched either way.
+// (Before this question there was no mark on a row whose pounds somebody had typed. So a row whose pounds are far
+// from its sum at any rate of those days - a fifth off the day's - is taken for one: it is left out, and the card
+// says how many such there are.)
+const fxUnset=()=>S.tx.filter(r=>real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)&&!r.o.hand&&Math.abs(+r.o.a)>0&&Math.abs(+r.a)>0&&fxDayOn(RATES.days,r.o.cur,r.d));
+const fxNew=r=>round2(Math.abs(+r.o.a)/rowRate(r.o.cur,r.d));
+const fxFar=r=>Math.abs(Math.abs(+r.a)/fxNew(r)-1)>0.2;
+const fxOld=()=>fxUnset().filter(r=>!fxFar(r));
+function fxAskCard(){
+ if(RO||S.fxk)return "";const rows=fxOld().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);if(!rows.length)return "";
+ const sig=v=>(v<0?"−":"")+fmt(Math.abs(v),2),money=r=>(+r.o.a<0?"−":"")+fmt(Math.abs(+r.o.a),Math.abs(+r.o.a)%1?2:0,SYM[r.o.cur]||"")+(SYM[r.o.cur]?"":" "+r.o.cur);
+ // In the table a row's sum stands with a plus whichever way the money went - what came is the block «выручка», what
+ // went is every other block - and with a minus when it is money back; a transfer between own accounts is neither.
+ const side=k=>rows.filter(r=>r.c!=="skip"&&(r.c==="rev")===(k>0)),was=k=>side(k).reduce((a,r)=>a+r.a,0),will=k=>side(k).reduce((a,r)=>a+(r.a<0?-1:1)*fxNew(r),0);
+ const d=round2((will(1)-was(1))-(will(-1)-was(-1))),n=rows.length,far=fxUnset().filter(fxFar).length;
+ return `<section class="card wide" id="fx-ask"><h2>Строки в валюте — по курсу своего дня?<span class="note">спрашивается один раз</span></h2>
+  <p class="note" style="margin:0;max-width:92ch">${n} ${plural(n,"строка","строки","строк")} в валюте с ${dRu(FX_FROM)} ${plural(n,"внесена","внесены","внесены")} по курсу, который тогда был вписан руками, — один на все дни. ${n===1?"Её":"Их"} можно один раз пересчитать по курсу дня каждого платежа. Всё, что раньше, остаётся как в таблице фаундеров.</p>
+  <div class="tbl" style="margin-top:12px"><table class="rc-t"><thead><tr><th>День</th><th>Строка</th><th class="r">Сумма</th><th class="r">Курс вписан</th><th class="r">Сейчас стоит</th><th class="r">Курс дня</th><th class="r">Станет</th></tr></thead><tbody>
+   ${rows.map(r=>`<tr><td class="m">${dRu(r.d)}</td><td>${esc(r.l||r.o.t||"")}</td><td class="r m">${money(r)}</td><td class="r m rc-was">${+(Math.abs(+r.o.a)/Math.abs(r.a)).toFixed(4)}</td><td class="r m rc-was">${sig(Math.abs(r.a))}</td><td class="r m">${+rowRate(r.o.cur,r.d).toFixed(4)}</td><td class="r m rc-new">${sig(fxNew(r))}</td></tr>`).join("")}
+   <tr class="rc-tot"><td colspan="4">Поступления в валюте</td><td class="r m rc-was">${sig(was(1))}</td><td></td><td class="r m rc-new">${sig(will(1))}</td></tr>
+   <tr class="rc-tot"><td colspan="4">Расходы в валюте</td><td class="r m rc-was">${sig(was(-1))}</td><td></td><td class="r m rc-new">${sig(will(-1))}</td></tr>
+   <tr class="rc-tot"><td colspan="6">Результат изменится на</td><td class="r m rc-new">${d>0?"+":""}${sig(d)}</td></tr></tbody></table></div>
+  <div class="row" style="margin-top:14px"><button class="sm primary" data-fxdo="recount">Пересчитать ${n} ${plural(n,"строку","строки","строк")}</button><button class="sm" data-fxdo="keep">Оставить как есть</button></div>
+  <p class="note" style="margin:10px 0 0;max-width:92ch">Суммы в самой валюте, остатки на счетах и план от этого не меняются. Меняется только то, сколько эти платежи стоят в фунтах — в «Месяцах», в «Отчётах» и в строках «Кассы», которые они закрыли.${far?` Ещё ${far} ${plural(far,"строка","строки","строк")} в валюте не ${plural(far,"меняется","меняются","меняются")}: сумма в фунтах там далека от пересчёта по любому курсу — похоже, её вписали руками.`:""}</p></section>`;
+}
+// «Пересчитать»: each of those rows at the rate of its own day, in one save, with «Отменить».
+function fxRecount(){
+ const rows=fxOld();if(!rows.length)return;snap();
+ rows.forEach(r=>{const was=Math.abs(r.a),now=fxNew(r);if(r.v)r.v=round2(r.v*now/was);r.a=(r.a<0?-1:1)*now;r.o.r=rowRate(r.o.cur,r.d);r.o.rd=fxDayOn(RATES.days,r.o.cur,r.d);});
+ // The rows still waiting in «Разбор» were read by the typed rate too: they go into the table at the rate of their day.
+ S.inbox.forEach(r=>{if(real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)){const was=r.a;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);}});
+ saveMonths(rows.map(r=>r.d.slice(0,7)));saveInbox();renderAll();toast(`Пересчитано: ${rows.length} ${plural(rows.length,"строка","строки","строк")} по курсу своего дня`,true);
+}
 function renderSettings(){
  const hs=Object.entries(S.holders);
  $("#view-settings").innerHTML=`${setNav("settings")}
  <div class="page-head"><div><h1>Настройки</h1><div class="page-sub">что инструмент знает о ваших деньгах</div></div></div>
  <div class="settings">
-  <section class="card"><h2>Курсы валют</h2><p class="note" style="margin:0 0 12px">Таблица ведётся в фунтах. Операции в другой валюте пересчитываются по этому курсу.</p>
-   <div class="fxrow">${["USD","EUR","RUB","AMD"].map(c=>`<label class="fld" for="fx-${c}"><span>£1 = ${c}</span><input id="fx-${c}" data-fx="${c}" type="number" step="any" value="${S.fx[c]}"></label>`).join("")}</div></section>
+  ${fxCard()}${fxAskCard()}
   <section class="card"><h2>Наши названия и счета</h2><p class="note" style="margin:0 0 12px">Платёж, где второй стороной стоит одно из них, считается переводом между своими и в таблицу не попадает. Номера счетов из PDF добавляются сами.</p>
    <div class="row">${S.own.map((k,i)=>`<span class="rule"><span class="mono">${esc(k)}</span><button class="x" data-owndel="${i}" aria-label="Удалить">×</button></span>`).join("")}</div>
    <div class="row" style="margin-top:12px"><input id="ownIn" placeholder="название или номер счёта" style="flex:1 1 200px" aria-label="Название или номер счёта"><button data-ownadd>Добавить</button></div></section>
@@ -1767,7 +1899,7 @@ const Cash=(()=>{
  // was due before it is never called late. It is written once, here, and travels with the plan from then on —
  // the engine itself reads no clock.
  const stamp=P=>{if(!P.tax.since){P.tax.since=Live.today();P.tax.rules.forEach(r=>{if(r.builtin&&!r.from)r.from=P.tax.since;});}return P;};
- const ledgerDoc=()=>({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,history:S.history,aliases:S.aliases||{}});
+ const ledgerDoc=ledIn;
  // A plan arrives from the server, from a file, from a paste or from another window's save, and none of those is
  // taken on trust: a bank the selects do not offer would be drawn as the first option while counted as something
  // else, a date that is not a date would open a month that does not exist. So the plan is rebuilt field by field,
@@ -1902,7 +2034,7 @@ const Cash=(()=>{
  const isOpen=it=>{const e=Ed.open();return !!e&&e.k==="row"&&e.id===it.id&&(e.at||"")==="plan";};
  // «в £» is what the row is counted at. Where that is more than was typed because the invoice carries VAT, the
  // cell says so: 9,750 typed and £11,700 beside it, with no word, read as a mistake.
- const gbpText=it=>it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
+ const gbpText=it=>it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.state==="done"&&it.cur!=="GBP"?it.exp:it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
  // A tax the page worked out is shown in whole units of its currency.
  const shown=it=>it.kind!=="typed"&&it.state!=="done"?Math.round(it.amt):it.amt;
  // The first thing in a line of the statement («По дням»): what can be done about it in one press. (In a month the
@@ -2573,7 +2705,7 @@ const Cash=(()=>{
 //
 // One pure function, Live.compute(ledger document, plan document, T, opts) → model. «Сегодня» and «Касса»
 // draw what it returns and work nothing out themselves, so two tabs cannot disagree about a figure. It reads its four
-// arguments, the page's constants (FOUNDERS, CURS, GENERIC, FX0) and two pure helpers (norm, owner). It never looks at
+// arguments, the page's constants (FOUNDERS, CURS, GENERIC, FX0) and three pure helpers (norm, owner, fxOn). It never looks at
 // S, the DOM, storage or the clock: "today" is the argument T, the rates are the ledger document's own. Days are
 // counted from a date's digits in UTC. So the same two documents and T give the same JSON in any browser and any
 // time zone, and nothing it is handed is changed.
@@ -3148,7 +3280,19 @@ const Live=(()=>{
  // nobody has accepted yet — so a payment does not vanish from the plan between upload and accept.
  function read(led,T){
   led=obj(led)?led:{};
-  const fx=Object.assign({},FX0,led.fx||{}),gbp=(a,cur)=>!cur||cur==="GBP"?+a||0:(+a||0)/(+fx[cur]||1),nat=(g,cur)=>!cur||cur==="GBP"?g:g*(+fx[cur]||1);
+// The rates. `fx` is today's, and counts what is still ahead and what the accounts hold today: the rate a person
+  // typed over the source's (led.fxo) first, else the table's latest day not after T (led.fxd), else the rates typed
+  // into the page (led.fx). What has already happened is counted at the rate of its own day - rateOn, gbpOn - and so
+  // does not move with today's. Without a table every day's rate is the typed one, and the two are the same.
+  const fx0=Object.assign({},FX0,led.fx||{}),fxd=obj(led.fxd)?led.fxd:null,fxo=obj(led.fxo)?led.fxo:{},fx={};
+  // (A rate of one's own stands over the table's, and only where the table answers: without a table the typed
+  // rates are the page's, and there is no box to take an own rate back in.)
+  const dayOn=(cur,d)=>fxDayOn(fxd,cur,d);
+  Object.keys(fx0).forEach(c=>{fx[c]=+fxo[c]>0&&dayOn(c,T)?+fxo[c]:fxOn(fxd,fx0,c,T);});
+  const gbp=(a,cur)=>!cur||cur==="GBP"?+a||0:(+a||0)/(+fx[cur]||1),nat=(g,cur)=>!cur||cur==="GBP"?g:g*(+fx[cur]||1);
+  // (natOn: a row's pounds as the other currency, by the rate of the row's own day - so that a line a row closed
+  // last month is still closed by it when today's rate has moved on.)
+  const rateOn=(cur,d)=>fxOn(fxd,fx0,cur,d),gbpOn=(a,cur,d)=>!cur||cur==="GBP"?+a||0:(+a||0)/rateOn(cur,d),natOn=(g,cur,d)=>!cur||cur==="GBP"?g:g*rateOn(cur,d);
   // Looked up as the map's own key only: a label «constructor» must not be answered by Object's.
   const al=obj(led.aliases)?led.aliases:{},alias=l=>{const k=String(l||"").trim(),v=Object.prototype.hasOwnProperty.call(al,k.toLowerCase())?al[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
   const rules=(Array.isArray(led.rules)?led.rules:[]).concat(GENERIC).filter(x=>x&&x.k&&x.l);
@@ -3179,7 +3323,7 @@ const Live=(()=>{
   let reach=sheetEnd;Object.keys(lastOf).forEach(b=>{if(lastOf[b]>reach)reach=lastOf[b];});if(reach>T)reach=T;
   const skOf=r=>{if(r.c==="tax"){const f=owner(r);return f?"tax|@"+f:"";}if(FOUNDERS.includes(r.c))return "";const l=norm(r.l);return l?r.c+"|"+l:"";};
   let L="";pool.forEach(r=>{r.sk=skOf(r);r.lk=r.sk||(FOUNDERS.includes(r.c)?"@"+r.c:r.c==="tax"?"tax|":"");if(r.d>L)L=r.d;});
-  return{led,fx,gbp,nat,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
+  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
  }
 
  // ---- C1–C5. who is paid, or pays, every month ----
@@ -3272,7 +3416,7 @@ const Live=(()=>{
  // are worked out here exactly as A did — its links, its matching of typed rows, its cycles — and nothing else of
  // A is kept. Returns {row id: what A counted, in the row's own currency}; 0 for a month A had as paid or covered.
  function counted(led,X,T){
-  const R=read(led,T),{pool,facts,gbp,nat,anyRow,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
+  const R=read(led,T),{pool,facts,gbp,nat,gbpOn,natOn,anyRow,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
   const link=(k,r)=>{const b0=KEYS.includes(r.blk)?r.blk:BLK0[k];
    if(typeof r.sk==="string"&&r.sk&&!/^(rev|cogs|fixed|other|behalf)\|./.test(r.sk)){const vat=r.sk.startsWith("tax|vat|"),m=r.sk.startsWith("m|");return{lk:vat?"tax|":m?"":r.sk,sk:r.sk};}
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});return f?{lk:"tax|@"+f,sk:"tax|@"+f}:{lk:"tax|",sk:""};}
@@ -3287,12 +3431,12 @@ const Live=(()=>{
   const linked=new Set(items.map(it=>it.lk).filter(Boolean)),used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
   items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
-   let s=0;rs.forEach(f=>{s+=f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):nat(Math.abs(+f.a||0),it.cur);used.add(String(f.id));});
+   let s=0;rs.forEach(f=>{s+=f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);used.add(String(f.id));});
    const t=it.rem*it.vk;if(s>=t-tol(t,it.dir)[0]||rs.some(f=>shared[String(f.id)]>1))it.done="row";else{it.got+=s;it.rem=Math.max(0,(t-s)/it.vk);}});
   const byAmt=(f,it)=>BLOCKS[it.list].includes(f.c)&&!(f.sk&&SER[f.sk]&&SER[f.sk].regular)&&!(f.lk&&linked.has(f.lk));
   const cand=(f,it)=>it.dir===Math.sign(f.o.a)&&!it.notx.includes(f.id)&&f.at>it.c0&&(!it.date||f.d>=plus(it.date,-10))&&(it.lk?it.lk===f.lk:byAmt(f,it));
   const cmp=(f,it,k)=>{const t=it.rem*it.vk*(k||1);if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
-   const x=nat(Math.abs(f.a),it.cur);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
+   const x=natOn(Math.abs(f.a),it.cur,f.d);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
   const named=it=>!!it.lk&&it.lk[0]!=="@"&&it.lk!=="tax|",word=it=>!!it.paid&&(!!it.paid.ok||!!it.paid.legacy||!isD(it.paid.on));
   const byItem=(a,b)=>(a.date||"9")<(b.date||"9")?-1:(a.date||"9")>(b.date||"9")?1:a.id<b.id?-1:a.id>b.id?1:0;
   const typed=items.filter(it=>!it.hist).sort(byItem);
@@ -3301,7 +3445,7 @@ const Live=(()=>{
    let hit=cs.find(it=>cmp(f,it).ok);if(hit){hit.done="row";used.add(f.id);return;}
    const nm=cs.filter(named);
    if(f.c==="rev"&&(hit=nm.find(it=>it.vk===1&&cmp(f,it,1.2).ok))){hit.done="row";used.add(f.id);return;}
-   if(nm.length>=2){const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbp(it.rem*it.vk,it.cur),x=same?Math.abs(f.o.a):Math.abs(f.a);
+   if(nm.length>=2){const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),x=same?Math.abs(f.o.a):Math.abs(f.a);
     const fits=s=>{if(!same)return Math.abs(x-s)<=0.06*s;const z=tol(s,c12[0].dir);return x>=s-z[0]&&x<=s+z[1];};
     let found=null,n=0;const walk=(i,set,s)=>{if(n>1)return;if(set.length>=2&&fits(s)){n++;found=set.slice();}if(set.length===6)return;for(let j=i;j<c12.length;j++){set.push(c12[j]);walk(j+1,set,s+val(c12[j]));set.pop();}};
     walk(0,[],0);if(n===1){found.forEach(it=>{it.done="row";});used.add(f.id);return;}}
@@ -3410,7 +3554,7 @@ const Live=(()=>{
  function compute(led,plan0,T,opts){
   if(!isD(T))throw new Error("Live.compute: T is not a date");
   opts=opts||{};
-  const R=read(led,T),{fx,gbp,nat,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
+  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
   // «Не называть сумму вывода, если остатки старше … дней»: on, eight days, unless the founders set it otherwise.
   const fresh={on:!(obj(P.fresh)&&P.fresh.on===false),days:Math.min(90,Math.max(1,Math.round(+(obj(P.fresh)&&P.fresh.days)||8)))};
@@ -3485,13 +3629,13 @@ const Live=(()=>{
   // and last the tax periods, which take only what nothing else claimed.
   const used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
-  const paidIn=(f,it)=>f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):nat(Math.abs(+f.a||0),it.cur);
+  const paidIn=(f,it)=>f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);
   items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;
    const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
    let s=0,last="";rs.forEach(f=>{s+=paidIn(f,it);used.add(String(f.id));if(f.d>last)last=f.d;});
    const t=it.rem*it.vk,lo=tol(t,it.dir)[0];it.match=rs.map(f=>String(f.id));
    if(s>=t-lo||rs.some(f=>shared[String(f.id)]>1))it.done={by:"row",on:last,rows:it.match.slice(),note:"hand"};
-   else{it.got+=s;it.gotG=gbp(it.got,it.cur);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;}
+   else{it.got+=s;it.gotG=gbpOn(it.got,it.cur,last);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;}
   });
   const word=it=>!!it.paid&&(!!it.paid.ok||!!it.paid.legacy||!isD(it.paid.on));
 
@@ -3520,7 +3664,7 @@ const Live=(()=>{
   const mine=(it,f)=>it.ptax?f.lk.startsWith("tax|@")&&(it.lk==="tax|@"||it.lk===f.lk):!!it.lk&&it.lk===f.lk;
   const named=it=>!!it.lk&&it.lk[0]!=="@"&&!it.lk.startsWith("tax|");
   const cmpN=(f,it,t)=>{if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
-   const x=nat(Math.abs(f.a),it.cur);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
+   const x=natOn(Math.abs(f.a),it.cur,f.d);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
   const cmp=(f,it,k)=>cmpN(f,it,it.rem*it.vk*(k||1));
   // Where a tax is paid from: the account the rule names; else, for a share of receipts, the account it is charged
   // on; else any pound account. A row the bank gave no amount for is placed by its bank alone.
@@ -3533,7 +3677,7 @@ const Live=(()=>{
   const whole=it=>!!it.of&&!it.of.part&&it.W;
   const cand=(f,it,loose)=>it.dir===Math.sign(f.o.a)&&!it.notx.includes(f.id)&&(loose||f.at>it.c0)&&
    (whole(it)?!!it.date&&f.d>=plus(it.date,-31)&&f.d<=plus(it.date,61)&&(!ruleBy[it.of.r]||onPay(ruleBy[it.of.r],f)):!it.date||f.d>=plus(it.date,loose?-31:-10))&&(it.lk?mine(it,f):byAmt(f,it));
-  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(f.a)/gbp(it.rem,it.cur);return k>=0.7&&k<=1.3;};
+  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(f.a)/gbpOn(it.rem,it.cur,f.d);return k>=0.7&&k<=1.3;};
   const close=(it,f,note,more)=>{it.done=Object.assign({by:"row",on:f.d,rows:[f.id],note:note||""},more||{});it.match.push(f.id);used.add(f.id);};
   // Which tax row is a period's whole bill: the first a founder said so of; a second one for the same period is
   // read as a part of it. (A row from before v3, which says nothing, is read further down, with the periods.)
@@ -3548,7 +3692,7 @@ const Live=(()=>{
   // statements of its bank reach the next month's window. One repeating payout carries at most one unpaid month.
   const missedNow=o=>{if(o.dir>0||o.moved||o.got>0||!o.cov)return false;const n=nextOf(o);return !!n&&o.cov>=plus(n.date,-10);};
   const ownOf=(l,f)=>{let best=null,bd=1e9;const n=dn(f.d);l.forEach(o=>{const k=Math.abs(dn(o.date)-n);if(k<bd||(k===bd&&o.date<best.date)){bd=k;best=o;}});return best;};
-  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
+  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a,d:f.d},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
   // The lines a founder said «Частично» of. Each knows how much was paid, and so knows its row when it comes.
   const said=items.filter(it=>it.pamt!=null&&!it.wd&&!word(it));
   pool.forEach(f=>{
@@ -3578,7 +3722,7 @@ const Live=(()=>{
     // 2. the invoice with the tax on top where the row had none, or without it where the row had it
     if(f.c==="rev"&&TOP>1){if((hit=nm.find(it=>!it.vat&&cmp(f,it,TOP).ok)))return close(hit,f,"vat");if((hit=nm.find(it=>it.vat&&cmpN(f,it,it.rem).ok)))return close(hit,f,"novat");}
     if(nm.length>=2){                                                                  // 3. one payment for several lines
-     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbp(it.rem*it.vk,it.cur),X=same?Math.abs(f.o.a):Math.abs(f.a);
+     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),X=same?Math.abs(f.o.a):Math.abs(f.a);
      const ok=s=>{if(!same)return Math.abs(X-s)<=0.06*s;const z=tol(s,c12[0].dir);return X>=s-z[0]&&X<=s+z[1];};
      let found=null,n=0;const walk=(i,set,s)=>{if(n>1)return;if(set.length>=2&&ok(s)){n++;found=set.slice();}if(set.length===6)return;for(let j=i;j<c12.length;j++){set.push(c12[j]);walk(j+1,set,s+val(c12[j]));set.pop();}};
      walk(0,[],0);
@@ -3621,7 +3765,8 @@ const Live=(()=>{
    if(o.got>=0.7*t)o.done={by:"row",on:o.last,rows,note:o.got>=t-z[0]&&o.got<=t+z[1]?"":"other",got:r2(o.got)};
    else if(o.cov&&o.cov>=plus(o.date,o.g))o.done={by:"row",on:o.last,rows,note:"part",got:r2(o.got)};
    else o.rem=Math.max(0,(t-o.got)/o.vk);});
-  items.forEach(it=>{it.gotG=it.wd?it.gotG:gbp(it.got,it.cur);});
+  // The part of a line that has come has happened too: it is worth what it was on the day its last row came.
+  items.forEach(it=>{it.gotG=it.wd?it.gotG:gbpOn(it.got,it.cur,it.last||it.date);});
   // E6. A hand mark stands in for a row no statement has shown yet. The row that then shows up takes its place —
   // even one still unrecognised in «Разбор»: it is the bank's fact either way. A row that was already filed (or
   // recognised) when the mark was made is never taken this way: a tap that silently re-filed it would move the
@@ -3672,6 +3817,21 @@ const Live=(()=>{
   // seen yet. A late inflow leaves in two steps, so one invoice a few days over does not move the verdict two
   // levels at once. A late payout never leaves by itself: it is still owed. What is left of a withdrawal is never
   // late: it stands on today until its window ends.
+  // What a line that is done was worth in pounds - counted once, at the rate of the day it was closed on (the day
+  // of the row that closed it, the day of a mark), and so the same tomorrow whatever today's rate does: what came
+  // where that is known, else the whole of it. (A line in pounds is its own sum on any day.)
+  //  - closed by rows of the statement in the line's own currency: at the rate those rows stand in the table at
+  //    (their sum over their pounds), so that «Касса» says of a payment what the table says of it - also of a row
+  //    that was read at a typed rate and left so;
+  //  - otherwise - a mark, a row in another currency: at the rate of the day it was closed on;
+  //  - a tax the page worked out and found paid: the pounds it found (`dg`).
+  const doneDay=it=>isD(it.done.on)?it.done.on:it.date;
+  const doneRate=it=>{
+   if(!it.cur||it.cur==="GBP")return{r:1,by:"",day:""};
+   const d=it.done,ids=d.by==="row"&&Array.isArray(d.rows)?d.rows:[],rs=ids.map(id=>anyRow[id]).filter(f=>f&&f.o&&f.o.cur===it.cur&&Math.abs(+f.o.a)>0&&Math.abs(+f.a)>0);
+   if(rs.length&&rs.length===ids.length){const n=sum(rs,f=>Math.abs(+f.o.a)),g=sum(rs,f=>Math.abs(+f.a));return{r:n/g,by:"rows",day:doneDay(it)};}
+   const day=doneDay(it),at=dayOn(it.cur,day);return{r:rateOn(it.cur,day),by:at?"day":"",day:at};};
+  const doneG=it=>it.dg!=null?Math.abs(+it.dg):Math.abs(it.done.got!=null?+it.done.got:it.amt*it.vk)/doneRate(it).r;
   const OPEN=["due","blind","waiting","late","carry"];
   const stand=it=>{
    it.day="";it.late=0;it.step=0;it.cash0=it.dir*gbp(it.rem*it.vk,it.cur);it.cash=0;
@@ -3717,7 +3877,7 @@ const Live=(()=>{
   const factsOf=(rule,a,b)=>{let g=0,n=0,sheet=false;const [bank,cur]=acctOf(rule.acct||"|GBP");
    revs.forEach(r=>{if(r.d<a||r.d>b)return;
     if(rule.base==="ontop"){if(rule.id==="vat")g+=r.v;else if(r.v>0)g+=r.a*rule.rate/(100+topRate);return;}
-    if(r.b!==bank)return;if(r.o){if(r.o.cur!==cur)return;n+=r.o.a*rule.rate/100;}else{n+=nat(r.a,cur)*rule.rate/100;sheet=true;}});
+    if(r.b!==bank)return;if(r.o){if(r.o.cur!==cur)return;n+=r.o.a*rule.rate/100;}else{n+=natOn(r.a,cur,r.d)*rule.rate/100;sheet=true;}});
    return rule.base==="ontop"?{g,n:g,sheet:false}:{g:gbp(n,cur),n,sheet};};
   // … and from the plan (T4): every written inflow, on the day it is counted, accrues the tax it will bring — the
   // on-top part of its cash when its invoice carries the tax, the share of its cash when it arrives on the rule's
@@ -3787,7 +3947,7 @@ const Live=(()=>{
    const last=()=>X.rows.reduce((d,f)=>f.d>d?f.d:d,"");
    if(st.none){X.state="none";X.by="none";return;}
    if(st.closed){X.state="paid";X.by="closed";X.on=last();return;}
-   if(X.W){if(X.W.done){X.state="paid";X.by="typed";X.on=X.W.done.on;X.paid=X.settled+(X.W.done.got?gbp(X.W.done.got,X.W.cur):X.W.fullG);}else{X.state="typed";if(X.left>=1)blocked[rule.id]=true;}return;}
+   if(X.W){if(X.W.done){X.state="paid";X.by="typed";X.on=X.W.done.on;X.paid=X.settled+(X.W.done.got?doneG(X.W):Math.abs(gbpOn(X.W.amt*X.W.vk,X.W.cur,doneDay(X.W))));}else{X.state="typed";if(X.left>=1)blocked[rule.id]=true;}return;}
    if(X.owed>=1&&X.settled>=0.85*X.owed){X.state="paid";X.by="parts";X.on=last();return;}
    const p=obj(st.paid)?st.paid:null;
    if(p&&p.ok){X.state="word";X.by="word";X.on=isD(p.on)?p.on:"";return;}
@@ -3823,6 +3983,10 @@ const Live=(()=>{
   // T7. The item: what a period still owes, on its due date, on the account the tax is paid from (homeOf, above).
   PER.forEach(X=>{const rule=X.rule,st=X.st;if(!counts(rule)||X.state==="gone"||X.asked||X.W)return;
    const [bank,cur]=homeOf(rule),p=obj(st.paid)?st.paid:null,amtOf=g=>r2(nat(g,cur)),ids=X.rows.map(f=>f.id);
+    // What was left of a period when it was shut by a word or a mark, in pounds for good: its sum in the account's
+    // own currency - which is what was counted - at the rate of the day it was shut. (While a period is open, what
+    // is owed for it is still ahead, and follows today's rate like every line that is.)
+    const shut=(g,d)=>cur==="GBP"?g:gbpOn(nat(g,cur),cur,isD(d)?d:T);
    const mk=(amt,o)=>{const it=add(Object.assign({id:"t|"+X.key,src:"tax",kind:"tax",list:"taxes",blk:"tax",grp:"tax",name:rule.name+" за "+perName(X.per),key:"",cur,vat:false,vk:1,dir:-1,bank,mon:"",sk:"",lk:"",how:"rule",label:"",c0:0,fixed:false,row:"",wd:false,ptax:false,
      of:false,guess:"",who:"",chain:"",ym0:"",carry:null,moved:isD(st.date),exc:st.amt!=null,rec:null,tax:{rule:rule.id,per:X.per,key:X.key},amt,date:X.d0,on:true,paid:p,tx:arr(st.tx),notx:arr(st.notx),closed:!!st.closed,rem:amt,got:0,gotG:0,done:null,hint:null,match:ids,last:"",g:10,cov:cov(bank),ck:"",lab:"tax#"+X.key},o));
     it.fullG=gbp(it.amt,cur);X.item=it;stand(it);settle(it);return it;};
@@ -3831,9 +3995,12 @@ const Live=(()=>{
     // T9. «Оплачено» first shows the payments that may be it: on the pay account, claimed by nothing, from a month
     // before the due date to today, of any size from a tenth of what is left — nearest sum first.
     it.pays=taxPool.filter(f=>!used.has(f.id)&&onPay(rule,f)&&!notx(X).includes(f.id)&&f.d>=plus(X.d0,-31)&&f.d<=T&&amtG(f)>=0.1*X.left).sort((a,b)=>Math.abs(amtG(a)-X.left)-Math.abs(amtG(b)-X.left)).map(f=>({id:f.id,d:f.d,gbp:r2(amtG(f)),label:f.l}));return;}
-   if(X.state==="paid"&&X.by==="mark")return void mk(amtOf(X.left),{done:{by:"mark",on:p.on,rows:[],note:""},markCov:X.markCov||""});
-   if(X.state==="word")return void mk(amtOf(X.left),{done:{by:"ok",on:X.on||"",rows:[],note:""}});
-   if(X.state==="paid"&&(X.by==="row"||(X.by==="closed"&&ids.length)))return void mk(amtOf(X.paid),{done:{by:"row",on:X.on,rows:ids,note:X.by==="row"?"bill":"hand",got:amtOf(X.paid)}});
+   if(X.state==="paid"&&X.by==="mark")return void mk(amtOf(X.left),{done:{by:"mark",on:p.on,rows:[],note:""},markCov:X.markCov||"",dg:shut(X.left,p.on)});
+   if(X.state==="word")return void mk(amtOf(X.left),{done:{by:"ok",on:X.on||"",rows:[],note:""},dg:shut(X.left,X.on||X.d0)});
+   if(X.state==="paid"&&(X.by==="row"||(X.by==="closed"&&ids.length))){
+     // The pounds are the ones that were found paid; the sum in the account's own currency is the rows' own.
+     const own=cur!=="GBP"&&X.rows.length&&X.rows.every(f=>f.o&&f.o.cur===cur&&Math.abs(+f.o.a)>0),paidN=own?r2(sum(X.rows,f=>Math.abs(+f.o.a))):cur==="GBP"?amtOf(X.paid):r2(natOn(X.paid,cur,X.on||T));
+     return void mk(paidN,{done:{by:"row",on:X.on,rows:ids,note:X.by==="row"?"bill":"hand",got:paidN},dg:X.paid});}
   });
   // What a period is called for the block «Налоги»: run — still running; open — ended, not paid, not late;
   // late; parts — being paid in parts; typed — a founder's row stands for it; and the closed ones.
@@ -3985,7 +4152,7 @@ const Live=(()=>{
    // plan to draw money against: what was not written is invisible, nothing being taken from history any more.
    // A line that has been paid is still a cost the plan holds for the slice its own date falls in — at the sum
    // that was paid: left out, paying the team on the day it is due made the page say the plan was not written.
-   const paidOut=it=>written(it)&&it.dir<0&&(it.grp==="team"||it.grp==="other")&&it.state==="done"?(it.done.got!=null?gbp(it.done.got,it.cur):Math.abs(it.fullG)):0;
+   const paidOut=it=>written(it)&&it.dir<0&&(it.grp==="team"||it.grp==="other")&&it.state==="done"?doneG(it):0;
    const sl=[[T,plus(T,30)],[plus(T,31),plus(T,61)]].map(([a,b])=>({from:a,to:b,plan:sum(items,it=>teamish(it)&&it.day>=a&&it.day<=b?-it.cash:it.date>=a&&it.date<=b?paidOut(it):0)}));
    const thinS=sl[1].plan<sl[0].plan?sl[1]:sl[0],thin=usualOut>=1000&&thinS.plan<0.8*usualOut?{from:thinS.from,to:thinS.to,plan:r2(thinS.plan),usual:r2(usualOut),month:plus(thinS.from,15).slice(0,7),half:thinS.plan<0.5*usualOut}:null;
    const wdl=items.filter(it=>it.wd&&it.cash<0&&in60(it)).sort(byItem),noout=!items.some(it=>written(it)&&it.cash<0&&in60(it));
@@ -3999,8 +4166,8 @@ const Live=(()=>{
   // bank's share of it and the row itself can never say three different things. A line that closed at another sum
   // than was written expects what came.
   const counted_=it=>!["off","empty","doubt","missed"].includes(it.state);
-  items.forEach(it=>{it.sec=it.sub?"subs":it.list;const came=it.done&&it.done.got!=null?gbp(it.done.got,it.cur):null;
-   it.exp=!counted_(it)?0:came!=null?came:Math.abs(it.fullG);it.expD=!it.exp?0:it.state==="done"?it.exp:it.gotG>0?Math.min(it.exp,it.gotG):0;});
+  items.forEach(it=>{it.sec=it.sub?"subs":it.list;
+   it.exp=!counted_(it)?0:it.done?doneG(it):Math.abs(it.fullG);it.expD=!it.exp?0:it.state==="done"?it.exp:it.gotG>0?Math.min(it.exp,it.gotG):0;});
   const months={},m60=T60.slice(0,7),mset=new Set();for(let m=ymT;m<=m60;m=ymAdd(m,1))mset.add(m);
   items.forEach(it=>{if(it.ym<=m60||it.src==="row")mset.add(it.ym);(months[it.ym]||(months[it.ym]={})).any=1;});
   mset.forEach(m=>{months[m]=months[m]||{};});
@@ -4104,7 +4271,7 @@ const Live=(()=>{
   // ---- the model, as plain data ----
   const doneDays={},since31=plus(T,-31);
   const outItem=it=>{const d=it.done,p=it.paid;let done=null;
-   if(d){const f=d.rows.length?anyRow[d.rows[0]]:null,day=d.by==="row"?d.on:it.date||d.on;done={by:d.by,on:d.on,day,rows:d.rows.slice(),note:d.note,label:f?alias(f.l):"",over:d.over||0,got:d.got!=null?r2(d.got):0};if(day&&day>=since31)(doneDays[day]||(doneDays[day]=[])).push(it.id);}
+   if(d){const f=d.rows.length?anyRow[d.rows[0]]:null,day=d.by==="row"?d.on:it.date||d.on;done={by:d.by,on:d.on,day,rows:d.rows.slice(),note:d.note,label:f?alias(f.l):"",over:d.over||0,got:d.got!=null?r2(d.got):0};if(it.cur!=="GBP"&&it.dg==null){const q=doneRate(it);if(q.by){done.fx=q.r;done.fxDay=q.day;done.fxBy=q.by;}}if(day&&day>=since31)(doneDays[day]||(doneDays[day]=[])).push(it.id);}
    const dl=it.src==="occ"&&!it.sk&&DL[it.chain]?DL[it.chain]:null;
    return{id:it.id,src:it.src,kind:it.kind,list:it.list,sec:it.sec,sub:!!it.sub,blk:it.blk,grp:it.grp,name:it.name,key:it.key,amt:r2(it.amt),cur:it.cur,vat:it.vat,factor:it.vk,dir:it.dir,cash:r2(it.cash),full:r2(it.dir*it.fullG),exp:r2(it.exp),expDone:r2(it.expD),
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
@@ -4322,8 +4489,8 @@ const Live=(()=>{
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},
- model(opts){return Live.compute({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,history:S.history,aliases:S.aliases||{}},Cash.test.state()||{},Live.today(),opts);}};
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+ model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
 // LIVE — the forecast engine (end)
 // =====================================================================================================================
 
@@ -4343,7 +4510,7 @@ const Plan=(()=>{
  const redraw=()=>subs.forEach(f=>f());
  return{doc:()=>Cash.plan(),by:()=>who,name(v){who=String(v||"").trim();},H:()=>H,watch(f){subs.push(f);},redraw,
   setH(v){H=v===30?30:60;try{localStorage.setItem(KEY,String(H));}catch(e){}redraw();},
-  model:o=>Live.compute({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,history:S.history,aliases:S.aliases||{}},Cash.plan()||{},Live.today(),o||{H}),
+  model:o=>Live.compute(ledIn(),Cash.plan()||{},Live.today(),o||{H}),
   // Once somebody else has saved the plan, nothing changed on this page is kept. A change is then refused where it
   // is made, in the same breath that used to answer «Сохранено»: lost() says so and is true. Every hand that
   // changes the plan asks it first, and answers in its own words only after edit() has returned true.
@@ -4406,7 +4573,7 @@ const Ed=(()=>{
 
  // What a row shows for money: the part still expected or, once it is done, the sum that came. A tax the page
  // worked out is shown in whole pounds.
- function sum(it){const done=it.state==="done",d=it.done,v=done?(d.got||d.note==="partial"?it.dir*toG(d.got,it.cur):it.full):it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
+ function sum(it){const done=it.state==="done",d=it.done,v=done?(d&&d.note==="partial"&&!+d.got?0:it.exp?it.dir*it.exp:it.full):it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
   // Whole pounds, like every other figure of the two tabs: the pennies are in the row's card.
   return s+fmt(Math.round(a));}
  // «в т.ч. VAT £1,950» — for an open inflow whose invoice carries the tax on top: how much of the sum shown is tax.
@@ -4565,6 +4732,9 @@ const Ed=(()=>{
    out.push(p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.");}
   else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?"вывод: закроется тем, что возьмут фаундеры":it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
   if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
+  // What has happened is counted at the rate of its own day, and the card says which.
+  if(d&&d.fx>0)out.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
+  if(d){}
   else if(it.part)out.push(it.wd?`Взято ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`:`Пришла часть: ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`);
   else if(it.state==="late")out.push(`Просрочено на ${it.lateDays} дн.: в выписках ${it.bank} по ${dRu(it.cov)} ${inn?"денег":"платежа"} нет.`);
   else if(it.state==="blind")out.push(`Дата прошла, а выписки ${it.bank} ${it.cov?"только по "+dRu(it.cov):"не загружены"}: считаю на сегодня.`);
@@ -5550,7 +5720,7 @@ Plan.watch(()=>Ed.settingsDraw());
 const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]",'button[data-ed-at="need"]',
  "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
  "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","input.lab","input.vat","[data-accept]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
- "[data-fx]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
+ "[data-fx]","[data-fxo]","[data-fxdo]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
  "[data-demo]","#toastUndo","[data-td-fill]","[data-td-helper]",'[data-tabgo="upload"]'].join(",");
 const KEEP="[data-ed-cl],[data-setc],[data-cs-fix],[data-taxowner]";
 const seal=()=>{if(RO)document.querySelectorAll(`:is(input,select,textarea,button):is(${ACT}):not(:disabled)`).forEach(e=>{e.disabled=true;});};
@@ -5711,6 +5881,7 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-tabgo]"))){setTab(x.dataset.tabgo);if(x.closest(".set-nav")){const b=$(`#view-${ui.tab} .set-nav [aria-pressed="true"]`);if(b)b.focus({preventScroll:true});}return;}
  if(c("[data-demo]"))return demo();
  if(c("#ledReload"))return location.reload();
+ if((x=c("[data-fxdo]"))){if(x.dataset.fxdo==="recount")return fxRecount();S.fxk=true;saveSettings();renderSettings();return toast("Оставлено как есть");}
  if(c("#demoOff"))return demoOff();
  if(c("#toastUndo")){$("#toast").hidden=true;const f=toast.back;toast.back=null;return f?f():undo();}
  if((x=c("[data-repgroup]"))){rp.group=x.dataset.repgroup;saveRep();return renderReports();}
@@ -5758,8 +5929,17 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-rule]"))){S.rules.splice(+x.dataset.rule,1);saveRules();return renderSettings();}
  if(c("[data-esave]")){r=S.tx.find(q=>q.id===ui.edit);if(!r)return;const was=r.d.slice(0,7),cat=$("#e-c").value;
   if(!cat||!$("#e-d").value)return toast("Нужны дата и блок");
-  r.d=$("#e-d").value;r.a=round2(+$("#e-a").value||0);r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=cat==="rev"?round2(+$("#e-v").value||0):0;
-  ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast("Строка сохранена");}
+  // Pounds somebody types are theirs (`o.hand`). A row that stands at the rate of its day and is moved to another day
+  // is counted at the rate of that day - here, where the person sees it, not behind their back when the page opens
+  // next. Moved to before the table began, it keeps its pounds and names no day.
+  const d0=r.d,a0=r.a,a=round2(+$("#e-a").value||0),o=r.o;let v=cat==="rev"?round2(+$("#e-v").value||0):0,again=false;
+  r.d=$("#e-d").value;
+  if(a!==a0){if(o){o.hand=1;delete o.r;delete o.rd;}r.a=a;}
+  else if(r.d!==d0&&o&&o.cur&&o.cur!=="GBP"&&o.r>0&&Object.keys(RATES.days).length){
+   if(fxDayOn(RATES.days,o.cur,r.d)){reprice(r);r.a*=a0<0?-1:1;if(v&&v===(+r.v||0)&&a0)v=round2(v*r.a/a0);again=r.a!==a0;}
+   else{delete o.r;delete o.rd;}}
+  r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=v;
+  ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast(again?"Строка сохранена: фунты — по курсу нового дня":"Строка сохранена");}
  if((x=c("[data-edel]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
   r=S.tx.find(q=>q.id===ui.edit);if(r){S.tx=S.tx.filter(q=>q!==r);ui.edit=null;saveMonths([r.d.slice(0,7)]);renderAll();toast("Строка удалена");}return;}
  if(c("[data-eclose]")){ui.edit=null;return renderLedger();}
@@ -5784,10 +5964,12 @@ document.addEventListener("change",ev=>{
  if(t.id==="periodSel"){ui.period=t.value;return renderDash();}
  if(t.id==="personSel"){ui.focus=t.value?"p:"+t.value:"";return renderDash();}
  if(t.id==="qSel"){ui.quarter=t.value;ui.edit=null;return renderLedger();}
- if(t.dataset.fx){const v=+t.value;if(v>0){S.fx[t.dataset.fx]=v;S.inbox.forEach(r=>{if(r.o.cur===t.dataset.fx)r.a=round2(Math.abs(toGBP(r.o.a,r.o.cur)));});saveSettings();saveInbox();renderInbox();toast("Курс сохранён");}return;}
+ // A rate of one's own for looking ahead; an empty box is the day's rate again. Nothing that has happened moves.
+ if(t.dataset.fxo){const k=t.dataset.fxo,v=+t.value;if(v>0)S.fxo[k]=v;else delete S.fxo[k];saveSettings();renderAll();return toast(v>0?`Свой курс ${k}: £1 = ${v}`:`${k}: снова курс дня`);}
+ if(t.dataset.fx){const v=+t.value;if(v>0){S.fx[t.dataset.fx]=v;S.inbox.forEach(r=>{if(r.o.cur===t.dataset.fx&&!(r.o.r>0))reprice(r);});saveSettings();saveInbox();renderInbox();toast("Курс сохранён");}return;}
  if(t.dataset.fbank||t.dataset.fcur){const f=S.files.find(q=>q.id===(t.dataset.fbank||t.dataset.fcur));if(!f)return;
   if(t.dataset.fbank)f.bank=t.value;else f.cur=t.value;
-  S.inbox.forEach(r=>{if(r.f!==f.id)return;r.b=f.bank;if(!r.o.fix){r.o.cur=f.cur;r.a=round2(Math.abs(toGBP(r.o.a,f.cur)));}if(!r.touched)classify(r);r.twin=findTwin(r);});
+  S.inbox.forEach(r=>{if(r.f!==f.id)return;r.b=f.bank;if(!r.o.fix){r.o.cur=f.cur;reprice(r);}if(!r.touched)classify(r);r.twin=findTwin(r);});
   saveInbox();renderInbox();return;}
  if(t.dataset.f&&t.closest("#view-inbox")){const r=inboxRow(t);if(!r)return;
   // A name typed for a receipt brings that client's VAT with it — unless the sum was typed by hand.

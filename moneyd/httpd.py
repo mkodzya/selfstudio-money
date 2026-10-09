@@ -108,7 +108,7 @@ import threading
 import time
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import auth, config, log, store
+from . import auth, config, log, rates as rates_, store
 
 __all__ = [
     "ROUTES", "Route", "PUBLIC_PATHS", "SERVED_METHODS", "VENDOR_FILES", "DOC_PATHS",
@@ -167,6 +167,7 @@ ROUTES = (
     Route("PUT", "/api/founder/money", True, "api_doc_put", body="ledger", doc="ledger", need="write"),
     Route("GET", "/api/founder/money/cash", True, "api_doc_get", doc="plan"),
     Route("PUT", "/api/founder/money/cash", True, "api_doc_put", body="plan", doc="plan", need="write"),
+    Route("GET", "/api/rates", True, "api_rates"),
     Route("GET", "/api/people", True, "api_people", need="owner"),
     Route("POST", "/api/people", True, "api_people_add", body="auth", need="owner"),
     Route("POST", "/api/people/update", True, "api_people_update", body="auth", need="owner"),
@@ -1195,6 +1196,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # The stored file is the answer, byte for byte.
         self._send(200, self.server.stores[route.doc].read().body, _TYPE_JSON)
 
+    def _do_api_rates(self, route: Route) -> None:
+        # The table of exchange rates by day, for anybody who is signed in. When it is behind, this is
+        # also what begins its refresh - and waits for it a moment, never longer (moneyd/rates.py).
+        self._send(200, self.server.rates.answer(self.server.settings.rates_door_wait), _TYPE_JSON)
+
     def _do_api_doc_put(self, route: Route) -> None:
         server = self.server
         document = server.stores[route.doc]
@@ -1393,6 +1399,8 @@ class MoneyServer(http.server.ThreadingHTTPServer):
         self.security_log = security_log
         self.clock = clock
         self.web = web if web is not None else WebFiles(settings, clock)
+        #: The exchange rates by day. On a dev stand it asks nobody and is an empty table.
+        self.rates = rates_.Rates(settings, clock, security_log)
         #: One large document is parsed and saved at a time: at the 16 MiB limit a save
         #: takes the process to about 130 MB for a moment, and the container has 256.
         self.heavy = threading.BoundedSemaphore(1)

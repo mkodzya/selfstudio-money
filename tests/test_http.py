@@ -544,6 +544,9 @@ class EveryRouteTests(Case):
                     self.assertRefused(stand.post(LOGIN, {"login": "mika", "password": PASSWORD}), 401, "invalid_credentials")
                     self.assertEqual(stand.post(LOGIN, {"login": "mika", "password": NEW_PASSWORD}).status, 200)
                     stand.set_password("mika")          # the rows after this one sign in with the password of the tests
+                elif (method, path) == ("GET", "/api/rates"):
+                    # A dev stand asks nobody: the table is there, and empty.
+                    self.assertEqual(self.json_answer(stand.get(path, cookie=cookie)), {"base": "GBP", "days": {}, "asked": None})
                 elif (method, path) == ("GET", PEOPLE):
                     listed = self.json_answer(stand.get(path, cookie=cookie))
                     self.assertEqual(sorted(listed), ["max", "people"])
@@ -1047,7 +1050,7 @@ class CrossSiteTests(Case):
             ("POST", PEOPLE_LINK): {"login": "vanya", "password": PASSWORD},
         }
         self.api = [(method, path) for method, path, _session in documented_routes() if path.startswith("/api/")]
-        self.assertEqual(len(self.api), 13, "the thirteen doors under /api/ of docs/api.md")
+        self.assertEqual(len(self.api), 14, "the fourteen doors under /api/ of docs/api.md")
         self.sessions = len(stand.auth.sessions.list())
 
     def ask(self, method: str, path: str, **options: Any) -> Any:
