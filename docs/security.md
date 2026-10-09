@@ -96,7 +96,9 @@ Since 9 October 2026 (the owner's decision: «я хочу сам создать 
   documents are sent to them, and neither is taken from them. A reader's `PUT`
   is `403 read_only`, said before a byte of its body is read. The page draws a
   reader nothing that changes anything, but that is a courtesy: the door
-  judges by itself.
+  judges by itself. (Where `/api/me` gives the page no answer at all - it is
+  asked twice - the page is drawn as a writer's, and becomes a reader's when
+  its first save is refused.)
 - **An editor** is a person the owner has let save. An editor manages nobody.
 - The role is read from `users.json` at every request, so a change holds from
   that person's next request, on a page they have open as well.
