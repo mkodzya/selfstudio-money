@@ -34,7 +34,8 @@ What is believed
     where only the bounds stand) is outvoted as soon as two true days stand beside it. And when
     the market really has moved further than ``JUMP`` allows, the days refused for it agree with
     each other: an answer that is as near to two other refused days as it should have been to the
-    table is believed after all (``_doubted``).
+    table is believed after all (``_doubt``) - two of the same week (``AGREE_DAYS``); a doubt that
+    nothing bore out is dropped after a month (``DOUBT_DAYS``).
 
 When
     Never on a timer. The page asks ``GET /api/rates`` once when it opens; if the table lacks a day
@@ -44,8 +45,9 @@ When
     no longer than ``settings.rates_door_wait``: a source that is slow or away never holds a page,
     and one that answers hands the page the whole table at once. What did not come this time
     comes at a later opening. A day the source says it does not have is given up after
-    ``settings.rates_tries_per_day`` askings; a day that could not be asked for at all - no
-    connection - is not counted against it.
+    ``settings.rates_tries_per_day`` askings, and so is a day in doubt once the table holds a day
+    after it; a day that could not be asked for at all - no connection, a source that is unwell
+    (5xx, 429) - is not counted against it.
 
 On disk
     ``rates/days.json``, written whole (temporary file, fsync, rename). A file that cannot be read
@@ -77,8 +79,12 @@ CURRENCIES = ("USD", "EUR", "RUB", "AMD")
 BOUNDS = {"USD": (0.9, 2.2), "EUR": (0.9, 1.8), "RUB": (40.0, 500.0), "AMD": (250.0, 1500.0)}
 #: How far a rate may stand from a day the table holds, per day between them (and three times that
 #: at most): 12% is more than three of the four have moved in a day in twenty years; the fourth,
-#: the rouble, has - and ``_doubted`` is for that.
+#: the rouble, has - and ``_doubt`` is for that.
 JUMP = 0.12
+#: Two doubted days bear a third out only when they are of the same week as it; a doubt that nothing
+#: bore out is forgotten after a month.
+AGREE_DAYS = 7
+DOUBT_DAYS = 30
 #: The source's answer for one day is about 12 KiB.
 MAX_BYTES = 512 * 1024
 
@@ -156,7 +162,10 @@ def fetch_day(url: str, timeout: float) -> bytes:
     except Refused:
         raise
     except urllib.error.HTTPError as answered:
+        code = answered.code
         answered.close()
+        if code >= 500 or code == 429:
+            raise Refused("no-answer")          # the source is unwell or busy: that says nothing about the day
         raise Refused("status")                 # the source answered: it has no such day (yet), or will not say
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
         raise Refused("no-answer")              # nobody answered: no connection, a broken one, a slow one
@@ -309,6 +318,9 @@ class Rates:
         try:
             with self._lock:
                 wanted = self._wanted()
+                today = self._today()
+                for day in [day for day in self._doubt if (today - self._day(day)).days > DOUBT_DAYS]:
+                    del self._doubt[day]        # a doubt nobody confirmed in a month was a slip of the source's
                 self._asked = as_utc(self._clock()).replace(microsecond=0)
                 self._save()                    # the attempt is noted first: a source that hangs is not asked again at once
             came = 0
@@ -324,9 +336,14 @@ class Rates:
                 except Refused as refusal:
                     with self._lock:
                         # Counted against a day only when the source answered and did not have it: a day
-                        # nobody could be asked for is asked for again, and so is one that is in doubt.
+                        # nobody could be asked for is asked for again, and so is one that is in doubt -
+                        # until the table has gone on past it: then the days after it did not bear it out,
+                        # it was a slip of the source's, and it is not asked for on every round for good.
                         # (Today's day is simply not out yet for some hours; that is no fault of anybody's.)
-                        if refusal.reason not in ("no-answer", "jump") and day != self._today().strftime(_DAY_FORMAT):
+                        counted = refusal.reason != "no-answer" and day != self._today().strftime(_DAY_FORMAT)
+                        if refusal.reason == "jump":
+                            counted = any(other > day for other in self._days or {})
+                        if counted:
                             self._gaps[day] = self._gaps.get(day, 0) + 1
                     if refusal.reason not in ("no-answer", "status") and (day, refusal.reason) not in self._noted:
                         self._noted.add((day, refusal.reason))
@@ -336,13 +353,17 @@ class Rates:
             self._asking.release()
 
     def _ask(self, day: str) -> Dict[str, float]:
-        last = Refused("no-answer")
+        # Of two addresses that both refuse, the one that said more is the answer: what it read and
+        # would not take, before "no such day", before nobody answering at all.
+        weight = {"no-answer": 0, "status": 1}
+        said = Refused("no-answer")
         for template in self._settings.rates_urls:
             try:
                 return read_answer(self._fetch(template.replace("{day}", day), self._settings.rates_timeout), day)
             except Refused as refusal:
-                last = refusal
-        raise last
+                if weight.get(refusal.reason, 2) > weight.get(said.reason, 2):
+                    said = refusal
+        raise said
 
     def _apart(self, day: str, other: str) -> int:
         return max(1, abs((self._day(other) - self._day(day)).days))
@@ -358,8 +379,12 @@ class Rates:
 
         Near enough to one of the three days nearest to it - by what a market moves in the days to the
         nearest of them: believed. Else it is kept as doubted, and believed all the same once two other
-        doubted days are that near to it - then it is the table that is out of step, and not the source
-        three days running.
+        doubted days of the same week are that near to it - then it is the table that is out of step,
+        and not the source three days running.
+
+        Three days' files that agree are believed whether they were asked for on three mornings or in one
+        round after a quiet weekend: a day's file does not change once it is out, so waiting adds nothing
+        to what it says. A source that is wrong three days running is held by ``BOUNDS`` alone.
         """
         known = sorted(self._days or {}, key=lambda other: self._apart(day, other))[:3]
         if not known:
@@ -369,7 +394,8 @@ class Rates:
             self._doubt.pop(day, None)
             return
         agree = [other for other, held in self._doubt.items()
-                 if other != day and self._near(quoted, held, self._apart(day, other))]
+                 if other != day and self._apart(day, other) <= AGREE_DAYS
+                 and self._near(quoted, held, self._apart(day, other))]
         self._doubt[day] = quoted
         if len(agree) >= 2:
             self._doubt.pop(day, None)

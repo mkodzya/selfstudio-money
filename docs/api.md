@@ -500,7 +500,8 @@ the page then counts by the latest day it was given, or - where the table is
 empty, as on a dev stand, which asks nobody - by the rates typed into it.
 
 The page asks when it opens, and once more - by somebody's own act - before
-it reads a statement whose days its copy of the table does not hold. It counts
+it reads a statement whose days its copy of the table does not hold, or when
+the door did not answer at the opening. It counts
 what has already happened - a payment in a statement, a row marked paid - at
 the rate of that day, and only what is still ahead, and what the accounts hold
 today, at the latest.

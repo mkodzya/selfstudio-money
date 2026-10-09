@@ -811,10 +811,15 @@ and a request id; the detail is in the log.
     followed to another address, and thrown away whole when it fails, with a
     line in the security log. One wrong day cannot shut the table against the
     true ones: a day is held against three neighbours, and three days of the
-    source that say the same are believed over the table. What remains: the
-    first day into an empty table is held by the bounds alone; a source that
-    is wrong within what a market moves in a day is believed; and a day once
-    in the table is not asked for again. The owner sees the rates in
+    source that say the same - three of one week - are believed over the
+    table, whether they were asked for on three mornings or in one round after
+    a quiet weekend (a day's file does not change once it is out). A day in
+    doubt that the days after it did not bear out is given up after five
+    askings. What remains: the first day into an empty table is held by the
+    bounds alone; a source that is wrong within what a market moves in a day,
+    or wrong three days running within the bounds, is believed; a day once in
+    the table is not asked for again, and there is no command yet that takes
+    a wrong day out of it. The owner sees the rates in
     «Настройки» and can type one of their own over any of them for looking
     ahead; a statement row keeps the rate it was read at, so a day that was
     wrong moves no row that was read before or after it was. Outbound traffic

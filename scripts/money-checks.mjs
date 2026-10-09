@@ -375,7 +375,7 @@ http
     const body = () => new Promise((r) => { let s = ''; req.on('data', (c) => (s += c)); req.on('end', () => r(s)); });
     // The page asks who is signed in, to sign the changes it makes to the plan.
     if (url === '/api/me') return send(200, store.me);
-    if (url === '/api/rates') return send(200, store.rates);
+    if (url === '/api/rates') return store.rates ? send(200, store.rates) : send(503, { error: 'storage_busy' });      // null: the door does not answer
     if (url === '/api/people' || url.startsWith('/api/people/') || url === '/api/auth/password' || url === '/api/auth/logout') {
       const b = req.method === 'GET' ? {} : JSON.parse((await body()) || '{}');
       const noted = { ...b };
@@ -5541,6 +5541,8 @@ await run('rv-rates', 'what has happened is counted at the rate of its own day; 
   const paidX = (M) => [item(M, 'x').state, item(M, 'x').exp, item(M, 'x').done.fxBy, Math.round(item(M, 'x').done.fx * 100) / 100];
   same([paidX(await C(withRates(ledX), X)), paidX(await C(withRates(ledX, moved), X))], [['done', 740.74, 'rows', 1.35], ['done', 740.74, 'rows', 1.35]],
     'a dollar line closed by a dollar row stands at the row\'s own pounds, £740.74, whatever the day\'s rate or today\'s');
+  same([paidX(await C(ledX, X)), paidX(await C({ ...ledX, fx: { ...FX, USD: 1.6 } }, X))], [['done', 740.74, 'rows', 1.35], ['done', 740.74, 'rows', 1.35]],
+    '… and without a table too, whatever rate is typed into the page afterwards: what is paid does not move with a rate on the laptop tool either (it used to: £800 at the typed 1.25)');
 
   // The made-up studio, whole: today's rates are moved a long way, and nothing that is done moves.
   const far = JSON.parse(JSON.stringify(DAYS));
@@ -5593,7 +5595,9 @@ await run('rv-rates-old', 'rows in another currency filed before the day\'s rate
   // pounds. The table of rates has come.
   const rows = () => [filed('o1', '2026-10-02', 2700, 'rev', 'Client U', { cur: 'USD', v: 0 }), filed('o2', '2026-10-05', -1350, 'cogs', 'Person V', { cur: 'USD' }),
     filed('o3', '2026-10-03', -11800, 'other', 'Landlord', { cur: 'RUB' }), filed('o4', '2026-09-20', -1350, 'cogs', 'Person V', { cur: 'USD' }), filed('o5', '2026-10-02', -300, 'other', 'Tool', {}),
-    (() => { const r = filed('o6', '2026-10-04', -135, 'other', 'By hand', { cur: 'USD' }); r.a = 111; r.o.h = 1; return r; })()];
+    (() => { const r = filed('o6', '2026-10-04', -135, 'other', 'By hand', { cur: 'USD' }); r.a = 111; r.o.hand = 1; return r; })(),
+    // … and a row whose pounds somebody typed before there was a mark for that: $1,350 that stand at £400
+    (() => { const r = filed('o7', T, -1350, 'cogs', 'Person V', { cur: 'USD' }); r.a = 400; return r; })()];
   const open2 = async (name, more = {}) => { serve(ledger(rows()), planW()); store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null }; if (more.reader) asReader(); const pg = await open(name, undefined, { hash: '#settings', ...(more.reader ? { who: 'Misha' } : {}) }); await pg.waitForSelector('#fx-card'); return pg; };
   const kept = () => Object.fromEntries(store.led.doc.tx.map((r) => [r.id, [r.a, (r.o || {}).r || null]]));
   let pg = await open2('old rows');
@@ -5601,11 +5605,13 @@ await run('rv-rates-old', 'rows in another currency filed before the day\'s rate
     ['Строки в валюте — по курсу своего дня?спрашивается один раз',
       [['2 окт', 'Client U', '$2,700', '1.35', '£2,000.00', '1.3', '£2,076.92'], ['3 окт', 'Landlord', '−₽11,800', '118', '£100.00', '111', '£106.31'], ['5 окт', 'Person V', '−$1,350', '1.35', '£1,000.00', '1.36', '£992.65']]],
     'the three rows of October in another currency, each with what it stands at and what it would stand at - not the row of September, not the row in pounds, not the row whose pounds somebody typed by hand in «Таблица»');
+  ok(/Ещё 1 строка в валюте не меняется: сумма в фунтах там далека от пересчёта по любому курсу/.test(await text(pg, '#fx-ask')),
+    'a row whose pounds are far from its sum at any rate was typed by somebody before rows were marked for that: it is left out, and the card says so');
   same(await pg.$$eval('#fx-ask tr.rc-tot', (l) => l.map((r) => r.cells[r.cells.length - 1].textContent)), ['£2,076.92', '£1,098.96', '+£77.96'], 'and what it does to the month: 76.92 more came in, 1.04 less went out');
   await shot(pg, 'rv-rates-old');
   await pg.click('#fx-ask [data-fxdo="recount"]');
   same([await puts('led', 1), kept(), await pg.$('#fx-ask'), await toastText(pg)],
-    [1, { o1: [2076.92, 1.3], o2: [992.65, 1.36], o3: [106.31, 111], o4: [1000, null], o5: [300, null], o6: [111, null] }, null, 'Пересчитано: 3 строки по курсу своего дня'],
+    [1, { o1: [2076.92, 1.3], o2: [992.65, 1.36], o3: [106.31, 111], o4: [1000, null], o5: [300, null], o6: [111, null], o7: [400, null] }, null, 'Пересчитано: 3 строки по курсу своего дня'],
     '«Пересчитать»: the three are counted over in one save and carry their rate; the rest is as it was; the question is gone');
   await pg.click('#toastUndo');
   same([await puts('led', 2), kept().o1, await pg.isVisible('#fx-ask')], [2, [2000, null], true], '«Отменить» puts them back, and the question with them');
@@ -5643,7 +5649,11 @@ await run('rv-rates-late', 'a row never keeps the rate of a wrong day: the table
   await pg.context().close();
 
   // A row of today, read before today's rate was out, stands at yesterday's - and says which day that was.
-  serve(ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), { ...filed('f-today', T, -680, 'other', 'Shop', { cur: 'USD' }), a: 500, o: { a: -680, cur: 'USD', t: 'Shop', r: 1.36, rd: '2026-10-05' } }]), planW());
+  // (So does a row still in «Разбор» - also one that carries the name on the card it was paid with.)
+  const stamped = (r, o) => ({ ...r, a: 500, o: { ...r.o, ...o } });
+  serve(ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), stamped(filed('f-today', T, -680, 'other', 'Shop', { cur: 'USD' }), { r: 1.36, rd: '2026-10-05' }),
+    stamped(filed('f-moved', '2026-10-03', -660, 'other', 'Moved shop', { cur: 'USD' }), { r: 1.32, rd: '2026-10-03' })],
+  [stamped(inbox('i-held', T, -680, 'other', 'Held shop', { cur: 'USD' }), { h: 'IVAN PETROV', r: 1.36, rd: '2026-10-05' })]), planW());
   store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null };          // today's rate, 1.40, has come
   const next = await open('rates, the day has come', undefined, { hash: '#settings' });
   await next.waitForSelector('#fx-card');
@@ -5653,7 +5663,44 @@ await run('rv-rates-late', 'a row never keeps the rate of a wrong day: the table
   await next.press('#fxo-EUR', 'Tab');
   const row = (await puts('led', 1)) && store.led.doc.tx.find((r) => r.id === 'f-today');
   same([row.a, row.o.r, row.o.rd], [485.71, 1.4, T], '… and with the next change the row goes to the server at the rate of its own day: $680 at 1.40');
+  const held = store.led.doc.inbox.find((r) => r.id === 'i-held');
+  same([held.a, held.o.r, held.o.rd, held.o.h], [485.71, 1.4, T, 'IVAN PETROV'], 'the row waiting in «Разбор» with a name on its card is counted over like any other');
+
+  // A row that stands at the rate of its day and is moved to another day in «Таблица» takes the rate of that day - at
+  // once, where the person sees it. Pounds somebody types are theirs: no day's rate is put over them again.
+  let saves = store.led.puts;
+  const moved = () => { const r = store.led.doc.tx.find((q) => q.id === 'f-moved'); return [r.d, r.a, r.o.r || null, r.o.rd || null, r.o.hand || null]; };
+  const edit = async (fields) => {
+    await next.click('#view-ledger tbody tr[data-row="f-moved"]');
+    for (const [sel, v] of Object.entries(fields)) await next.fill(sel, v);
+    await next.click('#view-ledger [data-esave]');
+    saves = await puts('led', saves + 1);
+    return [moved(), await toastText(next)];
+  };
+  await next.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  same(await edit({ '#e-d': '2026-10-05' }), [['2026-10-05', 485.29, 1.36, '2026-10-05', null], 'Строка сохранена: фунты — по курсу нового дня'], 'moved from the 3rd to the 5th: $660 at 1.36, and the page says the pounds changed');
+  same(await edit({ '#e-d': '2026-10-01' }), [['2026-10-01', 507.69, 1.3, '2026-10-01', null], 'Строка сохранена: фунты — по курсу нового дня'], 'moved back to the 1st: at 1.30');
+  same(await edit({ '#e-a': '480' }), [['2026-10-01', 480, null, null, 1], 'Строка сохранена'], 'pounds typed by hand: the row carries no day\'s rate and says whose they are');
+  same(await edit({ '#e-d': '2026-10-05' }), [['2026-10-05', 480, null, null, 1], 'Строка сохранена'], '… and stays at them wherever it is moved');
   await next.context().close();
+
+  // The door did not answer when the page opened: the page counts by the typed rates. A typed rate is not the rate of
+  // a row that stands at a day's; and before a statement is read the door is tried once more.
+  serve(ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD')], [stamped(inbox('i-kept', '2026-10-03', -660, 'other', 'Kept shop', { cur: 'USD' }), { r: 1.32, rd: '2026-10-03' })]), planW());
+  store.rates = null;
+  const down = await open('rates, the door is down', undefined, { hash: '#settings', quiet: /503/ });
+  await down.waitForSelector('#view-settings input[data-fx]');
+  await down.fill('#fx-USD', '1.5');
+  await down.press('#fx-USD', 'Tab');
+  saves = await puts('led', 1);
+  const kept = store.led.doc.inbox.find((r) => r.id === 'i-kept');
+  same([store.led.doc.fx.USD, kept.a, kept.o.r, kept.o.rd], [1.5, 500, 1.32, '2026-10-03'], 'a rate typed while the door is down is saved, and a row that stands at the rate of its day is not counted over by it');
+  store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null };          // the door answers again
+  await down.click('#view-settings .set-nav [data-tabgo="upload"]');
+  await down.setInputFiles('#fileIn', { name: 'statement_USD.csv', mimeType: 'text/csv', buffer: Buffer.from(wise(['CARD-1,05-10-2026,-680.00,USD,Card transaction of 680.00 USD issued by EXAMPLE SHOP,,,,EXAMPLE SHOP,'])) });
+  await puts('led', saves + 1);
+  same(shop(), [['2026-10-05', 500, 1.36, '2026-10-05']], 'the door is asked once more before the statement is read: the row of the 5th has the rate of the 5th and not the typed one');
+  await down.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

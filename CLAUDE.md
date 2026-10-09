@@ -280,13 +280,17 @@ a deploy:
   page hides, shuts and ignores, and the check `rv-reader` walks every tab for
   a control that is in neither.
 - **The exchange rates come from the stand, by day** (the owner's decision of
-  9 October 2026). The page asks `GET /api/rates` once when it opens and never
-  again; nothing asks on a timer, and the page itself still speaks to no other
-  host - it is the server that asks the source (`moneyd/rates.py`; a dev stand
-  asks nobody). What has already happened is counted at the rate of its own
+  9 October 2026). The page asks `GET /api/rates` once when it opens, and
+  again only by somebody's own act - before it reads a statement whose days
+  its copy of the table lacks; nothing asks on a timer, and the page itself
+  still speaks to no other host - it is the server that asks the source
+  (`moneyd/rates.py`; a dev stand asks nobody). What has already happened is counted at the rate of its own
   day and is never counted over when today's rate moves: a statement row is
   turned into pounds once, when it is read, and carries the rate it was read
-  at (`o.r`); a row marked paid is counted by the table's rate of that day.
+  at (`o.r`, and the table's day that answered, `o.rd`); a row marked paid is
+  counted by the table's rate of that day. Pounds somebody typed in «Таблица»
+  are marked `o.hand` and no rate is put over them (`o.h` is taken: on a row
+  in «Разбор» it is the name on the card).
   Only what is still ahead, and what the accounts hold today, follows the
   latest rate - or a rate somebody typed over it (`fxo` in the ledger
   document, beside the typed rates `fx`, which stay as they are for the days

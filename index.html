@@ -852,20 +852,30 @@ function reprice(r){const cur=r.o.cur,day=cur==="GBP"?"":fxDayOn(RATES.days,cur,
 // A row that was read before its own day was in the table took the latest day before it. Once the table has a
 // nearer day, the row is counted by that - here, when the page opens. Nothing is saved for it: the change goes to
 // the server with the next thing somebody changes, and until then every page works it out the same way.
+// (`o.hand`: somebody typed the row's pounds in «Таблица» - they are that person's, and no rate is put over them.
+// Not `o.h`: on a row still in «Разбор» that is the name on the card. A row whose day was moved back while the page
+// had no table carries a later day than its own: that one is counted over too.)
 function settleRates(){
- S.tx.concat(S.inbox).forEach(r=>{const o=r.o;if(!o||!o.cur||o.cur==="GBP"||!(o.r>0)||!o.rd||o.h||o.rd>=r.d)return;
-  if(fxDayOn(RATES.days,o.cur,r.d)>o.rd){const was=Math.abs(r.a),sign=r.a<0?-1:1;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);r.a*=sign;}});
+ S.tx.concat(S.inbox).forEach(r=>{const o=r.o;if(!o||!o.cur||o.cur==="GBP"||!(o.r>0)||!o.rd||o.hand||o.rd===r.d)return;
+  const day=fxDayOn(RATES.days,o.cur,r.d);
+  if(day&&(o.rd>r.d||day>o.rd)){const was=Math.abs(r.a),sign=r.a<0?-1:1;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);r.a*=sign;}});
 }
 // The table as the stand has it now. Asked when the page opens and - by somebody's own act - before a statement is
 // read whose days the page's copy of the table does not hold yet. Never on a timer.
-async function askRates(){
- const stop=new AbortController(),t=setTimeout(()=>stop.abort(),8000);
- try{const q=await fetch("/api/rates",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),j=q.ok?await q.json():null;if(j&&j.days&&typeof j.days==="object"&&!Array.isArray(j.days)){RATES={days:j.days,asked:j.asked||null};clearTimeout(t);return true;}}catch(e){}
- clearTimeout(t);return false;
+let ratesMissed=false;
+async function askRates(ms){
+ const stop=new AbortController(),t=setTimeout(()=>stop.abort(),ms||8000);let ok=false;
+ try{const q=await fetch("/api/rates",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),j=q.ok?await q.json():null;if(j&&j.days&&typeof j.days==="object"&&!Array.isArray(j.days)){RATES={days:j.days,asked:j.asked||null};ok=true;}}catch(e){}
+ clearTimeout(t);ratesMissed=!ok;return ok;
 }
+// (A page without a table: the door said it has none - a stand that asks nobody - and is not asked again; or the
+// door did not answer when the page opened, and is tried once more here: a row read without the table is counted by
+// a typed rate and carries no day. A door that does not answer is waited for once, four seconds.)
 async function ratesFor(days){
- if(!API||!Object.keys(RATES.days).length)return;const T=Live.today(),lack=()=>days.some(d=>typeof d==="string"&&d>=FX_FROM&&d<=T&&!RATES.days[d]);
- for(let n=0;n<2&&lack();n++){if(n)await new Promise(r=>setTimeout(r,1500));await askRates();}
+ if(!API)return;
+ if(!Object.keys(RATES.days).length&&(!ratesMissed||!(await askRates(4000))))return;
+ const T=Live.today(),lack=()=>days.some(d=>typeof d==="string"&&d>=FX_FROM&&d<=T&&!RATES.days[d]);
+ for(let n=0;n<2&&lack();n++){if(n)await new Promise(r=>setTimeout(r,1500));if(!(await askRates(4000)))return;}
 }
 // What the forecast engine is handed of the ledger: its rows, and the rates - the typed ones (`fx`), the table by
 // day (`fxd`) and what a person typed over it for looking ahead (`fxo`).
@@ -1658,15 +1668,20 @@ function fxCard(){
 // The rows in another currency that were filed since the table began and counted by a rate somebody had typed.
 // Asked once (the owner's choice of 9 October 2026, «А»): count them over at the rate of their own day, or leave
 // them. What was filed before the table began is the founders' sheet, and is not touched either way.
-const fxOld=()=>S.tx.filter(r=>real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)&&!r.o.h&&Math.abs(+r.o.a)>0&&Math.abs(+r.a)>0&&fxDayOn(RATES.days,r.o.cur,r.d));
+// (Before this question there was no mark on a row whose pounds somebody had typed. So a row whose pounds are far
+// from its sum at any rate of those days - a fifth off the day's - is taken for one: it is left out, and the card
+// says how many such there are.)
+const fxUnset=()=>S.tx.filter(r=>real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)&&!r.o.hand&&Math.abs(+r.o.a)>0&&Math.abs(+r.a)>0&&fxDayOn(RATES.days,r.o.cur,r.d));
 const fxNew=r=>round2(Math.abs(+r.o.a)/rowRate(r.o.cur,r.d));
+const fxFar=r=>Math.abs(Math.abs(+r.a)/fxNew(r)-1)>0.2;
+const fxOld=()=>fxUnset().filter(r=>!fxFar(r));
 function fxAskCard(){
  if(RO||S.fxk)return "";const rows=fxOld().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);if(!rows.length)return "";
  const sig=v=>(v<0?"−":"")+fmt(Math.abs(v),2),money=r=>(+r.o.a<0?"−":"")+fmt(Math.abs(+r.o.a),Math.abs(+r.o.a)%1?2:0,SYM[r.o.cur]||"")+(SYM[r.o.cur]?"":" "+r.o.cur);
  // In the table a row's sum stands with a plus whichever way the money went - what came is the block «выручка», what
  // went is every other block - and with a minus when it is money back; a transfer between own accounts is neither.
  const side=k=>rows.filter(r=>r.c!=="skip"&&(r.c==="rev")===(k>0)),was=k=>side(k).reduce((a,r)=>a+r.a,0),will=k=>side(k).reduce((a,r)=>a+(r.a<0?-1:1)*fxNew(r),0);
- const d=round2((will(1)-was(1))-(will(-1)-was(-1))),n=rows.length;
+ const d=round2((will(1)-was(1))-(will(-1)-was(-1))),n=rows.length,far=fxUnset().filter(fxFar).length;
  return `<section class="card wide" id="fx-ask"><h2>Строки в валюте — по курсу своего дня?<span class="note">спрашивается один раз</span></h2>
   <p class="note" style="margin:0;max-width:92ch">${n} ${plural(n,"строка","строки","строк")} в валюте с ${dRu(FX_FROM)} ${plural(n,"внесена","внесены","внесены")} по курсу, который тогда был вписан руками, — один на все дни. ${n===1?"Её":"Их"} можно один раз пересчитать по курсу дня каждого платежа. Всё, что раньше, остаётся как в таблице фаундеров.</p>
   <div class="tbl" style="margin-top:12px"><table class="rc-t"><thead><tr><th>День</th><th>Строка</th><th class="r">Сумма</th><th class="r">Курс вписан</th><th class="r">Сейчас стоит</th><th class="r">Курс дня</th><th class="r">Станет</th></tr></thead><tbody>
@@ -1675,7 +1690,7 @@ function fxAskCard(){
    <tr class="rc-tot"><td colspan="4">Расходы в валюте</td><td class="r m rc-was">${sig(was(-1))}</td><td></td><td class="r m rc-new">${sig(will(-1))}</td></tr>
    <tr class="rc-tot"><td colspan="6">Результат изменится на</td><td class="r m rc-new">${d>0?"+":""}${sig(d)}</td></tr></tbody></table></div>
   <div class="row" style="margin-top:14px"><button class="sm primary" data-fxdo="recount">Пересчитать ${n} ${plural(n,"строку","строки","строк")}</button><button class="sm" data-fxdo="keep">Оставить как есть</button></div>
-  <p class="note" style="margin:10px 0 0;max-width:92ch">Суммы в самой валюте, остатки на счетах и план от этого не меняются. Меняется только то, сколько эти платежи стоят в фунтах — в «Месяцах», в «Отчётах» и в строках «Кассы», которые они закрыли.</p></section>`;
+  <p class="note" style="margin:10px 0 0;max-width:92ch">Суммы в самой валюте, остатки на счетах и план от этого не меняются. Меняется только то, сколько эти платежи стоят в фунтах — в «Месяцах», в «Отчётах» и в строках «Кассы», которые они закрыли.${far?` Ещё ${far} ${plural(far,"строка","строки","строк")} в валюте не ${plural(far,"меняется","меняются","меняются")}: сумма в фунтах там далека от пересчёта по любому курсу — похоже, её вписали руками.`:""}</p></section>`;
 }
 // «Пересчитать»: each of those rows at the rate of its own day, in one save, with «Отменить».
 function fxRecount(){
@@ -4556,7 +4571,7 @@ const Ed=(()=>{
 
  // What a row shows for money: the part still expected or, once it is done, the sum that came. A tax the page
  // worked out is shown in whole pounds.
- function sum(it){const done=it.state==="done",d=it.done,v=done?(it.exp?it.dir*it.exp:it.full):it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
+ function sum(it){const done=it.state==="done",d=it.done,v=done?(d&&d.note==="partial"&&!+d.got?0:it.exp?it.dir*it.exp:it.full):it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
   // Whole pounds, like every other figure of the two tabs: the pennies are in the row's card.
   return s+fmt(Math.round(a));}
  // «в т.ч. VAT £1,950» — for an open inflow whose invoice carries the tax on top: how much of the sum shown is tax.
@@ -5912,8 +5927,17 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-rule]"))){S.rules.splice(+x.dataset.rule,1);saveRules();return renderSettings();}
  if(c("[data-esave]")){r=S.tx.find(q=>q.id===ui.edit);if(!r)return;const was=r.d.slice(0,7),cat=$("#e-c").value;
   if(!cat||!$("#e-d").value)return toast("Нужны дата и блок");
-  r.d=$("#e-d").value;{const a=round2(+$("#e-a").value||0);if(a!==r.a&&r.o){r.o.h=1;delete r.o.r;delete r.o.rd;}r.a=a;}r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=cat==="rev"?round2(+$("#e-v").value||0):0;
-  ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast("Строка сохранена");}
+  // Pounds somebody types are theirs (`o.hand`). A row that stands at the rate of its day and is moved to another day
+  // is counted at the rate of that day - here, where the person sees it, not behind their back when the page opens
+  // next. Moved to before the table began, it keeps its pounds and names no day.
+  const d0=r.d,a0=r.a,a=round2(+$("#e-a").value||0),o=r.o;let v=cat==="rev"?round2(+$("#e-v").value||0):0,again=false;
+  r.d=$("#e-d").value;
+  if(a!==a0){if(o){o.hand=1;delete o.r;delete o.rd;}r.a=a;}
+  else if(r.d!==d0&&o&&o.cur&&o.cur!=="GBP"&&o.r>0&&Object.keys(RATES.days).length){
+   if(fxDayOn(RATES.days,o.cur,r.d)){reprice(r);r.a*=a0<0?-1:1;if(v&&v===(+r.v||0)&&a0)v=round2(v*r.a/a0);again=r.a!==a0;}
+   else{delete o.r;delete o.rd;}}
+  r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=v;
+  ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast(again?"Строка сохранена: фунты — по курсу нового дня":"Строка сохранена");}
  if((x=c("[data-edel]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
   r=S.tx.find(q=>q.id===ui.edit);if(r){S.tx=S.tx.filter(q=>q!==r);ui.edit=null;saveMonths([r.d.slice(0,7)]);renderAll();toast("Строка удалена");}return;}
  if(c("[data-eclose]")){ui.edit=null;return renderLedger();}
@@ -5940,7 +5964,7 @@ document.addEventListener("change",ev=>{
  if(t.id==="qSel"){ui.quarter=t.value;ui.edit=null;return renderLedger();}
  // A rate of one's own for looking ahead; an empty box is the day's rate again. Nothing that has happened moves.
  if(t.dataset.fxo){const k=t.dataset.fxo,v=+t.value;if(v>0)S.fxo[k]=v;else delete S.fxo[k];saveSettings();renderAll();return toast(v>0?`Свой курс ${k}: £1 = ${v}`:`${k}: снова курс дня`);}
- if(t.dataset.fx){const v=+t.value;if(v>0){S.fx[t.dataset.fx]=v;S.inbox.forEach(r=>{if(r.o.cur===t.dataset.fx)reprice(r);});saveSettings();saveInbox();renderInbox();toast("Курс сохранён");}return;}
+ if(t.dataset.fx){const v=+t.value;if(v>0){S.fx[t.dataset.fx]=v;S.inbox.forEach(r=>{if(r.o.cur===t.dataset.fx&&!(r.o.r>0))reprice(r);});saveSettings();saveInbox();renderInbox();toast("Курс сохранён");}return;}
  if(t.dataset.fbank||t.dataset.fcur){const f=S.files.find(q=>q.id===(t.dataset.fbank||t.dataset.fcur));if(!f)return;
   if(t.dataset.fbank)f.bank=t.value;else f.cur=t.value;
   S.inbox.forEach(r=>{if(r.f!==f.id)return;r.b=f.bank;if(!r.o.fix){r.o.cur=f.cur;reprice(r);}if(!r.touched)classify(r);r.twin=findTwin(r);});

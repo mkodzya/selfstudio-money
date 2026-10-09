@@ -214,6 +214,54 @@ class TableTests(Case):
         self.assertEqual(table.table()["days"]["2026-10-08"]["RUB"], round(GOOD["RUB"] * 1.5, 6))
         self.assertEqual(table.table()["days"]["2026-10-08"]["USD"], GOOD["USD"], "the other three of that day came in with it")
 
+    def test_a_doubted_day_the_table_has_gone_on_past_is_given_up_like_a_day_that_never_comes(self):
+        # second reading, 9 October 2026: one wrong day at the source stayed in doubt and was asked for at
+        # every round for good.
+        table = self.table()
+        table.refresh()
+        self.source.says = {"2026-10-08": answer_for("2026-10-08", rub=GOOD["RUB"] * 1.5)}
+        self.stand.clock.tick(days=1)
+        self.assertEqual(table.refresh(), 0, "the 8th, on the 8th: in doubt, and nothing after it yet")
+        self.stand.clock.tick(days=1)
+        for _attempt in range(9):
+            table.refresh()
+            self.stand.clock.tick(hours=1)
+        self.assertIn("2026-10-09", table.table()["days"])
+        self.assertNotIn("2026-10-08", table.table()["days"])
+        self.assertEqual(self.source.days().count("2026-10-08"), 6, "once on its own day, and five times after the 9th did not bear it out")
+
+    def test_two_doubted_days_bear_a_third_out_only_when_they_are_of_the_same_week(self):
+        # second reading, 9 October 2026: three slips of the source weeks apart that happened to agree
+        # were "the market has moved".
+        table = self.table()
+        table.refresh()
+        slip = lambda day: answer_for(day, rub=GOOD["RUB"] * 1.5)
+        self.source.says = {day: slip(day) for day in ("2026-10-08", "2026-10-17", "2026-10-27")}
+        for _day in range(20):
+            self.stand.clock.tick(days=1)
+            table.refresh()
+        said = table.table()["days"]
+        self.assertEqual([day for day in ("2026-10-08", "2026-10-17", "2026-10-27") if day in said], [])
+        self.assertEqual(len(said), 7 + 20 - 3, "every other day came in")
+        self.assertEqual(self.events("rates-moved"), [])
+
+    def test_of_two_addresses_that_refuse_the_one_that_said_more_is_the_answer(self):
+        # second reading, 9 October 2026: "no such day" at the first address and no connection to the second
+        # was "nobody answered", so a day the source never published was asked for at every round for good.
+        one, two = (url.replace("{day}", "2026-10-04") for url in URLS)
+        self.source.says = {one: rates.Refused("status"), two: rates.Refused("no-answer")}
+        table = self.table()
+        for _attempt in range(8):
+            table.refresh()
+            self.stand.clock.tick(hours=1)
+        self.assertEqual(self.source.days().count("2026-10-04"), 5, "the first address said it has no such day: five tries")
+        # ... and what one address read and would not take is said in the log, whatever the other did
+        one, two = (url.replace("{day}", "2026-10-08") for url in URLS)
+        self.source.says = {one: answer_for("2026-10-08", usd=5.0), two: rates.Refused("status")}
+        self.stand.clock.tick(days=1)
+        table.refresh()
+        self.assertEqual([(entry["day"], entry["reason"]) for entry in self.events("rates-refused")], [("2026-10-08", "out-of-bounds")])
+
     def test_a_day_nobody_could_be_asked_for_is_not_given_up(self):
         # review, 9 October 2026: five failures of any kind dropped a past day until the process was started again.
         self.source.says = {day: rates.Refused("no-answer") for day in ("2026-10-0%d" % n for n in range(1, 8))}
@@ -296,6 +344,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        elif self.path.startswith("/unwell/"):
+            self.send_error(503)
+            return
+        elif self.path.startswith("/busy/"):
+            self.send_error(429)
+            return
         elif self.path.startswith("/slow/"):
             self.server.hold.wait(PATIENCE)
             body = answer_for(self.path[6:16])
@@ -336,6 +390,13 @@ class SocketTests(unittest.TestCase):
         with self.assertRaises(rates.Refused) as missing:
             rates.fetch_day(self.base + "/nothing", 5.0)
         self.assertEqual(missing.exception.reason, "status", "the source answered: it has no such day")
+
+    def test_a_source_that_is_unwell_or_busy_has_said_nothing_about_the_day(self):
+        # second reading, 9 October 2026: five 503s in an afternoon gave a past day up until the next start.
+        for path in ("/unwell/x", "/busy/x"):
+            with self.assertRaises(rates.Refused) as unwell:
+                rates.fetch_day(self.base + path, 5.0)
+            self.assertEqual(unwell.exception.reason, "no-answer", path)
 
     def test_a_source_that_says_nothing_is_waited_for_no_longer_than_its_time(self):
         began = time.monotonic()
