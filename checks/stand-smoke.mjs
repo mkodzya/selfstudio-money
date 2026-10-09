@@ -891,7 +891,8 @@ try {
   }
   await theirs.click('.nav [data-tab="cash"]');
   await sleep(2500);
-  const sent = responses.slice(mark).filter((r) => r.method !== 'GET' && r.method !== 'HEAD' && r.path.startsWith('/api/'));
+  // (The answer of the set-password door may be heard a moment after the mark: it is the link's, not the page's.)
+  const sent = responses.slice(mark).filter((r) => r.method !== 'GET' && r.method !== 'HEAD' && r.path.startsWith('/api/') && r.path !== '/api/auth/setup');
   ok(sent.length === 0, 'a reader\'s page reads, and sends nothing else: no save when it opens, none after', sent.map((r) => `${r.method} ${r.path} ${r.status}`));
   const drawn = await theirs.evaluate(() => ({ say: document.querySelector('#roSay').textContent, shown: !document.querySelector('#roSay').hidden, boxes: document.querySelectorAll('#view-cash input.cs-amt').length, rows: document.querySelectorAll('#view-cash tr.cs-r').length }));
   ok(drawn.shown && /только просмотр/.test(drawn.say) && drawn.boxes === 0 && drawn.rows > 0, 'it says «только просмотр», and the sums of «Касса» are figures, not boxes', drawn);
