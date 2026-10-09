@@ -516,7 +516,9 @@ function inv(M, P) {
   // 19
   const ymT = M.T.slice(0, 7);
   const g0 = addM(ymT, -24);
-  const g1 = addD(M.T, 120).slice(0, 7);
+  // (rows that repeat are written out to the month of T+120, or - further - as many months ahead as «Касса» is drawn)
+  const far120 = addD(M.T, 120).slice(0, 7), farM = addM(ymT, M.months.more);
+  const g1 = far120 > farM ? far120 : farM;
   Object.entries(rows).forEach(([id, { r }]) => {
     if (!r.rec || !/^\d{4}-\d\d$/.test(String(r.rec.from)) || !(r.rec.day >= 1)) return;
     const mine = M.items.filter((it) => it.row === id && it.src === 'occ');
@@ -726,8 +728,8 @@ await run('w1', 'fixture A, written down: the line is exactly the rows a founder
   let M = await C(ledA(), planW());
   figs(M, { now: 10000, IN: 8000, OUT: 6120, END: 11880, LOW: 4000, LOWDAY: '2026-10-20', LATE: 0, verdict: 'v3', res: 0 }, 'three rows marked «каждый месяц» — Person B −6,000 on 20 Oct, Client A +8,000 on 28 Oct, Tool S −120 on 3 Nov');
   same([M.nowIsToday, M.nowDate, M.items.filter((it) => it.day).map((it) => [it.id, it.kind, it.src, it.state, it.day, it.cash].join(' ')), M.cards, M.free.why],
-    [true, '2026-10-05', ['rA@2026-10 typed occ due 2026-10-28 8000', 'rA@2026-11 typed occ due 2026-11-28 8000', 'rA@2026-12 typed occ due 2026-12-28 8000', 'rA@2027-01 typed occ due 2027-01-28 8000', 'rA@2027-02 typed occ due 2027-02-28 8000', 'rB@2026-10 typed occ due 2026-10-20 -6000', 'rB@2026-11 typed occ due 2026-11-20 -6000', 'rB@2026-12 typed occ due 2026-12-20 -6000', 'rB@2027-01 typed occ due 2027-01-20 -6000', 'rB@2027-02 typed occ due 2027-02-20 -6000', 'rS@2026-11 typed occ due 2026-11-03 -120', 'rS@2026-12 typed occ due 2026-12-03 -120', 'rS@2027-01 typed occ due 2027-01-03 -120', 'rS@2027-02 typed occ due 2027-02-03 -120'], [], 'cushion'],
-    '… «Денег сейчас»; every line is a month of a written row, generated to the month of T + 120; no card — and УСН, with no receipt on its account anywhere, asks nothing');
+    [true, '2026-10-05', ['rA@2026-10 typed occ due 2026-10-28 8000', 'rA@2026-11 typed occ due 2026-11-28 8000', 'rA@2026-12 typed occ due 2026-12-28 8000', 'rA@2027-01 typed occ due 2027-01-28 8000', 'rA@2027-02 typed occ due 2027-02-28 8000', 'rA@2027-03 typed occ due 2027-03-28 8000', 'rA@2027-04 typed occ due 2027-04-28 8000', 'rB@2026-10 typed occ due 2026-10-20 -6000', 'rB@2026-11 typed occ due 2026-11-20 -6000', 'rB@2026-12 typed occ due 2026-12-20 -6000', 'rB@2027-01 typed occ due 2027-01-20 -6000', 'rB@2027-02 typed occ due 2027-02-20 -6000', 'rB@2027-03 typed occ due 2027-03-20 -6000', 'rB@2027-04 typed occ due 2027-04-20 -6000', 'rS@2026-11 typed occ due 2026-11-03 -120', 'rS@2026-12 typed occ due 2026-12-03 -120', 'rS@2027-01 typed occ due 2027-01-03 -120', 'rS@2027-02 typed occ due 2027-02-03 -120', 'rS@2027-03 typed occ due 2027-03-03 -120', 'rS@2027-04 typed occ due 2027-04-03 -120'], [], 'cushion'],
+    '… «Денег сейчас»; every line is a month of a written row, generated to the sixth month after this one (it was the month of T + 120 until «Касса» was drawn six months ahead); no card — and УСН, with no receipt on its account anywhere, asks nothing');
   M = await C(ledA(), planW(), T, { H: 60 });
   figs(M, { IN: 16000, OUT: 12240, END: 13760, LOW: 4000, LOWDAY: '2026-10-20' }, '60 days');
   // the running month: fact so far, plan for the rest
@@ -738,8 +740,8 @@ await run('w1', 'fixture A, written down: the line is exactly the rows a founder
   const W = await C(ledA({ f1: 'inbox' }), planW());
   same([W.month.blocks, W.month.inInbox, W.now, W.IN, W.OUT], [b, 120, M.now, M.IN, M.OUT], 'with the 3 Oct row recognised but not yet accepted the figures are the same — «в т.ч. в разборе £120»');
   // the constructor's months
-  same([M.months.list, M.months.by['2026-10'].inflows, M.months.by['2026-11'].other, M.months.by['2026-10'].other], [['2026-10', '2026-11', '2026-12'], { rows: ['rA@2026-10'], expected: 8000, done: 0 }, { rows: ['rS@2026-11'], expected: 120, done: 0 }, { rows: [], expected: 0, done: 0 }],
-    'the constructor walks this month and the two after it; a month holds the months of the repeating rows, in date order');
+  same([M.months.list, M.months.by['2026-10'].inflows, M.months.by['2026-11'].other, M.months.by['2026-10'].other], [['2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04'], { rows: ['rA@2026-10'], expected: 8000, done: 0 }, { rows: ['rS@2026-11'], expected: 120, done: 0 }, { rows: [], expected: 0, done: 0 }],
+    'the constructor walks this month and the six after it (the owner\'s decision of 9 October 2026; it was the two that sixty days reach); a month holds the months of the repeating rows, in date order');
 });
 
 await run('w4', 'a hand mark, and the statement row that takes its place (test 4)', async () => {
@@ -1220,7 +1222,7 @@ await run('p5', '«каждый месяц»: this month, this month and onward,
   const a = await C(L, P, '2026-10-31', H60);
   const b = await C(L, P, '2026-11-01', H60);
   const ids = (m) => Object.fromEntries(m.items.filter((it) => it.src === 'occ').map((it) => [it.id, it.amt]));
-  ok(Object.entries(ids(a)).every(([id, amt]) => !(id in ids(b)) || ids(b)[id] === amt) && Object.keys(ids(b)).filter((id) => !(id in ids(a))).every((id) => id.endsWith('@2027-03')), 'across the end of a month every month both days generate has the same id and amount; the later day only adds the month that came into reach', [Object.keys(ids(a)).length, Object.keys(ids(b)).length]);
+  ok(Object.entries(ids(a)).every(([id, amt]) => !(id in ids(b)) || ids(b)[id] === amt) && Object.keys(ids(b)).filter((id) => !(id in ids(a))).every((id) => id.endsWith('@2027-05')), 'across the end of a month every month both days generate has the same id and amount; the later day only adds the month that came into reach - May, the sixth after November', [Object.keys(ids(a)).length, Object.keys(ids(b)).length]);
   ok(b.OUT >= 0 && a.items.filter((it) => it.src === 'occ' && it.day).every((it) => { const z = item(b, it.id); return z && (z.day || z.state === 'missed' || z.state === 'doubt'); }), 'no occurrence leaves a figure because a date passed');
 });
 
@@ -1350,8 +1352,8 @@ await run('dated rest', '«Частично» with a day for the rest: a dated r
   same([item(K, 'debt').state, item(K, 'debt').day, K.OUT, K.END, K60.OUT, K60.END, K60.months.by['2026-12'].team, K60.months.by['2026-11'].team], ['due', '2026-12-15', 11780, 28420, 19000, 32800, { rows: ['debt', 'rB@2026-12'], expected: 6600, done: 0 }, { rows: ['rB@2026-11'], expected: 6000, done: 0 }],
     'the rest on 15 Dec, two months on: outside the thirty days it moves neither «Уйдёт» nor the end of the line, inside the sixty it does — and it is a row of December\'s list, not of November\'s');
   K60 = await C(L, await on('2027-01-10'), D22, H60);
-  same([item(K60, 'debt').state, item(K60, 'debt').day, K60.OUT, K60.END, K60.free.now, K60.months.list, K60.months.by['2027-01'].team], ['due', '2027-01-10', 18400, 33400, 16440, ['2026-10', '2026-11', '2026-12', '2027-01'], { rows: ['debt', 'rB@2027-01'], expected: 6600, done: 0 }],
-    'on 10 Jan, past the sixty days: due on its day and a row of January — a month the constructor now walks to — but in no figure of the sixty days, like any row a founder moves that far');
+  same([item(K60, 'debt').state, item(K60, 'debt').day, K60.OUT, K60.END, K60.free.now, K60.months.list, K60.months.by['2027-01'].team], ['due', '2027-01-10', 18400, 33400, 16440, ['2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04'], { rows: ['debt', 'rB@2027-01'], expected: 6600, done: 0 }],
+    'on 10 Jan, past the sixty days: due on its day and a row of January — a month the constructor walks to — but in no figure of the sixty days, like any row a founder moves that far');
   // A payment that fits it closes it; past its day it is asked about, like any written payout.
   Q = await on('2026-11-12');
   K = await C(ledP({ tx: [pay('b1', '2026-10-20', -5400), pay('b6', '2026-11-03', -600, ms('2026-11-04T08:00:00Z'))] }), Q, '2026-11-05');
@@ -1685,8 +1687,8 @@ await run('p10', 'a tax no statement shows: asked once, closable by hand, never 
   same([per(Z, K).state, per(Z, K).left, item(Z, 't|' + K).state, N.now - Z.now, Z.month.blocks.tax.fact, Z.month.byWord, card(Z, 11).filter((c) => c.key === K), card(Z, 12)], ['word', 0, 'done', 0, 0, 0, [], []],
     'after the next Tochka statement, with no such row and no tax payment on that account at all: closed on the founder\'s word — «сейчас» no longer lowered, in no fact of the month, and nobody is asked again');
   const A = await C(L, await wr(P, 'rule', 'usn', { away: true }, TAP, BY), D);
-  same([A.items.filter((x) => x.src === 'tax' && x.tax.rule === 'usn'), A.taxes.periods.filter((x) => x.rule === 'usn').map((x) => x.state), M.taxes.reserve - A.taxes.reserve, card(A, 11).filter((c) => c.rule === 'usn')], [[], ['away', 'away', 'away'], 360 + 0, []].map((x) => x),
-    '[Платим не со счетов студии] instead: no УСН item or reserve for any period, the accrual still shown');
+  same([A.items.filter((x) => x.src === 'tax' && x.tax.rule === 'usn'), A.taxes.periods.filter((x) => x.rule === 'usn').map((x) => x.state), M.taxes.reserve - A.taxes.reserve, card(A, 11).filter((c) => c.rule === 'usn')], [[], ['away', 'away', 'away', 'away'], 360 + 0, []].map((x) => x),
+    '[Платим не со счетов студии] instead: no УСН item or reserve for any period - four of them now that periods are made as far as «Касса» is drawn -, the accrual still shown');
 });
 
 await run('p11', 'VAT on a row: stored when it is saved, proposed per client and bank, changed only by a founder\'s own switch (T2)', async () => {
@@ -5701,6 +5703,53 @@ await run('rv-rates-late', 'a row never keeps the rate of a wrong day: the table
   await puts('led', saves + 1);
   same(shop(), [['2026-10-05', 500, 1.36, '2026-10-05']], 'the door is asked once more before the statement is read: the row of the 5th has the rate of the 5th and not the typed one');
   await down.context().close();
+});
+
+// =====================================================================================================================
+// «КАССА» SIX MONTHS AHEAD (the owner's decision of 9 October 2026: «а почему только до декабря план?» - «продли кассу
+// на 6 месяцев»). The months are drawn further; the verdict and «Можно вывести» still look sixty days ahead.
+// =====================================================================================================================
+await run('rv-months6', '«Касса» by months is drawn six months ahead, and nothing of the first sixty days moves for it', async () => {
+  // The made-up studio, on 6 October: sixty days reach 5 December. `months: 0` is the engine as it was - the months of
+  // those sixty days and no further.
+  const led = demoLedger(T), P = demoPlan(T), ymT = T.slice(0, 7), T60 = addD(T, 60);
+  const M6 = await C(led, P, T, { H: 60 }), M0 = await C(led, P, T, { H: 60, months: 0 });
+  const ahead = (M) => M.months.list.filter((m) => m >= ymT);
+  same([ahead(M0), ahead(M6), M6.months.to60], [['2026-10', '2026-11', '2026-12'], ['2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04'], '2026-12'],
+    'the switcher of «Касса» walks the running month and six after it; the sixty days end in December, as they did');
+  // every row that repeats and has no end is written out in each of those months
+  const forever = ['inflows', 'team', 'other', 'div'].flatMap((k) => (P[k] || []).filter((r) => r.rec && !r.rec.to && r.on !== false).map((r) => r.id));
+  const lacks = forever.filter((id) => ['2027-01', '2027-02', '2027-03', '2027-04'].some((ym) => !M6.items.some((it) => it.row === id && it.src === 'occ' && it.ym === ym)));
+  same([forever.length > 10, lacks, M6.months.by['2027-04'].inflows.rows.length > 3], [true, [], true], 'a row that repeats is written out in every month up to April, and April\'s page has its rows');
+  // … and nothing of the first sixty days moves for it: every line dated within them, every tax period due within
+  // them, every day and week of the walk, the money now, the lowest point, what may be taken out, every card - the
+  // same to the penny as when the months ended in December.
+  const diff = (a, b, path, out) => {
+    if (out.length > 60) return out;
+    if (a && b && typeof a === 'object' && typeof b === 'object') new Set([...Object.keys(a), ...Object.keys(b)]).forEach((k) => diff(a[k], b[k], path + '.' + k, out));
+    else if (JSON.stringify(a) !== JSON.stringify(b)) out.push([path, JSON.stringify(a), JSON.stringify(b)].map((x) => String(x).slice(0, 50)));
+    return out;
+  };
+  const byId = (l, far) => Object.fromEntries(l.filter((x) => !far(x)).map((x) => [x.id || x.key, x]));
+  const near = (M) => ({ ...M, items: byId(M.items, (it) => (it.day || it.date || '') > T60), taxes: { ...M.taxes, periods: byId(M.taxes.periods, (p) => !(p.due <= T60)) },
+    months: { ...M.months, more: 0, list: M.months.list.filter((m) => m <= M.months.to60), by: Object.fromEntries(Object.entries(M.months.by).filter(([m]) => m <= M.months.to60)) } });
+  const kept = Object.keys(near(M6).items).length;
+  same([diff(near(M0), near(M6), 'M', []), kept > 60, M6.items.length - M0.items.length > 20, M6.days.length === M0.days.length && M6.days.length > 50], [[], true, true, true],
+    'drawn six months ahead, the made-up studio is to the penny what it was in everything of its first sixty days', kept);
+
+  // On the page: the switcher goes to April and no further, and a month beyond the sixty days says so.
+  const pg = await scene('six months', led, P, { H: 60 });
+  await goCash(pg);
+  const at = async () => [await text(pg, '#cs-mname'), await text(pg, '#cs-month .cs-note'), await pg.$eval('#cs-month [data-cs-mon="1"]', (e) => e.disabled), (await pg.$$('#cs-plan [data-ed-open]')).length > 5];
+  const seen = [await at()];
+  for (let i = 0; i < 6; i++) { await pg.click('#cs-month [data-cs-mon="1"]'); seen.push(await at()); }
+  const farNote = 'впереди · дальше 60 дней: в «хватит ли денег» и «Можно вывести» не входит';
+  same(seen.map((x) => [x[0], x[1].replace(/сегодня.*/, 'сегодня'), x[2]]), [['Октябрь 2026', 'идёт · сегодня', false], ['Ноябрь 2026', 'впереди', false], ['Декабрь 2026', 'впереди', false],
+    ['Январь 2027', farNote, false], ['Февраль 2027', farNote, false], ['Март 2027', farNote, false], ['Апрель 2027', farNote, true]],
+    'October to April, one press a month; from January on the page says the month is beyond the sixty days the verdict looks at; April is the last');
+  ok(seen.every((x) => x[3]), 'every one of the seven months has its rows drawn', seen.map((x) => x[3]));
+  await shot(pg, 'rv-months6');
+  await pg.context().close();
 });
 
 // =====================================================================================================================
