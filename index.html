@@ -875,7 +875,9 @@ async function ratesFor(days){
  if(!API)return;
  if(!Object.keys(RATES.days).length&&(!ratesMissed||!(await askRates(4000))))return;
  const T=Live.today(),lack=()=>days.some(d=>typeof d==="string"&&d>=FX_FROM&&d<=T&&!RATES.days[d]);
- for(let n=0;n<2&&lack();n++){if(n)await new Promise(r=>setTimeout(r,1500));if(!(await askRates(4000)))return;}
+ // (The second asking is for a refresh the first one began on the stand: `asked` has moved. Where it has not, the
+ // stand is not asking the source just now, and a second asking would bring what the first did.)
+ for(let n=0;n<2&&lack();n++){const was=RATES.asked;if(n)await new Promise(r=>setTimeout(r,1500));if(!(await askRates(4000))||RATES.asked===was)return;}
 }
 // What the forecast engine is handed of the ledger: its rows, and the rates - the typed ones (`fx`), the table by
 // day (`fxd`) and what a person typed over it for looking ahead (`fxo`).
