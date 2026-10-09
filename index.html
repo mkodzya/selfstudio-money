@@ -3247,7 +3247,9 @@ const Live=(()=>{
   const fx0=Object.assign({},FX0,led.fx||{}),fxd=obj(led.fxd)?led.fxd:null,fxo=obj(led.fxo)?led.fxo:{},fx={};
   Object.keys(fx0).forEach(c=>{fx[c]=+fxo[c]>0?+fxo[c]:fxOn(fxd,fx0,c,T);});
   const gbp=(a,cur)=>!cur||cur==="GBP"?+a||0:(+a||0)/(+fx[cur]||1),nat=(g,cur)=>!cur||cur==="GBP"?g:g*(+fx[cur]||1);
-  const rateOn=(cur,d)=>fxOn(fxd,fx0,cur,d),gbpOn=(a,cur,d)=>!cur||cur==="GBP"?+a||0:(+a||0)/rateOn(cur,d);
+  // (natOn: a row's pounds as the other currency, by the rate of the row's own day - so that a line a row closed
+  // last month is still closed by it when today's rate has moved on.)
+  const rateOn=(cur,d)=>fxOn(fxd,fx0,cur,d),gbpOn=(a,cur,d)=>!cur||cur==="GBP"?+a||0:(+a||0)/rateOn(cur,d),natOn=(g,cur,d)=>!cur||cur==="GBP"?g:g*rateOn(cur,d);
   // Looked up as the map's own key only: a label «constructor» must not be answered by Object's.
   const al=obj(led.aliases)?led.aliases:{},alias=l=>{const k=String(l||"").trim(),v=Object.prototype.hasOwnProperty.call(al,k.toLowerCase())?al[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
   const rules=(Array.isArray(led.rules)?led.rules:[]).concat(GENERIC).filter(x=>x&&x.k&&x.l);
@@ -3278,7 +3280,7 @@ const Live=(()=>{
   let reach=sheetEnd;Object.keys(lastOf).forEach(b=>{if(lastOf[b]>reach)reach=lastOf[b];});if(reach>T)reach=T;
   const skOf=r=>{if(r.c==="tax"){const f=owner(r);return f?"tax|@"+f:"";}if(FOUNDERS.includes(r.c))return "";const l=norm(r.l);return l?r.c+"|"+l:"";};
   let L="";pool.forEach(r=>{r.sk=skOf(r);r.lk=r.sk||(FOUNDERS.includes(r.c)?"@"+r.c:r.c==="tax"?"tax|":"");if(r.d>L)L=r.d;});
-  return{led,fx,gbp,nat,rateOn,gbpOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
+  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
  }
 
  // ---- C1–C5. who is paid, or pays, every month ----
@@ -3371,7 +3373,7 @@ const Live=(()=>{
  // are worked out here exactly as A did — its links, its matching of typed rows, its cycles — and nothing else of
  // A is kept. Returns {row id: what A counted, in the row's own currency}; 0 for a month A had as paid or covered.
  function counted(led,X,T){
-  const R=read(led,T),{pool,facts,gbp,nat,anyRow,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
+  const R=read(led,T),{pool,facts,gbp,nat,gbpOn,natOn,anyRow,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
   const link=(k,r)=>{const b0=KEYS.includes(r.blk)?r.blk:BLK0[k];
    if(typeof r.sk==="string"&&r.sk&&!/^(rev|cogs|fixed|other|behalf)\|./.test(r.sk)){const vat=r.sk.startsWith("tax|vat|"),m=r.sk.startsWith("m|");return{lk:vat?"tax|":m?"":r.sk,sk:r.sk};}
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});return f?{lk:"tax|@"+f,sk:"tax|@"+f}:{lk:"tax|",sk:""};}
@@ -3386,12 +3388,12 @@ const Live=(()=>{
   const linked=new Set(items.map(it=>it.lk).filter(Boolean)),used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
   items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
-   let s=0;rs.forEach(f=>{s+=f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):nat(Math.abs(+f.a||0),it.cur);used.add(String(f.id));});
+   let s=0;rs.forEach(f=>{s+=f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);used.add(String(f.id));});
    const t=it.rem*it.vk;if(s>=t-tol(t,it.dir)[0]||rs.some(f=>shared[String(f.id)]>1))it.done="row";else{it.got+=s;it.rem=Math.max(0,(t-s)/it.vk);}});
   const byAmt=(f,it)=>BLOCKS[it.list].includes(f.c)&&!(f.sk&&SER[f.sk]&&SER[f.sk].regular)&&!(f.lk&&linked.has(f.lk));
   const cand=(f,it)=>it.dir===Math.sign(f.o.a)&&!it.notx.includes(f.id)&&f.at>it.c0&&(!it.date||f.d>=plus(it.date,-10))&&(it.lk?it.lk===f.lk:byAmt(f,it));
   const cmp=(f,it,k)=>{const t=it.rem*it.vk*(k||1);if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
-   const x=nat(Math.abs(f.a),it.cur);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
+   const x=natOn(Math.abs(f.a),it.cur,f.d);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
   const named=it=>!!it.lk&&it.lk[0]!=="@"&&it.lk!=="tax|",word=it=>!!it.paid&&(!!it.paid.ok||!!it.paid.legacy||!isD(it.paid.on));
   const byItem=(a,b)=>(a.date||"9")<(b.date||"9")?-1:(a.date||"9")>(b.date||"9")?1:a.id<b.id?-1:a.id>b.id?1:0;
   const typed=items.filter(it=>!it.hist).sort(byItem);
@@ -3400,7 +3402,7 @@ const Live=(()=>{
    let hit=cs.find(it=>cmp(f,it).ok);if(hit){hit.done="row";used.add(f.id);return;}
    const nm=cs.filter(named);
    if(f.c==="rev"&&(hit=nm.find(it=>it.vk===1&&cmp(f,it,1.2).ok))){hit.done="row";used.add(f.id);return;}
-   if(nm.length>=2){const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbp(it.rem*it.vk,it.cur),x=same?Math.abs(f.o.a):Math.abs(f.a);
+   if(nm.length>=2){const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),x=same?Math.abs(f.o.a):Math.abs(f.a);
     const fits=s=>{if(!same)return Math.abs(x-s)<=0.06*s;const z=tol(s,c12[0].dir);return x>=s-z[0]&&x<=s+z[1];};
     let found=null,n=0;const walk=(i,set,s)=>{if(n>1)return;if(set.length>=2&&fits(s)){n++;found=set.slice();}if(set.length===6)return;for(let j=i;j<c12.length;j++){set.push(c12[j]);walk(j+1,set,s+val(c12[j]));set.pop();}};
     walk(0,[],0);if(n===1){found.forEach(it=>{it.done="row";});used.add(f.id);return;}}
@@ -3509,7 +3511,7 @@ const Live=(()=>{
  function compute(led,plan0,T,opts){
   if(!isD(T))throw new Error("Live.compute: T is not a date");
   opts=opts||{};
-  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
+  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
   // «Не называть сумму вывода, если остатки старше … дней»: on, eight days, unless the founders set it otherwise.
   const fresh={on:!(obj(P.fresh)&&P.fresh.on===false),days:Math.min(90,Math.max(1,Math.round(+(obj(P.fresh)&&P.fresh.days)||8)))};
@@ -3584,13 +3586,13 @@ const Live=(()=>{
   // and last the tax periods, which take only what nothing else claimed.
   const used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
-  const paidIn=(f,it)=>f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):nat(Math.abs(+f.a||0),it.cur);
+  const paidIn=(f,it)=>f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);
   items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;
    const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
    let s=0,last="";rs.forEach(f=>{s+=paidIn(f,it);used.add(String(f.id));if(f.d>last)last=f.d;});
    const t=it.rem*it.vk,lo=tol(t,it.dir)[0];it.match=rs.map(f=>String(f.id));
    if(s>=t-lo||rs.some(f=>shared[String(f.id)]>1))it.done={by:"row",on:last,rows:it.match.slice(),note:"hand"};
-   else{it.got+=s;it.gotG=gbp(it.got,it.cur);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;}
+   else{it.got+=s;it.gotG=gbpOn(it.got,it.cur,last);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;}
   });
   const word=it=>!!it.paid&&(!!it.paid.ok||!!it.paid.legacy||!isD(it.paid.on));
 
@@ -3619,7 +3621,7 @@ const Live=(()=>{
   const mine=(it,f)=>it.ptax?f.lk.startsWith("tax|@")&&(it.lk==="tax|@"||it.lk===f.lk):!!it.lk&&it.lk===f.lk;
   const named=it=>!!it.lk&&it.lk[0]!=="@"&&!it.lk.startsWith("tax|");
   const cmpN=(f,it,t)=>{if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
-   const x=nat(Math.abs(f.a),it.cur);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
+   const x=natOn(Math.abs(f.a),it.cur,f.d);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
   const cmp=(f,it,k)=>cmpN(f,it,it.rem*it.vk*(k||1));
   // Where a tax is paid from: the account the rule names; else, for a share of receipts, the account it is charged
   // on; else any pound account. A row the bank gave no amount for is placed by its bank alone.
@@ -3632,7 +3634,7 @@ const Live=(()=>{
   const whole=it=>!!it.of&&!it.of.part&&it.W;
   const cand=(f,it,loose)=>it.dir===Math.sign(f.o.a)&&!it.notx.includes(f.id)&&(loose||f.at>it.c0)&&
    (whole(it)?!!it.date&&f.d>=plus(it.date,-31)&&f.d<=plus(it.date,61)&&(!ruleBy[it.of.r]||onPay(ruleBy[it.of.r],f)):!it.date||f.d>=plus(it.date,loose?-31:-10))&&(it.lk?mine(it,f):byAmt(f,it));
-  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(f.a)/gbp(it.rem,it.cur);return k>=0.7&&k<=1.3;};
+  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(f.a)/gbpOn(it.rem,it.cur,f.d);return k>=0.7&&k<=1.3;};
   const close=(it,f,note,more)=>{it.done=Object.assign({by:"row",on:f.d,rows:[f.id],note:note||""},more||{});it.match.push(f.id);used.add(f.id);};
   // Which tax row is a period's whole bill: the first a founder said so of; a second one for the same period is
   // read as a part of it. (A row from before v3, which says nothing, is read further down, with the periods.)
@@ -3647,7 +3649,7 @@ const Live=(()=>{
   // statements of its bank reach the next month's window. One repeating payout carries at most one unpaid month.
   const missedNow=o=>{if(o.dir>0||o.moved||o.got>0||!o.cov)return false;const n=nextOf(o);return !!n&&o.cov>=plus(n.date,-10);};
   const ownOf=(l,f)=>{let best=null,bd=1e9;const n=dn(f.d);l.forEach(o=>{const k=Math.abs(dn(o.date)-n);if(k<bd||(k===bd&&o.date<best.date)){bd=k;best=o;}});return best;};
-  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
+  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a,d:f.d},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
   // The lines a founder said «Частично» of. Each knows how much was paid, and so knows its row when it comes.
   const said=items.filter(it=>it.pamt!=null&&!it.wd&&!word(it));
   pool.forEach(f=>{
@@ -3677,7 +3679,7 @@ const Live=(()=>{
     // 2. the invoice with the tax on top where the row had none, or without it where the row had it
     if(f.c==="rev"&&TOP>1){if((hit=nm.find(it=>!it.vat&&cmp(f,it,TOP).ok)))return close(hit,f,"vat");if((hit=nm.find(it=>it.vat&&cmpN(f,it,it.rem).ok)))return close(hit,f,"novat");}
     if(nm.length>=2){                                                                  // 3. one payment for several lines
-     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbp(it.rem*it.vk,it.cur),X=same?Math.abs(f.o.a):Math.abs(f.a);
+     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),X=same?Math.abs(f.o.a):Math.abs(f.a);
      const ok=s=>{if(!same)return Math.abs(X-s)<=0.06*s;const z=tol(s,c12[0].dir);return X>=s-z[0]&&X<=s+z[1];};
      let found=null,n=0;const walk=(i,set,s)=>{if(n>1)return;if(set.length>=2&&ok(s)){n++;found=set.slice();}if(set.length===6)return;for(let j=i;j<c12.length;j++){set.push(c12[j]);walk(j+1,set,s+val(c12[j]));set.pop();}};
      walk(0,[],0);
@@ -3720,7 +3722,8 @@ const Live=(()=>{
    if(o.got>=0.7*t)o.done={by:"row",on:o.last,rows,note:o.got>=t-z[0]&&o.got<=t+z[1]?"":"other",got:r2(o.got)};
    else if(o.cov&&o.cov>=plus(o.date,o.g))o.done={by:"row",on:o.last,rows,note:"part",got:r2(o.got)};
    else o.rem=Math.max(0,(t-o.got)/o.vk);});
-  items.forEach(it=>{it.gotG=it.wd?it.gotG:gbp(it.got,it.cur);});
+  // The part of a line that has come has happened too: it is worth what it was on the day its last row came.
+  items.forEach(it=>{it.gotG=it.wd?it.gotG:gbpOn(it.got,it.cur,it.last||it.date);});
   // E6. A hand mark stands in for a row no statement has shown yet. The row that then shows up takes its place —
   // even one still unrecognised in «Разбор»: it is the bank's fact either way. A row that was already filed (or
   // recognised) when the mark was made is never taken this way: a tap that silently re-filed it would move the
@@ -3820,7 +3823,7 @@ const Live=(()=>{
   const factsOf=(rule,a,b)=>{let g=0,n=0,sheet=false;const [bank,cur]=acctOf(rule.acct||"|GBP");
    revs.forEach(r=>{if(r.d<a||r.d>b)return;
     if(rule.base==="ontop"){if(rule.id==="vat")g+=r.v;else if(r.v>0)g+=r.a*rule.rate/(100+topRate);return;}
-    if(r.b!==bank)return;if(r.o){if(r.o.cur!==cur)return;n+=r.o.a*rule.rate/100;}else{n+=nat(r.a,cur)*rule.rate/100;sheet=true;}});
+    if(r.b!==bank)return;if(r.o){if(r.o.cur!==cur)return;n+=r.o.a*rule.rate/100;}else{n+=natOn(r.a,cur,r.d)*rule.rate/100;sheet=true;}});
    return rule.base==="ontop"?{g,n:g,sheet:false}:{g:gbp(n,cur),n,sheet};};
   // … and from the plan (T4): every written inflow, on the day it is counted, accrues the tax it will bring — the
   // on-top part of its cash when its invoice carries the tax, the share of its cash when it arrives on the rule's

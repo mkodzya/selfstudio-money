@@ -5499,19 +5499,23 @@ await run('rv-rates', 'what has happened is counted at the rate of its own day; 
   const P = plan3({
     banks: [bal('Wise', 'GBP', 10000, '2026-10-05'), bal('Wise', 'USD', 500, '2026-10-05')],
     inflows: [row('u', 'Client U', 1000, '2026-10-03', { cur: 'USD', vat: false, paid: { on: '2026-10-03', at: ms('2026-10-03T12:00:00Z'), by: BY } })],
-    team: [row('v', 'Person V', 2000, '2026-10-11', { cur: 'USD' })],
+    team: [row('v', 'Person V', 2000, '2026-10-11', { cur: 'USD' }), row('w', 'Person W', 1000, '2026-10-03', { cur: 'USD' })],
   });
-  const led = { ...ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD')]), fx: { ...FX, USD: 1.25 } };
+  // Person W was owed $1,000 on the 3rd and was paid from the pound account that day: the statement shows −£757.58.
+  const led = { ...ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), filed('f-w', '2026-10-03', -757.58, 'cogs', 'Person W', { at: AT2 })]), fx: { ...FX, USD: 1.25 } };
+  const paidW = (M) => [item(M, 'w').state, item(M, 'w').done && item(M, 'w').done.by, item(M, 'w').exp];
   const of = (M) => [item(M, 'u').state, item(M, 'u').exp, item(M, 'u').done.fx, item(M, 'u').done.fxDay, -item(M, 'v').cash, acct(M, 'Wise|USD').gbp, M.fx.USD];
   let M = await C(withRates(led), P);
   same(of(M), ['done', round2(1000 / 1.32), 1.32, '2026-10-03', round2(2000 / 1.40), round2(500 / 1.40), 1.40],
     'the $1,000 that came on the 3rd is worth what a dollar was worth on the 3rd; the $2,000 still owed and the dollars in the account, what it is worth today');
+  same(paidW(M), ['done', 'row', 757.58], 'a line in dollars paid in pounds is closed by its row: £757.58 was $1,000 on the 3rd');
   // today's rate moves
   const moved = JSON.parse(JSON.stringify(DAYS));
   moved[T].USD = 1.60;
   M = await C(withRates(led, moved), P);
   same(of(M), ['done', round2(1000 / 1.32), 1.32, '2026-10-03', round2(2000 / 1.60), round2(500 / 1.60), 1.60],
     'today\'s rate moves: what came on the 3rd does not move by a penny; what is ahead and what the account holds do');
+  same(paidW(M), ['done', 'row', 757.58], '… and the line that row closed on the 3rd is still closed by it: a row is held against its line by the rate of the row\'s own day');
   // a rate of one's own is for looking ahead, and for nothing that has happened
   M = await C(withRates(led, DAYS, { USD: 2 }), P);
   same(of(M), ['done', round2(1000 / 1.32), 1.32, '2026-10-03', 1000, 250, 2], 'a rate typed over the day\'s counts what is ahead and nothing that has happened');
