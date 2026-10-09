@@ -418,7 +418,7 @@ class LinkTests(Case):
         token = shown.out.strip().rsplit("#t=", 1)[1]
         self.assertEqual(stand.post(SETUP, {"token": token, "password": PASSWORD}).json()["login"], "anna")
         listed = stand.ctl("user", "list").out
-        self.assertRegex(listed, r"(?m)^anna +Anna +reader +yes +set ")
+        self.assertRegex(listed, r"(?m)^anna +Anna +yes +set \S+ +- +reader$")
 
 
 # ---------------------------------------------------------------------------

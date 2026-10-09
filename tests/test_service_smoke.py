@@ -1778,15 +1778,15 @@ class CtlTests(StandCase):
         self.assertEqual(listed.status, 0)
         lines = listed.out.splitlines()
         self.assertEqual(lines[0].split()[:2], ["login", "name"])
-        self.assertRegex(lines[1], r"^mika +Mika +owner +yes +set 2026-10-07T12:00:00Z")
-        self.assertRegex(lines[2], r"^misha +Misha +reader +yes +not set")
+        self.assertRegex(lines[1], r"^mika +Mika +yes +set 2026-10-07T12:00:00Z +- +owner$")
+        self.assertRegex(lines[2], r"^misha +Misha +yes +not set +- +reader$")
         sessions = stand.ctl("sessions", "list")
         self.assertEqual(sessions.status, 0)
         self.assertIn("2 session(s)\n", sessions.out)
         for cookie in (mika, misha):
             self.assertNotIn(stand.token_of(cookie), sessions.out)
         self.assertEqual(stand.ctl("user", "disable", "misha").status, 0)
-        self.assertRegex(stand.ctl("user", "list").out, r"misha +Misha +reader +no: disabled")
+        self.assertRegex(stand.ctl("user", "list").out, r"misha +Misha +no: disabled")
         self.assertEqual(stand.get("/api/me", cookie=misha).status, 401)
         self.assertEqual(stand.ctl("user", "enable", "misha").status, 0)
         self.assertEqual(stand.ctl("sessions", "logout", "mika").out, "1 session(s) of mika closed\n")
@@ -1937,7 +1937,7 @@ class CtlTests(StandCase):
         self.assertEqual(lines[2:], stand.ctl("user", "list").out.splitlines())
         self.assertEqual(len(lines), 6)
         for row in lines[3:]:
-            self.assertTrue(row.rstrip().endswith(" -"), "no link is pending any more: %r" % row)
+            self.assertRegex(row, r" - +(owner|reader|editor)$", "no link is pending any more: %r" % row)
         for token in (spent, waiting):
             self.assertRefused(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}), 404, "invalid_link")
         self.assertNotIn(spent, done.out)

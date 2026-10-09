@@ -681,6 +681,31 @@ button.td-wk:focus-visible{outline-offset:-2px}
 @media (max-width:620px){.ed-acct{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.ed-an{grid-column:1/-1}.ed-foot .row{flex:1 1 100%}.ed-foot .row>button{flex:1 1 auto}}
 .toasts{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:100;width:min(92vw,520px);pointer-events:none}
 .toast{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;pointer-events:auto;font-size:14px;line-height:1.4;background:var(--panel-raised);color:var(--text-primary);border:1px solid var(--text-primary);border-left-width:5px;box-shadow:var(--shadow-lift)}
+/* ---- a reader's page: nothing on it changes anything. What would is not drawn (the script hides it); a field that
+   also shows something — a rate, a rule, a row's block — stays in view, and is not to be typed in. ---- */
+.ro-say{font-size:12px;color:var(--text-muted);white-space:nowrap}
+body.ro input:disabled,body.ro select:disabled,body.ro textarea:disabled{opacity:1;color:var(--text-primary);-webkit-text-fill-color:var(--text-primary);background-color:transparent;border-color:var(--border);cursor:default}
+body.ro select:disabled{background-image:none}
+body.ro button:disabled{opacity:1;cursor:default}
+body.ro [data-ed-bal],body.ro #view-ledger tr[data-row]{cursor:default}
+body.ro .cs-helpbar,body.ro .cs-addrow:empty,body.ro .cs-how,body.ro #ownIn{display:none}
+/* ---- «Люди»: a person is one quiet line; a press opens the card ---- */
+.ppl{max-width:780px}
+.ppl-row{display:grid;grid-template-columns:minmax(0,1fr) 24px;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.ppl-row:hover{background:var(--panel-raised)}
+.ppl-row:focus-visible{outline:2px solid var(--text-primary);outline-offset:-2px}
+.ppl-nm{font-size:14.5px;font-weight:600}
+.ppl-meta{display:block;margin-top:2px;font-size:12px;line-height:1.45;color:var(--text-muted)}
+.ppl-caret{width:7px;height:7px;border:solid var(--text-muted);border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);justify-self:center;transition:transform .2s}
+.ppl-open>.ppl-row{border-bottom-color:transparent}
+.ppl-open>.ppl-row .ppl-caret{transform:translateY(2px) rotate(-135deg)}
+.ppl-off .ppl-nm{color:var(--text-muted);text-decoration:line-through}
+.ppl .ed-card{margin:0 0 12px}
+.ppl .ppl-new{margin:10px 0 0}
+.ppl-step{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;padding-top:12px;border-top:1px solid var(--border)}
+.ppl-step .fld{flex:1 1 220px;min-width:0}
+.ppl-step .fld input{width:100%}
+.ppl-step .note{flex:1 1 100%;margin:0}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -696,7 +721,7 @@ button.td-wk:focus-visible{outline-offset:-2px}
       <button data-tab="reports">Отчёты</button>
       <button data-tab="settings">Настройки</button>
     </nav>
-    <div class="topbar-right"><span id="sync" class="sync wait">загружаю</span></div>
+    <div class="topbar-right"><span id="roSay" class="ro-say" hidden></span><span id="sync" class="sync wait">загружаю</span></div>
   </header>
   <main class="main">
     <div id="ledLost" class="banner" hidden><span><b id="ledLostHead"></b> <span id="ledLostText"></span></span><button id="ledReload" class="sm">Обновить страницу</button></div>
@@ -709,6 +734,7 @@ button.td-wk:focus-visible{outline-offset:-2px}
     <div id="view-inbox" class="stack" hidden></div>
     <div id="view-ledger" class="stack" hidden></div>
     <div id="view-settings" class="stack" hidden></div>
+    <div id="view-people" class="stack" hidden></div>
   </main>
 </div>
 <div class="dropveil" id="dropveil" hidden><div>Отпустите файлы — загружу выписки</div></div>
@@ -744,6 +770,13 @@ const FX0={USD:1.35,EUR:1.17,RUB:118,AMD:525};
 const S={tx:[],inbox:[],rules:[],history:{},fx:Object.assign({},FX0),files:[],loaded:false,own:["self studio"],ownSeen:[],holders:{}};
 const ui={tab:"today",month:null,quarter:null,edit:null,lastTr:0,trOpen:false};
 let db=null,disk=false;
+// Who is signed in and what they may do, as the stand's /api/me says it. A reader is sent both documents and saves
+// neither (the owner's decision of 9 October 2026: «они могут только читать, писать могу пока только я»). For a
+// reader the page draws nothing that changes anything and sends no save - and the server refuses one whatever the
+// page does. Where nobody says who is asking (the laptop tool, an artifact, a server of an earlier release),
+// everybody may do everything, as before.
+let ME=null,RO=false;
+const RO_SAY="Только просмотр: менять данные может владелец";
 // One page, three homes: the studio's server under /money/ (data through the founder API, behind the platform's
 // own sign-in), the laptop's little server, or a claude.ai artifact.
 // On the studio's server it has a name of its own, finance.selfstudio.se, where the edge serves this page at the
@@ -800,12 +833,15 @@ const LEDLOST={rev:["Таблица изменилась в другом окн�
 let staleWhy="";
 function ledLost(why){const first=!stale;stale=true;staleWhy=why;$("#ledLostHead").textContent=LEDLOST[why][0];$("#ledLostText").textContent=LEDLOST[why][1];$("#ledLost").hidden=false;if(first)toast(`Не сохранено: ${LEDLOST[why][2]} — обновите страницу`);}
 async function put(){
+ if(RO)return;
  if(putBusy){putAgain=true;return;}putBusy=true;putT=null;
  try{
   const d=dump(),base=d.base;delete d.base;
   const r=API?await fetch(API,{method:"PUT",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({base,doc:JSON.stringify(d)})})
    :await fetch("/api/data",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign(d,{base}))});
   if(r.status===409){ledLost("rev");putBusy=false;return sync("данные изменились в другом окне — обновите страницу","bad");}
+  // The owner has made this person a reader while the page stood open: the save was not taken, and none follows.
+  if(r.status===403&&await refusedAs(r,"read_only")){putBusy=false;return readOnly(true);}
   if(r.status===401||r.status===403){ledLost("auth");putBusy=false;return sync("вход закончился — войдите заново и обновите страницу","bad");}
   if(!r.ok)throw new Error(r.status);const j=await r.json();if(j&&j.rev)S.rev=j.rev;sync(API?"сохранено":"сохранено на диск","ok");}
  catch(e){sync(API?"не сохранено — проверьте связь":"не сохранено — запустите «Запустить Money»","bad");}
@@ -821,8 +857,11 @@ function gate(st){
  $("#view-today").innerHTML=`<div class="empty"><b>${st===401?"Сначала войдите в платформу":st===403?"Этот раздел только для фаундеров":"Сервер не отвечает"}</b>${st===401?"Money открывается под тем же входом, что и вся платформа.":st===403?"Деньги студии видят только фаундеры.":"Проверьте связь и обновите страницу."}<div style="margin-top:14px"><a class="btnlink" href="${st===401?"/login":st===403?"/tracker/board":location.pathname}">${st===401?"Войти":st===403?"На платформу":"Обновить"}</a></div></div>`;
 }
 window.addEventListener("pagehide",()=>{if(disk&&!API&&putT&&navigator.sendBeacon){clearTimeout(putT);putT=null;navigator.sendBeacon("/api/data",new Blob([JSON.stringify(dump())],{type:"application/json"}));}});
+// Whether a refusal carries this code. (The answer is read from a copy: whoever asked may read it again.)
+async function refusedAs(r,code){try{const j=await r.clone().json();return !!j&&j.error===code;}catch(e){return false;}}
 function applyState(x){S.tx=x.tx||[];S.inbox=x.inbox||[];S.rules=x.rules||[];S.history=x.history||{};Object.assign(S.fx,x.fx||{});if(Array.isArray(x.own))S.own=x.own;if(Array.isArray(x.ownSeen))S.ownSeen=x.ownSeen;if(x.holders)S.holders=x.holders;S.lastpdf=x.lastpdf||null;S.rev=x.rev||0;S.aliases=x.aliases||{};}
 function write(path,data){
+ if(RO)return;
  if(disk){if(stale)return;sync("сохраняю","wait");clearTimeout(putT);putT=setTimeout(put,400);return;}
  if(!db){localSave();return;}
  pending++;sync("сохраняю…","wait");
@@ -839,9 +878,12 @@ async function load(){
   let r=null;try{r=await fetch(API,{credentials:"same-origin",cache:"no-store"});}catch(e){}
   if(!r||!r.ok)return gate(r?r.status:0);
   const j=await r.json();applyState(j.doc||{});S.rev=j.rev||0;disk=true;sync("сохранено","ok");
-  // Whose hand a change to the plan is in: the first name the platform knows the signed-in founder by. Asked once;
-  // a change made before the answer comes, or without one, is simply unsigned.
-  fetch("/api/me",{credentials:"same-origin"}).then(q=>q.ok?q.json():null).then(me=>{if(me&&me.firstName)Plan.name(me.firstName);}).catch(()=>{});
+  // Who is signed in: the first name signs a change to the plan, and what the person may do decides what the page
+  // offers. It is waited for - a moment - because the page saves by itself when it opens (transfers between the
+  // studio's own accounts are put away, an older plan is rewritten), and a reader's page must not try. Without an
+  // answer the page is what it was before there were readers; a save the server then refuses says so (put, push).
+  try{const q=await fetch("/api/me",{credentials:"same-origin",cache:"no-store"}),me=q.ok?await q.json():null;
+   if(me&&typeof me==="object"){ME=me;if(me.firstName)Plan.name(me.firstName);if(me.canWrite===false)readOnly();if(ui.tab==="people")People.show();}}catch(e){}
  }
  if(DISK){try{const r=await fetch("/api/data",{cache:"no-store"});if(r.ok){applyState(await r.json());disk=true;sync("сохранено на диск","ok");}}catch(e){}}
  if(!disk){
@@ -1146,6 +1188,7 @@ function ingest(parsed,file,src){
  return{added,dup};
 }
 async function handleFiles(list){
+ if(RO)return toast(RO_SAY);
  // A window that no longer saves takes no file: read here, a statement would be sorted and then lost.
  if(stale)return toast(`Файлы не взяты: ${LEDLOST[staleWhy||"rev"][2]} — сначала обновите страницу`);
  for(const f of list){
@@ -1492,8 +1535,8 @@ function repGo(v){
 // «Загрузка» and «Таблица» are not in the bar: they are opened from «Настройки», by the switch the three screens
 // begin with. The bar keeps «Настройки» lit on each of them (UNDER, in the shell); their addresses, #upload and
 // #ledger, are as they were, and so is every button elsewhere that leads to one of them.
-const SETNAV=[["settings","Общие"],["upload","Загрузка выписок"],["ledger","Таблица"]];
-function setNav(cur){return `<div class="tabs2 set-nav" role="group" aria-label="Что открыть в настройках">${SETNAV.map(([k,n])=>`<button data-tabgo="${k}" aria-pressed="${k===cur}">${n}</button>`).join("")}</div>`;}
+const SETNAV=[["settings","Общие"],["upload","Загрузка выписок"],["ledger","Таблица"],["people","Люди"]];
+function setNav(cur){return `<div class="tabs2 set-nav" role="group" aria-label="Что открыть в настройках">${SETNAV.filter(([k])=>k==="upload"?!RO:k!=="people"||!!(ME&&ME.role)).map(([k,n])=>`<button data-tabgo="${k}" aria-pressed="${k===cur}">${n}</button>`).join("")}</div>`;}
 
 // ---------- upload ----------
 function renderUpload(){
@@ -1533,9 +1576,9 @@ function renderSettings(){
    <div class="row" style="margin-top:12px"><input id="ownIn" placeholder="название или номер счёта" style="flex:1 1 200px" aria-label="Название или номер счёта"><button data-ownadd>Добавить</button></div></section>
   <section class="card"><h2>Карты фаундеров</h2><p class="note" style="margin:0 0 12px">Трата с такой карты у незнакомого продавца получает блок фаундера как подсказку. Подписки студии всё равно идут в Fixed.</p>
    ${hs.length?hs.map(([h,c])=>`<div class="row" style="justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span><span class="mono">${esc(h)}</span> → <b>${CAT[c]?CAT[c].name:esc(c)}</b></span><button class="x" data-holderdel="${esc(h)}" aria-label="Удалить">×</button></div>`).join(""):`<span class="note">Пока пусто. Появится, когда вы отнесёте трату с карты к блоку фаундера.</span>`}</section>
-  <section class="card"><h2>Где лежат данные</h2><p class="note" style="margin:0">${API?"На сервере студии, под входом платформы. Открыть могут только фаундеры. Состояние на начало каждого дня хранится 90 дней.":disk?"В папке <span class=\"mono\">selfstudio-money/data</span> на этом компьютере. Каждый день первая запись сохраняет копию вчерашнего состояния в <span class=\"mono\">data/backups</span>.":db?"В базе этого артефакта на claude.ai.":"Только в этом браузере. Запустите «Запустить Money», чтобы данные сохранялись на диск."}</p>
+  <section class="card"><h2>Где лежат данные</h2><p class="note" style="margin:0">${API?(MONEY_HOST?"На сервере студии, под входом Money. Открыть могут те, кого впустил владелец. Перед первым сохранением дня прежнее состояние откладывается в копию.":"На сервере студии, под входом платформы. Открыть могут только фаундеры. Состояние на начало каждого дня хранится 90 дней."):disk?"В папке <span class=\"mono\">selfstudio-money/data</span> на этом компьютере. Каждый день первая запись сохраняет копию вчерашнего состояния в <span class=\"mono\">data/backups</span>.":db?"В базе этого артефакта на claude.ai.":"Только в этом браузере. Запустите «Запустить Money», чтобы данные сохранялись на диск."}</p>
    ${ui.imp?`<div class="banner" style="margin:14px 0 0"><span>В файле <b>${ui.imp.tx.length}</b> строк и ${(ui.imp.rules||[]).length} правил${ui.imp.savedAt?", сохранён "+esc(String(ui.imp.savedAt).slice(0,10)):""}. Сейчас здесь <b>${S.tx.length}</b> строк. Заменить всё данными из файла?</span><span class="row"><button class="sm ghost" data-impno>Отмена</button><button class="sm primary" data-impyes>Заменить</button></span></div>`
-   :`<div class="row" style="margin-top:14px"><button data-imp>Загрузить данные из файла</button><input type="file" id="impIn" accept=".json,application/json" hidden><span class="note">файл <span class="mono">db.json</span> из папки <span class="mono">selfstudio-money/data</span></span></div>`}</section>
+   :RO?"":`<div class="row" style="margin-top:14px"><button data-imp>Загрузить данные из файла</button><input type="file" id="impIn" accept=".json,application/json" hidden><span class="note">файл <span class="mono">db.json</span> из папки <span class="mono">selfstudio-money/data</span></span></div>`}</section>
   <section class="card wide"><h2>Прогноз<span class="note">как «Сегодня» считает то, чего ещё не было</span></h2><div id="ed-forecast">${Ed.settings()}</div></section>
   <section class="card wide"><h2>Налоги<span class="note">правила, по которым считаются налоги студии, и у кого из клиентов VAT</span></h2><div id="ed-taxes">${Ed.taxes()}</div></section>
   <section class="card wide"><h2>Правила разноски<span class="note">${S.rules.length} своих · ${GENERIC.length} общих (подписки, HMRC)</span></h2>
@@ -1764,12 +1807,14 @@ const Cash=(()=>{
   tax:plan.tax,log:plan.log},plan.fresh?{fresh:plan.fresh}:{},plan.fx?{fx:plan.fx}:{},plan.horizon?{horizon:plan.horizon}:{},plan.led?{led:plan.led}:{},plan.old?{old:plan.old}:{});
  const sig=()=>JSON.stringify([plan.cushion,plan.banks,plan.inflows,plan.team,plan.taxes,plan.other,plan.div,plan.tax,plan.fresh||null]);
  function save(){
+  if(RO)return;
   const g=sig();if(g===lastSig)return;lastSig=g;
   if(home==="local"){try{localStorage.setItem(STORE,JSON.stringify(docOf()));}catch(e){}return;}
   if(stale)return;
   sync("сохраняю","wait","cash");clearTimeout(saveT);saveT=setTimeout(push,500);
  }
  async function push(){
+  if(RO)return;
   if(busy){again=true;return;}busy=true;saveT=null;
   try{
    const d=docOf(),sent=sig();
@@ -1783,6 +1828,7 @@ const Cash=(()=>{
    if(r.status===409&&first&&!again&&sig()===sent){first=false;busy=false;sync(home==="api"?"сохранено":"сохранено на диск","ok","cash");return fetchPlan();}
    // The toast on the screen at this moment is the one that answered «Сохранено» to the change just refused.
    if(r.status===409){stale=true;first=false;again=false;busy=false;sync("касса изменилась в другом окне — обновите страницу","bad","cash");toast(LOST);return Plan.redraw();}
+   if(r.status===403&&await refusedAs(r,"read_only")){first=false;again=false;busy=false;return readOnly(true);}
    if(r.status===401||r.status===403){stale=true;busy=false;return sync("вход закончился — войдите заново и обновите страницу","bad","cash");}
    if(!r.ok)throw new Error(r.status);const j=await r.json();if(j&&j.rev)rev=j.rev;failing=false;sync(home==="api"?"сохранено":"сохранено на диск","ok","cash");
   }catch(e){lastSig="";sync(home==="api"?"касса не сохранена — проверьте связь":"касса не сохранена — запустите «Запустить Money»","bad","cash");
@@ -1795,7 +1841,7 @@ const Cash=(()=>{
  }
  // A change made in the last half second before the tab closes is still waiting for its timer.
  window.addEventListener("pagehide",()=>{
-  if(!saveT||stale||!plan)return;clearTimeout(saveT);saveT=null;
+  if(!saveT||stale||!plan||RO)return;clearTimeout(saveT);saveT=null;
   try{
    if(home==="disk"&&navigator.sendBeacon)navigator.sendBeacon("/api/cash",new Blob([JSON.stringify(Object.assign(docOf(),{base:rev}))],{type:"application/json"}));
    if(home==="api")fetch(API+"/cash",{method:"PUT",keepalive:true,credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({base:rev,doc:JSON.stringify(docOf())})}).catch(()=>{});
@@ -1817,8 +1863,9 @@ const Cash=(()=>{
   if(!X&&doc&&typeof doc==="object"&&Object.keys(doc).some(k=>k!=="rev"))return unread("То, что под него сохранено, не читается как план. Ничего не тронуто.");
   plan=X||blank();lastSig=sig();ready=true;failed=false;
   // A plan kept by the page as it was before version 3 is rewritten once, at once — so the three founders read the
-  // same rows from then on. After that, opening the page writes nothing.
-  if(X&&!(doc.v>=3)){if(home==="local"){lastSig="";save();}else{first=true;sync("сохраняю","wait","cash");push();}}
+  // same rows from then on. After that, opening the page writes nothing. (A reader's page reads the older plan as
+  // version 3 and writes nothing at all: the rewrite waits for somebody who may save.)
+  if(X&&!(doc.v>=3)&&!RO){if(home==="local"){lastSig="";save();}else{first=true;sync("сохраняю","wait","cash");push();}}
   if(!root.hidden)address();
   Plan.redraw();
  }
@@ -1873,12 +1920,12 @@ const Cash=(()=>{
   const sum=shown(it),figure=Math.abs(sum).toLocaleString("en-GB",{maximumFractionDigits:2});
   // A month of a «каждый месяц» row and a tax the page worked out keep their name and currency, and so do the rest
   // here: only the sum is typed in the row.
-  const amt=ro?`<span class="cs-at">${figure}</span>`:`<input class="cs-amt" data-cs-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${sum?esc(sum):""}" placeholder="сумма" aria-label="Сумма: ${name}">`;
+  const amt=ro||RO?`<span class="cs-at">${figure}</span>`:`<input class="cs-amt" data-cs-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${sum?esc(sum):""}" placeholder="сумма" aria-label="Сумма: ${name}">`;
   return `<tr class="${rowCls(it)}${open?" cs-open":""}" data-cs-id="${id}" data-cs-k="${it.sec}">
    <td class="cs-dt"><span class="cs-dd" data-cs-d="${esc(it.date)}">${it.date?dRu(it.date):"—"}</span></td>
    <td class="cs-nmc"><div class="cs-nm"><i class="sw" style="background:${bcol(it.bank)}" title="${esc(it.bank)}"></i><span class="cs-nt">${name||"(без названия)"}</span></div></td>
    <td class="r cs-amc">${amt}</td><td class="cs-cur"><span class="cs-ct">${esc(it.cur)}</span></td>
-   <td class="cs-mo"><button class="cs-more" data-ed-open="${id}" data-ed-at="plan" aria-expanded="${open}" aria-label="${name||"строка"}: подробнее" title="Название, банк, дата, «каждый месяц» — и что сделать со строкой"></button></td>
+   <td class="cs-mo"><button class="cs-more" data-ed-open="${id}" data-ed-at="plan" aria-expanded="${open}" aria-label="${name||"строка"}: подробнее" title="${RO?"Подробнее":"Название, банк, дата, «каждый месяц» — и что сделать со строкой"}"></button></td>
    <td class="m r cs-gbp" data-cs-gbp>${gbpText(it)}</td>
    <td class="cs-rm" data-cs-rm>${esc(remark(it))}</td></tr>`;
  }
@@ -2049,7 +2096,7 @@ const Cash=(()=>{
   const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)).join("")}</div>`;
   return `<div id="cs-plan" class="stack">${sw}${back}${past}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
-   <p class="note"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
+   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Подписки</b> — те же прочие расходы в своей графе; она свёрнута в одну строку, пока её не откроют. Строку переносит туда и обратно галочка «это подписка» в её карточке.
     <b>Даты.</b> Строка без даты остаётся в своём месяце, но в расчёт по дням не идёт.</p>
@@ -4270,7 +4317,7 @@ const Live=(()=>{
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},
  model(opts){return Live.compute({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,history:S.history,aliases:S.aliases||{}},Cash.test.state()||{},Live.today(),opts);}};
 // LIVE — the forecast engine (end)
 // =====================================================================================================================
@@ -4295,7 +4342,7 @@ const Plan=(()=>{
   // Once somebody else has saved the plan, nothing changed on this page is kept. A change is then refused where it
   // is made, in the same breath that used to answer «Сохранено»: lost() says so and is true. Every hand that
   // changes the plan asks it first, and answers in its own words only after edit() has returned true.
-  lost(){if(Cash.status()!=="stale")return false;toast(LOST);return true;},
+  lost(){if(RO){toast(RO_SAY);return true;}if(Cash.status()!=="stale")return false;toast(LOST);return true;},
   edit(label,fn){const P=Cash.plan();if(!P||this.lost())return false;Cash.snap(label);fn(P,Date.now(),who);Cash.changed();redraw();return true;},
   undo(){Cash.undo();}};
 })();
@@ -4507,7 +4554,7 @@ const Ed=(()=>{
  }
 
  // ---- the card of one row ----
- function why(it){
+ function why(it,quiet){
   const d=it.done,inn=it.dir>0,out=[];
   if(it.kind==="tax"){const p=M.taxes.periods.find(x=>x.key===it.tax.key),r=M.taxes.rules.find(x=>x.id===it.tax.rule);
    out.push(p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.");}
@@ -4523,6 +4570,9 @@ const Ed=(()=>{
   const hint=it.hint&&!d?`<div class="row"><span>Похоже, уже ${inn?"пришло":"оплачено"}: ${inn?"+":"−"}${nat(it.hint.amt,it.hint.cur)} · ${dRu(it.hint.d)}${it.hint.label?" · "+esc(it.hint.label):""}</span>${btn("tx","Это оно",it)}${btn("notx",inn?"Нет, это новый счёт":"Нет, это другой платёж",it)}</div>`:"";
   // A month of a row the table had no name for was closed by an amount: whose payment that was is asked once.
   const payer=it.payer?`<div class="row"><span>${esc(it.payer.label)} в таблице — это «${esc(it.name)}»?</span>${btn("payer","Да",it)}${btn("nopayer","Нет, другой",it)}</div>`:"";
+  // For a reader: the same words, where the money goes through and when - the fields that said so are not drawn -
+  // and neither of the two questions, which are answers to give.
+  if(quiet)return `<div class="ed-why">${esc(out.concat(`Счёт: ${it.bank} ${it.cur}${it.date?", "+dRu(it.date):""}.`).join(" "))}</div>`;
   return `<div class="ed-why">${esc(out.join(" "))}${hint}${payer}</div>`;
  }
  // By what the row is and where it stands. «Получено» / «Оплачено» comes first on every open row, and «Частично»
@@ -4593,6 +4643,7 @@ const Ed=(()=>{
   ${boxes?`<div class="ed-chks">${boxes}</div>`:""}${o.note?`<span class="note">${o.note}</span>`:""}`;
  }
  function rowCard(it){
+  if(RO)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it,true)}<div class="ed-foot"><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
   const done=it.state==="done",tax=it.src==="tax",occ=it.src==="occ";
   let body="";
   if(!done){
@@ -5485,17 +5536,166 @@ const Today=(()=>{
 Plan.watch(()=>Ed.settingsDraw());
 
 // ---------- shell ----------
-const TABS=["today","cash","inbox","upload","dashboard","reports","ledger","settings"];
+// ---------- a reader's page ----------
+// ACT is every control whose press, change or typing changes one of the two documents; a new one is added here.
+// For a reader those that are buttons are not drawn, those that are fields are not to be typed in, and none of
+// them does anything - whatever a screen draws. This is courtesy and tidiness: what keeps a reader from saving is
+// that the page sends no save (put, push, write, Plan.lost) and that the server takes none from a reader.
+// KEEP are the buttons that also say something - which block a row is in, whether a client pays VAT: they stay.
+const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]",
+ "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
+ "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","input.lab","input.vat","[data-accept]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
+ "[data-fx]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
+ "[data-demo]","#toastUndo","[data-td-fill]","[data-td-helper]",'[data-tabgo="upload"]'].join(",");
+const KEEP="[data-ed-cl],[data-setc],[data-cs-fix],[data-taxowner]";
+const seal=()=>{if(RO)document.querySelectorAll(`:is(input,select,textarea,button):is(${ACT}):not(:disabled)`).forEach(e=>{e.disabled=true;});};
+// `late`: the owner made this person a reader while the page stood open, and a save has just been refused.
+function readOnly(late){
+ if(RO)return;RO=true;document.body.classList.add("ro");
+ const css=document.createElement("style");css.textContent=`body.ro :is(button,a,label,details):is(${ACT}):not(${KEEP}){display:none!important}`;document.head.appendChild(css);
+ $("#sync").hidden=true;const say=$("#roSay");say.textContent=`${ME&&ME.firstName?ME.firstName+" · ":""}только просмотр`;say.hidden=false;
+ // The page is drawn anew at every change; whatever it draws, a field of ACT is shut as it arrives.
+ new MutationObserver(seal).observe(document.body,{childList:true,subtree:true});seal();
+ // «Загрузка выписок» is a screen for bringing statements in: a reader who came by its address is shown «Настройки».
+ if(ui.tab==="upload")setTab("settings");
+ if(late){Ed.close();toast("Теперь у вас только просмотр: сохранить нельзя");renderAll();}
+}
+["click","change","input"].forEach(k=>document.addEventListener(k,ev=>{if(RO&&ev.target.closest&&ev.target.closest(ACT)){ev.stopImmediatePropagation();ev.preventDefault();}},true));
+
+// ---------- «Люди»: who can sign in, and one's own sign-in ----------
+// A screen of «Настройки», on a stand. The owner sees everybody: adds a person, issues their one-time link - after
+// saying the owner's own password again - says what each may do and shuts a login out. Everybody else sees their own
+// line. One's own card changes the password and signs out. Nothing here touches the two documents, and nothing here
+// is asked of the server until the screen is opened. The doors: docs/api.md, "Who may do what".
+// A link is shown once: it is held here only while its card stands open, and is in no document, log or storage.
+const People=(()=>{
+ const st={list:null,failed:false,open:"",step:"",adding:false,link:null,busy:false};
+ const root=()=>$("#view-people"),card=()=>root().querySelector("[data-pp-card]"),person=l=>(st.list||[]).find(p=>p.login===l)||null;
+ const ROLE={owner:"правит и управляет людьми",editor:"смотрит и правит",reader:"только смотрит"};
+ const SAY={wrong_password:"Пароль не тот",weak_password:"Пароль не подходит: не короче 12 знаков, без логина, имени и простых слов",login_taken:"Такой логин уже есть",too_many_people:"Больше людей здесь завести нельзя",login_disabled:"Вход отключён — сначала включите его",owner_fixed:"Вход владельца со страницы не меняется",not_owner:"Это может только владелец",unknown_login:"Такого логина нет — обновите страницу",unauthenticated:"Вход закончился — обновите страницу и войдите заново"};
+ const words=a=>{const j=a.j||{},c=j.error;
+  if(c==="too_many_attempts")return `Слишком много попыток — подождите ${Math.max(1,Math.ceil((+j.retryAfter||60)/60))} мин`;
+  if(c==="bad_person")return j.reason==="login"?"Логин — латинские буквы и цифры, первая — буква":j.reason==="name"?"Впишите имя, до 40 знаков":"Нечего менять";
+  return SAY[c]||(a.status?"Сервер не принял — попробуйте ещё раз":"Нет связи с сервером");};
+ async function call(method,path,body){
+  try{const r=await fetch(path,{method,credentials:"same-origin",cache:"no-store",headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+   let j=null;try{j=await r.json();}catch(e){}return{ok:r.ok,status:r.status,j};}
+  catch(e){return{ok:false,status:0,j:null};}
+ }
+ // A moment the server names, on this person's own clock: «сегодня», «вчера», a day; a link's end with its hour.
+ const two=n=>String(n).padStart(2,"0"),dayOf=d=>`${d.getFullYear()}-${two(d.getMonth()+1)}-${two(d.getDate())}`;
+ const when=iso=>{const d=new Date(iso);if(isNaN(d))return "";const k=dayOf(d),now=new Date(),y=new Date(now.getTime()-864e5);return k===dayOf(now)?"сегодня":k===dayOf(y)?"вчера":dRu(k);};
+ const until=iso=>{const d=new Date(iso);return isNaN(d)?"":`${dRu(dayOf(d))} ${two(d.getHours())}:${two(d.getMinutes())}`;};
+ const pending=p=>!!p.linkExpires&&new Date(p.linkExpires)>new Date();
+ const status=p=>p.disabled?"вход отключён":pending(p)?`${p.hasPassword?"новая ссылка":"ссылка"} выдана, действует до ${until(p.linkExpires)}`:!p.hasPassword?"пароля ещё нет":p.lastSeen?`последний вход ${when(p.lastSeen)}`:"сейчас не в Money";
+ const meta=p=>[p.login,p.me?"это вы":"",ROLE[p.role]||"",st.list?status(p):""].filter(Boolean).join(" · ");
+ function cardOf(p){
+  const step=(k,body)=>st.step===k?`<div class="ppl-step" data-pp-step>${body}</div>`:"";
+  if(p.me)return `<article class="ed-card" data-pp-card><div class="ed-why">Это вы, логин <span class="mono">${esc(p.login)}</span>. ${p.role==="owner"?"Владелец один: он правит данные, добавляет людей и выдаёт ссылки.":p.role==="editor"?"Вы смотрите и правите данные.":"Вы смотрите; менять данные может владелец."}</div>
+   <div class="ed-foot"><div class="row"><button class="sm" data-pp-pw>Сменить пароль</button><button class="sm" data-pp-out>Выйти</button></div><div class="row"><button class="sm ghost" data-pp-x>Закрыть</button></div></div>
+   ${step("pw",`<label class="fld" for="pp-cur"><span>Текущий пароль</span><input id="pp-cur" type="password" autocomplete="current-password"></label><label class="fld" for="pp-new"><span>Новый пароль</span><input id="pp-new" type="password" autocomplete="new-password" placeholder="не короче 12 знаков"></label><button class="sm primary" data-pp-pwsave>Сохранить</button><p class="note">После смены пароля остальные ваши входы закрываются.</p>`)}</article>`;
+  const why=p.disabled?"Вход отключён: войти нельзя, открытые страницы закрылись. Пароль и всё остальное сохранены.":p.hasPassword?`Пароль задан${p.passwordSetAt?" "+when(p.passwordSetAt):""}. Новая ссылка сбрасывает пароль и закрывает открытые входы.`:"Пароля ещё нет: его задают сами, по одноразовой ссылке.";
+  return `<article class="ed-card" data-pp-card><div class="ed-why">Логин <span class="mono">${esc(p.login)}</span>. ${why}</div>
+   <div class="ed-grid"><label class="fld ed-wide" for="pp-name"><span>Имя</span><input id="pp-name" data-pp-name maxlength="40" value="${esc(p.name)}"></label>
+    <label class="fld ed-wide" for="pp-role"><span>Что может</span><select id="pp-role" data-pp-role><option value="reader"${p.role==="reader"?" selected":""}>только смотрит</option><option value="editor"${p.role==="editor"?" selected":""}>смотрит и правит</option></select></label></div>
+   <div class="ed-foot"><div class="row">${p.disabled?"":'<button class="sm primary" data-pp-link>Ссылка для входа</button>'}<button class="sm" data-pp-off>${p.disabled?"Включить":"Отключить"}</button></div><div class="row"><button class="sm ghost" data-pp-x>Закрыть</button></div></div>
+   ${step("ask",`<label class="fld" for="pp-own"><span>Ваш пароль</span><input id="pp-own" type="password" autocomplete="current-password"></label><button class="sm primary" data-pp-issue>Выдать ссылку</button><p class="note">Пароль спрашивается ещё раз: ссылка открывает Money тому, у кого она в руках.</p>`)}
+   ${st.link?step("link",`<label class="fld" for="pp-link"><span>Ссылка — показывается один раз</span><input id="pp-link" class="mono" readonly value="${esc(st.link.link)}"></label><button class="sm" data-pp-copy>Скопировать</button><p class="note">Срабатывает один раз, до ${esc(until(st.link.expires))}. Передайте её вместе с логином <span class="mono">${esc(p.login)}</span>. Закроете карточку — показать ссылку снова нельзя, только выдать новую.</p>`):""}</article>`;
+ }
+ const item=p=>{const on=st.open===p.login;return `<div class="ppl-item${on?" ppl-open":""}${p.disabled?" ppl-off":""}"><div class="ppl-row" role="button" tabindex="0" aria-expanded="${on}" data-pp-open="${esc(p.login)}"><span><span class="ppl-nm">${esc(p.name)}</span><span class="ppl-meta">${esc(meta(p))}</span></span><span class="ppl-caret" aria-hidden="true"></span></div>${on?cardOf(p):""}</div>`;};
+ function draw(){
+  const v=root();if(!v)return;
+  if(!ME||!ME.role){v.innerHTML=`${setNav("people")}<div class="page-head"><div><h1>Люди</h1></div></div><div class="empty"><b>Здесь этого экрана нет</b>Входы и люди есть только у Money на сервере студии.</div>`;return;}
+  const owner=!!ME.canManage,mine={login:ME.id,name:ME.firstName||ME.id,role:ME.role,me:true,hasPassword:true},list=owner&&st.list?st.list:[mine];
+  v.innerHTML=`${setNav("people")}
+  <div class="page-head"><div><h1>Люди</h1><div class="page-sub">${owner?"кто может открыть Money и что в нём может":"ваш вход в Money"}</div></div></div>
+  <section class="card ppl"><h2>${owner?"Кто может войти":"Ваш вход"}${owner&&st.list?`<span class="note mono">${list.length}${" "}${plural(list.length,"человек","человека","человек")}</span>`:""}</h2>
+   <div class="ppl-list">${list.map(item).join("")}</div>
+   ${owner&&st.list?`<div class="row cs-addrow"><button class="sm ghost" data-pp-new>+ новый человек</button></div>${st.adding?`<article class="ed-card ppl-new" data-pp-addcard><div class="ed-why">Новый человек получает логин и право только смотреть. Пароль он задаст сам, по ссылке, которую вы выдадите в его карточке.</div>
+    <div class="ed-grid"><label class="fld ed-wide" for="pp-add-name"><span>Имя</span><input id="pp-add-name" maxlength="40"></label><label class="fld ed-wide" for="pp-add-login"><span>Логин, латиницей</span><input id="pp-add-login" class="mono" maxlength="32" autocapitalize="none" autocomplete="off" spellcheck="false"></label></div>
+    <div class="ed-foot"><div class="row"><button class="sm primary" data-pp-add>Добавить</button></div><div class="row"><button class="sm ghost" data-pp-new>Отмена</button></div></div></article>`:""}`:""}
+   <p class="note" style="margin:14px 0 0">${!owner?"Остальных людей и их права видит только владелец.":st.failed?"Список людей не загрузился: нет связи с сервером. Обновите страницу.":"Людьми управляет только владелец. Новый человек, выданная ссылка и отключение записываются в журнал на странице /data."}</p></section>`;
+ }
+ async function load(){if(!(ME&&ME.canManage))return;const a=await call("GET","/api/people");if(a.ok&&a.j&&Array.isArray(a.j.people)){st.list=a.j.people;st.failed=false;}else st.failed=!st.list;draw();}
+ const took=a=>{if(a.ok&&a.j&&Array.isArray(a.j.people)){st.list=a.j.people;return true;}toast(words(a));return false;};
+ // One thing at a time: a second press while the server is asked does nothing.
+ const once=fn=>async(...args)=>{if(st.busy)return;st.busy=true;try{await fn(...args);}finally{st.busy=false;}};
+ const forget=()=>{st.open="";st.step="";st.link=null;};
+ const shut=()=>fold(card(),()=>{forget();draw();});
+ function open(login){
+  if(st.open===login)return shut();
+  const go=()=>{forget();st.adding=false;st.open=login;draw();unfold(card());};
+  if(st.open)fold(card(),go);else go();
+ }
+ function step(k){st.step=st.step===k?"":k;st.link=null;draw();const s=root().querySelector("[data-pp-step]");unfold(s);const f=s&&s.querySelector("input");if(f)f.focus({preventScroll:true});}
+ const miss=(sel,msg)=>{const f=$(sel);if(f)f.focus();toast(msg);};
+ function adding(){
+  if(st.adding)return fold(root().querySelector("[data-pp-addcard]"),()=>{st.adding=false;draw();});
+  forget();st.adding=true;draw();unfold(root().querySelector("[data-pp-addcard]"));$("#pp-add-name").focus({preventScroll:true});
+ }
+ const add=once(async()=>{
+  const name=$("#pp-add-name").value.trim(),login=$("#pp-add-login").value.trim().toLowerCase();
+  if(!name)return miss("#pp-add-name","Впишите имя");if(!login)return miss("#pp-add-login","Впишите логин");
+  if(!took(await call("POST","/api/people",{login,name})))return;
+  st.adding=false;forget();st.open=login;draw();unfold(card());toast(`Добавлен: ${name}. Осталось выдать ссылку`);
+ });
+ const change=once(async(body,said)=>{if(took(await call("POST","/api/people/update",Object.assign({login:st.open},body)))){if(said)toast(said);}draw();});
+ const issue=once(async()=>{
+  const own=$("#pp-own"),password=own?own.value:"";if(!password)return miss("#pp-own","Впишите свой пароль");
+  const a=await call("POST","/api/people/link",{login:st.open,password});
+  if(!a.ok||!a.j||!a.j.link){toast(words(a));if(own){own.value="";own.focus();}return;}
+  const p=person(st.open);if(p)p.linkExpires=a.j.expires;
+  st.link={link:a.j.link,expires:a.j.expires};st.step="link";draw();unfold(root().querySelector("[data-pp-step]"));const f=$("#pp-link");if(f){f.focus({preventScroll:true});f.select();}
+ });
+ const pwSave=once(async()=>{
+  const current=$("#pp-cur").value,password=$("#pp-new").value;
+  if(!current)return miss("#pp-cur","Впишите текущий пароль");if(password.length<12)return miss("#pp-new","Новый пароль — не короче 12 знаков");
+  const a=await call("POST","/api/auth/password",{current,password});
+  if(!a.ok){toast(words(a));const f=$(a.j&&a.j.error==="weak_password"?"#pp-new":"#pp-cur");if(f){f.value="";f.focus();}return;}
+  st.step="";draw();toast("Пароль сменён. Остальные ваши входы закрыты");
+ });
+ const out=once(async()=>{await call("POST","/api/auth/logout",{});location.href="/login";});
+ function copy(b){const f=$("#pp-link");if(!f)return;f.focus();f.select();try{navigator.clipboard.writeText(f.value).then(()=>{b.textContent="Скопировано";},()=>{});}catch(e){}}
+ document.addEventListener("click",ev=>{
+  const t=ev.target,v=root(),c=s=>t.closest(s);if(!v||!t.closest||!v.contains(t))return;let x;
+  if(c("[data-pp-x]"))return shut();
+  if(c("[data-pp-new]"))return adding();
+  if(c("[data-pp-add]"))return add();
+  if(c("[data-pp-pw]"))return step("pw");
+  if(c("[data-pp-pwsave]"))return pwSave();
+  if(c("[data-pp-out]"))return out();
+  if(c("[data-pp-link]"))return step("ask");
+  if(c("[data-pp-issue]"))return issue();
+  if((x=c("[data-pp-copy]")))return copy(x);
+  if(c("[data-pp-off]")){const p=person(st.open);if(!p)return;st.step="";st.link=null;return change({disabled:!p.disabled},`${p.name}: ${p.disabled?"вход включён":"вход отключён"}`);}
+  if((x=c("[data-pp-open]")))return open(x.dataset.ppOpen);
+ });
+ document.addEventListener("change",ev=>{
+  const t=ev.target,v=root();if(!v||!t.closest||!v.contains(t))return;
+  if(t.matches("[data-pp-name]")){const name=t.value.trim(),p=person(st.open);if(!p||name===p.name)return;if(!name){t.value=p.name;return toast("Впишите имя");}return change({name},"Имя сохранено");}
+  if(t.matches("[data-pp-role]"))return change({role:t.value},t.value==="editor"?"Теперь может править":"Теперь только смотрит");
+ });
+ document.addEventListener("keydown",ev=>{
+  const t=ev.target,v=root();if(!v||!t.closest||!v.contains(t))return;
+  if((ev.key==="Enter"||ev.key===" ")&&t.matches(".ppl-row")){ev.preventDefault();return open(t.dataset.ppOpen);}
+  if(ev.key!=="Enter"||!t.matches("input"))return;
+  if(t.id==="pp-own")return issue();if(t.id==="pp-cur"||t.id==="pp-new")return pwSave();if(t.id==="pp-add-name"||t.id==="pp-add-login")return add();
+  if(t.matches("[data-pp-name]"))t.blur();
+ });
+ return{draw,show(){forget();st.adding=false;draw();load();}};
+})();
+
+const TABS=["today","cash","inbox","upload","dashboard","reports","ledger","settings","people"];
 // A screen that has no button in the bar lights the one it is opened from.
-const UNDER={upload:"settings",ledger:"settings"};
-function setTab(t){ui.tab=t;Ed.close();const lit=UNDER[t]||t;document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===lit);b.setAttribute("aria-current",b.dataset.tab===lit?"page":"false");});
+const UNDER={upload:"settings",ledger:"settings",people:"settings"};
+function setTab(t){if(t==="upload"&&RO)t="settings";ui.tab=t;Ed.close();const lit=UNDER[t]||t;document.querySelectorAll(".nav [data-tab]").forEach(b=>{b.classList.toggle("active",b.dataset.tab===lit);b.setAttribute("aria-current",b.dataset.tab===lit?"page":"false");});
  TABS.forEach(v=>$("#view-"+v).hidden=v!==t);
  try{history.replaceState(null,"","#"+t);}catch(e){}
  window.scrollTo(0,0);
- if(t==="today")Today.render();if(t==="dashboard")renderDash();if(t==="reports")renderReports();if(t==="cash")Cash.show();if(t==="settings")Ed.settingsDraw();}
+ if(t==="today")Today.render();if(t==="dashboard")renderDash();if(t==="reports")renderReports();if(t==="cash")Cash.show();if(t==="settings")Ed.settingsDraw();if(t==="people")People.show();}
 // «Сегодня» and «Касса» are worked out from the ledger as much as from the plan, so they follow it too; each draws
 // only while it is the tab in view.
-function renderAll(){if(!S.loaded)return;$("#demoBanner").hidden=!S.tx.concat(S.inbox).some(r=>r.s==="demo");renderDash();renderReports();renderUpload();renderInbox();renderLedger();renderSettings();Cash.draw();Today.render();}
+function renderAll(){if(!S.loaded)return;$("#demoBanner").hidden=!S.tx.concat(S.inbox).some(r=>r.s==="demo");renderDash();renderReports();renderUpload();renderInbox();renderLedger();renderSettings();People.draw();Cash.draw();Today.render();}
 const inboxRow=el=>{const h=el.closest("[data-id]");return h?S.inbox.find(q=>q.id===h.dataset.id):null;};
 
 document.addEventListener("click",ev=>{
@@ -5514,7 +5714,7 @@ document.addEventListener("click",ev=>{
   saveRep();return renderReports();}
  if(c("[data-represet]")){rp=Object.assign({cats:[],bank:"",q:"",group:"cat"},preset("y12"));saveRep();return renderReports();}
  if((x=c("[data-repgo]")))return repGo(x.dataset.repgo);
- if((x=c("[data-reprow]"))){r=S.tx.find(q=>q.id===x.dataset.reprow);if(!r)return;ui.quarter=qOf(r.d.slice(0,7));ui.edit=r.id;setTab("ledger");renderLedger();const e=$("#e-l");if(e)e.scrollIntoView({block:"center"});return;}
+ if((x=c("[data-reprow]"))){r=S.tx.find(q=>q.id===x.dataset.reprow);if(!r)return;ui.quarter=qOf(r.d.slice(0,7));ui.edit=RO?null:r.id;setTab("ledger");renderLedger();const e=$("#e-l");if(e)e.scrollIntoView({block:"center"});return;}
  if(c("[data-dashmore]")){ui.dashRows=(ui.dashRows||DASH_STEP)+DASH_STEP;return renderDash();}
  if((x=c("[data-scope]"))){ui.scope=x.dataset.scope;ui.period=null;return renderDash();}
  if((x=c("[data-focus]"))){ui.focus=x.dataset.focus;renderDash();return window.scrollTo(0,0);}
@@ -5557,7 +5757,7 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-edel]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
   r=S.tx.find(q=>q.id===ui.edit);if(r){S.tx=S.tx.filter(q=>q!==r);ui.edit=null;saveMonths([r.d.slice(0,7)]);renderAll();toast("Строка удалена");}return;}
  if(c("[data-eclose]")){ui.edit=null;return renderLedger();}
- if((x=c("[data-row]"))){ui.edit=x.dataset.row;renderLedger();const s=$("#e-l");if(s)s.scrollIntoView({block:"center",behavior:"smooth"});return;}
+ if((x=c("[data-row]"))){if(RO)return;ui.edit=x.dataset.row;renderLedger();const s=$("#e-l");if(s)s.scrollIntoView({block:"center",behavior:"smooth"});return;}
 });
 document.addEventListener("keydown",ev=>{
  const t=ev.target;if(ev.key!=="Enter"||!t.matches)return;
@@ -5590,7 +5790,7 @@ document.addEventListener("change",ev=>{
 });
 // Files can be dropped anywhere on the page, not only on the box that says so.
 let dragN=0;const veil=()=>$("#dropveil"),hasFiles=ev=>ev.dataTransfer&&[...(ev.dataTransfer.types||[])].includes("Files");
-window.addEventListener("dragenter",ev=>{if(!hasFiles(ev))return;ev.preventDefault();dragN++;veil().hidden=false;});
+window.addEventListener("dragenter",ev=>{if(!hasFiles(ev)||RO)return;ev.preventDefault();dragN++;veil().hidden=false;});
 window.addEventListener("dragover",ev=>{if(hasFiles(ev))ev.preventDefault();});
 window.addEventListener("dragleave",ev=>{if(!hasFiles(ev))return;dragN=Math.max(0,dragN-1);if(!dragN)veil().hidden=true;});
 window.addEventListener("drop",ev=>{if(!hasFiles(ev))return;ev.preventDefault();dragN=0;veil().hidden=true;const f=[...ev.dataTransfer.files];if(f.length)handleFiles(f);});

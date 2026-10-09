@@ -634,9 +634,15 @@ restored on the server (`docs/deploy.md`).
 
 - `409` — «данные изменились в другом окне — обновите страницу»; the page
   stops saving until it is reloaded.
-- `401` or `403` — «вход закончился — войдите заново и обновите страницу»; the
-  page stops saving, and what is typed afterwards is lost. This is why a
-  session in its last day is sent to sign in again before the page opens.
+- `403 read_only` — the owner has made this person a reader while their page
+  stood open. The page says «Теперь у вас только просмотр: сохранить нельзя»,
+  becomes a reader's page — nothing on it changes anything any more — and
+  sends no further save. (A page that knew from `/api/me` that its person only
+  looks never sent one.)
+- `401`, or any other `403` — «вход закончился — войдите заново и обновите
+  страницу»; the page stops saving, and what is typed afterwards is lost. This
+  is why a session in its last day is sent to sign in again before the page
+  opens.
 - any other refusal — «не сохранено — проверьте связь». That includes `413`,
   so a ledger near its limit would be told to check the connection.
 

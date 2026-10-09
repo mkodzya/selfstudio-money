@@ -281,10 +281,11 @@ Set-Cookie: __Host-money=<token>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Ag
   (`money-user <stand> logout <login>`). Whoever holds a copy of that cookie
   could go on using it. Money's own pages say so in words instead of "nothing
   changed".
-- The page has no sign-out control. Until it gets one, the way out is the
-  address `/login` (or `/logout`, which redirects there): for a signed-in
-  founder it shows «Вы вошли как {firstName}», the login of that session
-  («Ваш логин: …»), a link «Открыть Money» and a button «Выйти».
+- The page signs out from «Настройки → Люди», one's own card: «Выйти»
+  (since 9 October 2026). The address `/login` (or `/logout`, which redirects
+  there) is the other way out: for a signed-in founder it shows «Вы вошли как
+  {firstName}», the login of that session («Ваш логин: …»), a link «Открыть
+  Money» and a button «Выйти».
 - `GET /login` never redirects. That removes the loop a design draft had
   between `/` and `/login` for a session in its last day; the form that such
   a session is shown comes with its login filled in. The server says which of
@@ -780,12 +781,13 @@ and a request id; the detail is in the log.
 9. **The edge is the platform's.** Money's two proxy blocks live in the
    platform's `Caddyfile.edge`; a mistake in that file takes every name of both
    products down. `docs/deploy.md` has the guards.
-10. **The page has not been changed for the split yet.** It draws with
-    `innerHTML`, has no sign-out control and no stand mark, its own import
-    works on the test stand, and behind a closed door it still says that Money
-    opens under the platform's sign-in. Since the hand-over it is this
-    repository's to change; none of these is changed yet. The policy is the
-    compensating control for the first; rules for the import.
+10. **The page is only partly changed for the split.** It draws with
+    `innerHTML` — the names the owner gives people included, each through the
+    page's own escape — has no stand mark, its own import works on the test
+    stand, and behind a closed door it still says that Money opens under the
+    platform's sign-in. The sign-out control came on 9 October 2026 with
+    «Люди». The policy is the compensating control for the first; rules for
+    the import.
 11. **The vendored SheetJS is 0.18.5**, which has a published prototype-pollution
     advisory. Until it is replaced the enforced policy is the compensating
     control.
@@ -868,7 +870,8 @@ Not in the first version; none of these is built.
   the server's Caddy: it takes stalled bodies and slow uploads off the stand.
 - A cap on how far ahead a prod policy override may be dated.
 - A longer reach for the request log within one container's life.
-- A sign-out control and a stand mark in the page, and its closed-door words.
+- A stand mark in the page, and its closed-door words. (The sign-out control
+  is there since 9 October 2026: «Настройки → Люди», one's own card.)
 - Blocking outbound network for the container.
 - A scheduled rebuild for Python patch releases (today `selfcheck` only prints
   the image's age).
