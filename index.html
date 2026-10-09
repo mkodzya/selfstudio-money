@@ -1108,7 +1108,10 @@ function parseGrid(grid,name){
  let hi=-1,map=null;
  for(let i=0;i<Math.min(grid.length,40);i++){const m=mapCols(grid[i]||[]);if(m.date!=null&&(m.amount!=null||m.debit!=null||m.credit!=null)){hi=i;map=m;break;}}
  if(hi<0)return{error:"Не нашла в файле колонки с датой и суммой. Нужна выписка в CSV или Excel, где каждая строка — одна операция."};
- const hdr=grid[hi].map(x=>String(x||"")),known=guessBank(name,hdr),bank=known||"Wise",defCur=bank==="Tochka"?"RUB":"GBP",rows=[],accs={};let odd=false;
+ // (`sure`: the file's name or its own columns say whose statement this is. A bank guessed from less - Cyrillic
+ // headers are taken for Tochka's - is good enough to file rows under until somebody corrects it, and not good enough
+ // to say what an account holds.)
+ const hdr=grid[hi].map(x=>String(x||"")),known=guessBank(name,hdr),hl=hdr.join("|").toLowerCase(),sure=/wise|barclays|tochka|точка|mosta|nebeus|revolut/i.test(name)||hl.includes("transferwise id")||(hl.includes("subcategory")&&hl.includes("memo"))||hl.includes("инн плательщика"),bank=known||"Wise",defCur=bank==="Tochka"?"RUB":"GBP",rows=[],accs={};let odd=false;
  for(let i=hi+1;i<grid.length;i++){const r=grid[i];if(!r||!r.length)continue;
   const d=parseDate(r[map.date]);
   let a=map.amount!=null?parseNum(r[map.amount]):NaN;
@@ -1133,7 +1136,7 @@ function parseGrid(grid,name){
   rows.push({d,a,cur:CURS.includes(cur)?cur:"",hasCur:!!cur,t:g("desc"),p:a>0?(g("payer")||g("party")):toBank?shop.trim():(g("party")||g("merchant")||g("payer")),h:g("holder"),tid:g("id"),own,rb:map.bal!=null?parseNum(r[map.bal]):NaN});
  }
  if(!rows.length)return{error:"Колонки нашла, но операций в файле нет."};
- stmtEnds(rows,!!known&&!odd);
+ stmtEnds(rows,sure&&!odd);
  // (A fee is folded into its payment, and the balance after it goes with the payment - unless that takes it back to an
  // earlier day than another row's: then the file's last day is not the day the balance is of.)
  const out=foldFees(rows);out.forEach(r=>{if(r.eb!=null&&out.some(q=>q.cur===r.cur&&q.d>r.d))delete r.eb;});
@@ -1146,8 +1149,8 @@ function parseGrid(grid,name){
 // through, in one direction. That also says which way the file runs (Wise: the newest row first). The row the file
 // ends at is marked with that balance (`eb`); a file that does not add up marks nothing, and is read as before.
 // Nothing is marked either where adding up proves nothing or the account is not known: a lone row (it adds up with
-// no other), a currency the page does not keep (its rows are read as the file's own), a bank that was only guessed,
-// a file with a row the page could not date (`ok` is false for the last two).
+// no other), a currency the page does not keep (its rows are read as the file's own), a bank the page is not sure
+// of, a file with a row the page could not date (`ok` is false for the last two).
 function stmtEnds(rows,ok){
  const by={};rows.forEach(r=>{(by[r.cur]||(by[r.cur]=[])).push(r);});
  if(ok)Object.keys(by).forEach(k=>{const g=by[k],n=g.length,near=(x,y)=>Math.abs(x-y)<0.006;
@@ -1225,7 +1228,7 @@ function parsePdfLines(lines,name){
  // at after the last day in it. Any row of that day carries it - the engine asks only for the day.)
  // (The PDF's balances are read without their sign. Rows that come to nothing would add up for an account in debit
  // too, with the wrong sign: such a file says nothing.)
- if(check==="ok"&&Math.abs(sum)>0.005){const to=rows.reduce((a,r)=>r.d>a?r.d:a,""),end=rows.filter(r=>r.d===to).pop();if(end)end.eb=round2(close);}
+ if(check==="ok"&&Math.abs(sum)>0.005&&/barclays|revolut|\bwise\b/i.test(all+name)){const to=rows.reduce((a,r)=>r.d>a?r.d:a,""),end=rows.filter(r=>r.d===to).pop();if(end)end.eb=round2(close);}
  const bank=/barclays/i.test(all+name)?"Barclays":/revolut/i.test(all+name)?"Revolut":/\bwise\b/i.test(all+name)?"Wise":guessBank(name,[])||"Barclays";
  const nums={};(all.match(/Account No\.?\s*\d{8}/gi)||[]).forEach(z=>{const n=z.slice(-8);nums[n]=(nums[n]||0)+1;});
  const ownAccs=Object.keys(nums),acc=ownAccs.slice().sort((a,b)=>nums[b]-nums[a])[0]||"";
@@ -1305,11 +1308,15 @@ function ingest(parsed,file,src){
  //            file was read, is what is held against a balance somebody typed and against a mark made by hand;
  //   o.balIn  when the page read it: a row of that day that comes in afterwards is after the balance.
  // The row may have been here already, from an earlier file or from before balances were read: it is marked all the
- // same. But a file is the last word on an account only when the table holds nothing of that account, on the file's
- // last day or after it, that the file itself lacks: an older export read after a newer one says nothing new.
+ // same - where it still stands on its own day and in its own bank (a row somebody moved in «Таблица» is not the row
+ // the statement ends at any more). And a file is the last word on its last day only when the table holds no row of
+ // that account and that day which the file itself lacks: an older export read after a newer one, which ends at an
+ // earlier row of the day, says nothing new. (Rows of later days need no such care: they are after the balance by
+ // their date.)
  const made=Math.min(at,+file.made>0?+file.made:at);
- const behind=r=>S.tx.concat(S.inbox).some(q=>q!==r&&q.o&&isFinite(+q.o.a)&&q.b===r.b&&q.o.cur===r.o.cur&&String(q.ac||"")===String(r.ac||"")&&q.d>=r.d&&!mine.has(q.key));
- const mark=(r,p)=>{if(p.eb==null||!r.o)return;if(behind(r)){late=true;return;}
+ const oneAc=(x,y)=>x===y||!x||!y||x.endsWith(y)||y.endsWith(x),digits=r=>String(r.ac||"").replace(/\D/g,"");
+ const behind=r=>S.tx.concat(S.inbox).some(q=>q!==r&&q.o&&isFinite(+q.o.a)&&q.b===r.b&&q.o.cur===r.o.cur&&oneAc(digits(q),digits(r))&&q.d===r.d&&!mine.has(q.key));
+ const mark=(r,p)=>{if(p.eb==null||!r.o||r.d!==p.d||r.b!==file.bank)return;if(behind(r)){late=true;return;}
   ends.push({cur:r.o.cur,d:r.d,v:p.eb});r.o.balAt=r.o.bal===p.eb?Math.max(+r.o.balAt||0,made):made;r.o.bal=p.eb;r.o.balIn=at;if(S.tx.includes(r))months.add(r.d.slice(0,7));};
  parsed.rows.forEach(p=>{
   const cur=p.cur||file.cur,key=keyOf(p);
@@ -1681,7 +1688,7 @@ function renderUpload(){
  ${S.files.length?`<section class="card"><h2>Загружено в этот раз${ui.lastTr?`<span class="note">переводов между своими убрано без вашего участия: ${ui.lastTr}</span>`:""}</h2><div class="files">${S.files.map(f=>f.error?
    `<div class="file err"><div class="fn">${esc(f.name)}</div><div>${esc(f.error)}</div></div>`:
    `<div class="file"><div class="fn" title="${esc(f.name)}">${esc(f.name)}${f.demo?' <span class="pill info">пример</span>':""}</div>
-    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc||f.acn?" · счёт ·"+esc((f.acc||f.acn).slice(-4)):""}${f.left?" · не взято: "+esc(f.left):""}${f.end?" · остаток по выписке: "+esc(f.end):f.late?" · остаток из выписки не взят: в таблице уже есть строки этого счёта позже неё":""}</div>
+    <div class="note">${f.from?dShort(f.from)+" – "+dShort(f.to)+" · ":""}операций ${f.total}${f.acc||f.acn?" · счёт ·"+esc((f.acc||f.acn).slice(-4)):""}${f.left?" · не взято: "+esc(f.left):""}${f.end?" · остаток по выписке: "+esc(f.end):f.late?" · остаток из выписки не взят: в таблице есть строки этого счёта за её последний день, которых в ней нет":""}</div>
     <div class="row"><span class="pill ok">новых ${f.added}</span>${f.dup?`<span class="pill">уже были ${f.dup}</span>`:""}${f.pdf?(f.check==="ok"?'<span class="pill ok">сошлось с остатками выписки</span>':f.check==null?'<span class="pill">остатки в выписке не найдены</span>':`<span class="pill dup">расходится с остатками на ${fmt(Math.abs(f.check),2)}</span>`):""}</div>
     <div class="row"><label class="lbl" for="fb-${f.id}">Банк</label><select id="fb-${f.id}" data-fbank="${f.id}">${opt(BANKS.map(b=>[b,b]),f.bank)}</select>
     ${f.needCur?`<label class="lbl" for="fc-${f.id}">Валюта</label><select id="fc-${f.id}" data-fcur="${f.id}">${opt(CURS.map(b=>[b,b]),f.cur)}</select>`:""}</div></div>`).join("")}</div></section>`:""}
@@ -3018,6 +3025,8 @@ const Cash=(()=>{
 //                                  that is the fresher - of a later day, or made later on the same day (`at`: when
 //                                  the statement was made; `read`: when the page read it)
 //    typed                         null | {amt, asOf, at, by} — what a founder typed, whichever of the two is in force
+//    unsure                        a statement printed a balance, and it was not taken: this bank and currency have
+//                                  two accounts with balances typed, and the statement's rows carry no number
 //    legacy, old                   a v1 balance waiting to be confirmed, and its amount (native) to pre-fill
 //    after, marks, est             native: statement rows dated after asOf; hand marks counted; anchor+after+marks
 //    same                          native, ≤ 0: the part of `after` that is payments OUT dated on the balance's own
@@ -4104,9 +4113,12 @@ const Live=(()=>{
   // whichever way the money went - the file that carried the balance ended at that row.
   // Where a bank and currency have two accounts, a row says whose it is only by a number: a statement without one
   // (Wise prints none) may be either account's, and its balance is nobody's.
-  ACC.forEach(a=>{a.typed=a.anchor;let end=null;const sole=ACC.filter(x=>x.bank===a.bank&&x.cur===a.cur).length===1;
+  // (The other account has to be one somebody keeps - with a balance typed for it. A leftover row without one takes
+  // nothing away. `unsure` is for the page to say that a statement's balance was there and could not be taken.)
+  ACC.forEach(a=>{a.typed=a.anchor;});
+  ACC.forEach(a=>{let end=null;const sole=!ACC.some(x=>x!==a&&x.bank===a.bank&&x.cur===a.cur&&x.typed);a.unsure=false;
    facts.forEach(f=>{if(f.bal==null||rowHome.get(f)!==a)return;
-    if(!sole&&!(f.ac&&a.ac.length>=3&&(f.ac.endsWith(a.ac)||a.ac.endsWith(f.ac))))return;
+    if(!sole&&!(f.ac&&a.ac.length>=3&&(f.ac.endsWith(a.ac)||a.ac.endsWith(f.ac)))){a.unsure=true;return;}
     if(!end||f.d>end.d||(f.d===end.d&&f.balAt>end.balAt))end=f;});
    if(end&&(!a.anchor||end.d>a.anchor.asOf||(end.d===a.anchor.asOf&&end.balAt>a.anchor.at)))a.anchor={amt:end.bal,asOf:end.d,at:end.balAt,read:end.balIn,by:"",file:true};});
   ACC.forEach(a=>{const A=a.anchor;a.cov=cov(a.bank);a.after=0;a.same=0;a.marks=0;a.est=null;a.gbp=null;
@@ -4345,7 +4357,7 @@ const Live=(()=>{
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
     wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
-  const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
+  const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
   const outItems=items.map(outItem),mins=days.reduce((m,x)=>Math.min(m,x.e),0);
   const outPer=X=>({key:X.key,rule:X.rule.id,per:X.per,name:X.rule.name+" за "+pname(X),pname:pname(X),start:X.start,end:X.end,due:X.due,date:X.d0,accF:r2(X.accF),accN:r2(X.accN),sheet:!!X.sheet,accP:r2(X.accP),
@@ -5519,7 +5531,7 @@ const Today=(()=>{
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
   const A=M.accounts.filter(a=>a.inPlan||a.active),known=M.accounts.filter(a=>a.anchor).length,miss=M.missing.map(k=>acc(k).name);
   const row=a=>{const A0=a.anchor,words=[];
-   if(A0){words.push(A0.file?`по выписке на ${dRu(A0.asOf)}`:`вписан ${dRu(A0.asOf)}${A0.by?", "+A0.by:""}`);if(A0.file)words.push("остаток после последнего платежа взят из самой выписки");if(a.cov&&a.cov>A0.asOf)words.push(`выписки по ${dRu(a.cov)}`);
+   if(A0){words.push(A0.file?`по выписке на ${dRu(A0.asOf)}`:`вписан ${dRu(A0.asOf)}${A0.by?", "+A0.by:""}`);if(A0.file)words.push("остаток после последнего платежа взят из самой выписки");else if(a.unsure)words.push("в выписке есть остаток, но в этом банке и валюте два счёта — чей он, выписка не говорит");if(a.cov&&a.cov>A0.asOf)words.push(`выписки по ${dRu(a.cov)}`);
     // Payments of the balance's own day that came with a later statement are taken to have left after it was typed.
     if(a.same<-0.005)words.push(`платежи за ${dRu(A0.asOf)} (${natv(round2(-a.same),a.cur)}) вычтены: считаю, что прошли после остатка`);
     if(a.stale)words.push(a.stale==="old"?`устарел · ${a.age} дн. без выписки`:`${a.age} дн. без выписки`);else if(a.handOld)words.push(`вписан ${a.handDays} дн. назад — сверьте с банком`);}
