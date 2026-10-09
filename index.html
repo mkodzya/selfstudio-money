@@ -296,7 +296,13 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .cs-rows tr.cs-r{display:grid;grid-template-columns:58px minmax(0,1fr) 96px 30px 70px 24px;column-gap:8px;align-items:start;padding:3px 0;border-bottom:1px solid var(--border);cursor:pointer}
 .cs-rows tr.cs-r td{display:block;grid-row:1;min-width:0;padding:0;border:0;line-height:28px}
 .cs-rows td.cs-dt{grid-column:1}.cs-rows td.cs-nmc{grid-column:2}.cs-rows td.cs-amc{grid-column:3}.cs-rows td.cs-cur{grid-column:4}.cs-rows td.cs-gbp{grid-column:5}.cs-rows td.cs-mo{grid-column:6}
-.cs-rows tr.cs-r:hover,.cs-rows tr.cs-open{background:var(--panel-raised)}
+/* A row pointed at, and a row that is open, stand on a lighter ground that reaches ten pixels past the row on either
+   side - drawn behind it, so nothing in the row moves when it opens. (The open row was first set in by a padding on
+   its day; Mika, 9 October 2026: «дата платежа скачет при раскрытии».) */
+.cs-rows tr.cs-r{position:relative;z-index:0}
+.cs-rows tr.cs-r::before{content:"";position:absolute;inset:0 -10px;z-index:-1;pointer-events:none}
+.cs-rows tr.cs-r:hover::before,.cs-rows tr.cs-open::before{background:var(--panel-raised)}
+.cs-rows tr.cs-open::before{top:-1px;border-top:1px solid var(--text-primary)}
 .cs-dd{font-family:var(--mono);font-size:12px;color:var(--text-muted);white-space:nowrap}
 .cs-nm{display:flex;align-items:flex-start;gap:8px;min-width:0}
 .cs-nm .sw{flex:none;margin-top:9px}
@@ -331,16 +337,18 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .cs-rows tr.cs-done .cs-nt,.cs-rows tr.cs-done .cs-at{text-decoration:line-through}
 .cs-rows tr.cs-off td,.cs-rows tr.cs-gone td{opacity:.5}
 /* Under a row: what a change has just done, in a line of words, and the row's card. The open row and its card are
-   one block between two dark lines. The card keeps to the width that is in sight (cqw: the box the list stands in). */
+   one block between two dark lines. */
 .cs-rows tr.cs-line,.cs-rows tr.cs-line td,.cs-rows tr.cs-edrow,.cs-rows tr.cs-edrow td,.cs-rows tr.cs-none,.cs-rows tr.cs-none td{display:block}
 .cs-rows tr.cs-line td{padding:5px 0 7px 66px;font-size:12.5px}
 .cs-line button{height:22px;padding:0 8px;vertical-align:baseline}
 .cs-rows tr.cs-none td{padding:7px 0}
-.cs-rows tr.cs-open{border-bottom-color:transparent;box-shadow:0 -1px 0 var(--text-primary)}
-.cs-rows tr.cs-open td.cs-dt{padding-left:8px}
-.cs-rows .tbl{container-type:inline-size}
-.cs-rows tr.cs-edrow td{padding:0;border-bottom:1px solid var(--text-primary)}
-.cs-rows tr.cs-edrow .ed-card{position:sticky;left:0;max-width:100cqw;margin:0;border:0;box-shadow:none;padding:6px 12px 14px}
+.cs-rows tr.cs-open{border-bottom-color:transparent}
+/* The list itself is ten pixels wider on either side than what is written in it: that is where the ground of a row
+   and of its card reaches, and so nothing of them is outside the list - nor is the dark line over the first row,
+   which is why it is a pixel taller at the top. */
+.cs-rows .tbl{margin:-1px -10px 0;padding:1px 10px 0}
+.cs-rows tr.cs-edrow td{padding:0;border-bottom:0}
+.cs-rows tr.cs-edrow .ed-card{margin:0 -10px;border:0;border-bottom:1px solid var(--text-primary);box-shadow:none;padding:6px 10px 14px}
 /* «Подписки»: one line of words until it is asked for. */
 .cs-fold{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
 .cs-fold p{margin:0;flex:1 1 260px}
@@ -354,7 +362,6 @@ table.grp{min-width:560px}table.rws{min-width:620px}
  .cs-vatw{display:inline;margin:0 0 0 5px}
  .cs-rows tr.cs-r td.cs-rm{grid-row:3;grid-column:2/-1;padding-left:16px}
  .cs-rows tr.cs-line td{padding-left:50px}
- .cs-rows tr.cs-open td.cs-dt{padding-left:4px}
 }
 /* The boxes of a line of «По дням». */
 .cs-mv input{height:28px;padding:4px 7px;line-height:18px;font-family:var(--mono);font-size:12px}
@@ -1634,26 +1641,26 @@ function renderLedger(){
 // Every attribute and class it puts on the page starts with cs-, which no other handler of Money's matches.
 // ---------- what unfolds, unfolds smoothly ----------
 // A row's card, a folded section, a week of «Сегодня», a day of «По дням», the page's <details>: each opens with one
-// motion — it grows to its height and comes into ink in about a fifth of a second — and what is shut by its own
+// motion — it grows to its height and comes into ink in a little under half a second — and what is shut by its own
 // button goes the same way back, a little faster (Mika, 8 October 2026: «на все раскрывания сделай приятную плавную
-// анимацию»). The page is drawn afresh at every change, so this is not a transition between two states: the motion
+// анимацию»; and of the first, at a fifth of a second: «нужно медленнее и плавнее»). It starts and ends gently. The page is drawn afresh at every change, so this is not a transition between two states: the motion
 // is played on what has just been drawn, once, and a part that is to go is folded first and only then drawn away.
 // Nothing waits on it: a reader who asked the system for less motion gets none, and for him `fold` calls back at once.
 const CALM=()=>!!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-const EASE="cubic-bezier(.2,.7,.2,1)",SHUT={height:"0px",opacity:0,paddingTop:"0px",paddingBottom:"0px",marginTop:"0px",marginBottom:"0px",borderTopWidth:"0px",borderBottomWidth:"0px"};
-function unfold(el){
+const EASE="cubic-bezier(.4,0,.2,1)",SLOW=420,QUICK=320,SHUT={height:"0px",opacity:0,paddingTop:"0px",paddingBottom:"0px",marginTop:"0px",marginBottom:"0px",borderTopWidth:"0px",borderBottomWidth:"0px"};
+function unfold(el,ms){
   if(!el||!el.animate||CALM())return;const h=el.getBoundingClientRect().height;if(!(h>0))return;
   const was=el.style.overflow;el.style.overflow="hidden";
-  const a=el.animate([SHUT,{height:h+"px",opacity:1}],{duration:220,easing:EASE});
+  const a=el.animate([SHUT,{height:h+"px",opacity:1}],{duration:ms||SLOW,easing:EASE});
   a.onfinish=a.oncancel=()=>{el.style.overflow=was;};
 }
 // `then` is what takes the part away. It is called once — when the motion ends, or at once where there is none.
-function fold(el,then){
+function fold(el,then,ms){
   if(!el||!el.animate||!el.isConnected||CALM())return then();const h=el.getBoundingClientRect().height;if(!(h>0))return then();
   // The part is held shut until `then` has taken it away; one that stays in the page (the body of a <details>) is
   // then let go, or it would still be shut when it is opened again.
   const was=el.style.overflow;el.style.overflow="hidden";
-  const a=el.animate([{height:h+"px",opacity:1},SHUT],{duration:160,easing:EASE,fill:"forwards"});
+  const a=el.animate([{height:h+"px",opacity:1},SHUT],{duration:ms||QUICK,easing:EASE,fill:"forwards"});
   let done=false;const end=()=>{if(done)return;done=true;then();a.cancel();el.style.overflow=was;};a.onfinish=end;a.oncancel=end;
 }
 // Every <details> of the page, by its own summary. (A tab that has to draw into one before it is measured — the
@@ -4938,7 +4945,8 @@ const Ed=(()=>{
   if(!x||x.g.isConnected)return x&&x.g.isConnected?x.g:null;
   const line=lineOf(x.of);if(!line||(cur&&cur.k==="row"&&cur.id===x.of.id&&(cur.at||"")===x.of.at))return null;
   if(x.inside)line.appendChild(x.g);else{let at=line;if(at.nextElementSibling&&at.nextElementSibling.matches("tr.cs-line"))at=at.nextElementSibling;at.insertAdjacentElement("afterend",x.g);}
-  fold(x.g.matches(".ed-card")?x.g:x.g.querySelector(".ed-card")||x.g,()=>x.g.remove());return x.g;
+  // … for as long as the card that comes takes to grow: together they are one motion.
+  fold(x.g.matches(".ed-card")?x.g:x.g.querySelector(".ed-card")||x.g,()=>x.g.remove(),SLOW);return x.g;
  }
  // What closes a card by doing something with its row.
  const leave=fn=>{const g=grab();fn();drop(g);};
