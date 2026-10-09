@@ -495,9 +495,10 @@
     'storage-unsynced': 'Диск не подтвердил запись: сохранённое на месте, но может не пережить сбой питания',
     'snapshots-purged': 'Старые копии удалены',
     'rates-refused': 'Курс валют от источника не принят: он неправдоподобен',
+    'rates-moved': 'Курс ушёл далеко от прежнего, но источник три дня говорит одно и то же: принят',
     'rates-damaged': 'Таблица курсов не читалась и начата заново',
   };
-  const ALARMS = ['rates-refused', 'sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'password-check-failed', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
+  const ALARMS = ['rates-refused', 'rates-moved', 'sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'password-check-failed', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
   const FIELDS = {
     doc: 'документ', rev: 'ревизия', fromRev: 'из ревизии', rows: 'строк', fromRows: 'было строк',
     snapshot: 'копия', kept: 'прежнее отложено в', count: 'сколько', days: 'старше, дней', n: 'попытка',

@@ -5504,7 +5504,7 @@ await run('rv-rates', 'what has happened is counted at the rate of its own day; 
   // Person W was owed $1,000 on the 3rd and was paid from the pound account that day: the statement shows −£757.58.
   const led = { ...ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), filed('f-w', '2026-10-03', -757.58, 'cogs', 'Person W', { at: AT2 })]), fx: { ...FX, USD: 1.25 } };
   const paidW = (M) => [item(M, 'w').state, item(M, 'w').done && item(M, 'w').done.by, item(M, 'w').exp];
-  const of = (M) => [item(M, 'u').state, item(M, 'u').exp, item(M, 'u').done.fx, item(M, 'u').done.fxDay, -item(M, 'v').cash, acct(M, 'Wise|USD').gbp, M.fx.USD];
+  const of = (M) => [item(M, 'u').state, item(M, 'u').exp, item(M, 'u').done.fx || 0, item(M, 'u').done.fxDay || '', -item(M, 'v').cash, acct(M, 'Wise|USD').gbp, M.fx.USD];
   let M = await C(withRates(led), P);
   same(of(M), ['done', round2(1000 / 1.32), 1.32, '2026-10-03', round2(2000 / 1.40), round2(500 / 1.40), 1.40],
     'the $1,000 that came on the 3rd is worth what a dollar was worth on the 3rd; the $2,000 still owed and the dollars in the account, what it is worth today');
@@ -5524,14 +5524,39 @@ await run('rv-rates', 'what has happened is counted at the rate of its own day; 
   same(item(await C(withRates(led), gap), 'u').exp, round2(1000 / 1.32), 'the 4th is not in the table: the 3rd answers for it');
   const early = plan3({ ...P, inflows: [row('u', 'Client U', 1000, '2026-09-28', { cur: 'USD', vat: false, paid: { on: '2026-09-28', at: ms('2026-09-28T12:00:00Z'), by: BY } })] });
   M = await C(withRates(led), early);
-  same([item(M, 'u').exp, item(M, 'u').done.fx], [800, 1.25], 'a payment of before the table began is counted by the rate that was typed then');
+  same([item(M, 'u').exp, item(M, 'u').done.fx || 0], [800, 0], 'a payment of before the table began is counted by the rate that was typed then - and its card names no day\'s rate, for there was none');
   // no table at all: every day's rate is the typed one, as it was before there were days
   M = await C(led, P);
-  same(of(M), ['done', 800, 1.25, '2026-10-03', 1600, 400, 1.25], 'without a table - the laptop tool, a stand that asks nobody - the page counts as it always did');
+  same(of(M), ['done', 800, 0, '', 1600, 400, 1.25], 'without a table - the laptop tool, a stand that asks nobody - the page counts as it always did');
+  same((await C({ ...led, fxo: { USD: 2 } }, P)).fx.USD, 1.25, '… and a rate of one\'s own stands over the table\'s only: without a table there is no box to take it back in');
   // a line in pounds is its own sum on any day
   const gbp = plan3({ ...P, inflows: [row('u', 'Client U', 1000, '2026-10-03', { vat: false, paid: { on: '2026-10-03', at: ms('2026-10-03T12:00:00Z'), by: BY } })] });
   M = await C(withRates(led), gbp);
-  same([item(M, 'u').exp, item(M, 'u').done.fx], [1000, 0], 'a line in pounds has no rate');
+  same([item(M, 'u').exp, item(M, 'u').done.fx || 0], [1000, 0], 'a line in pounds has no rate');
+
+  // A line closed by a row of the statement in its own currency says what the table says of that row - here a row
+  // that was read at the typed rate, 1.35, before there were days: «Касса» does not count it over behind the table's back.
+  const X = plan3({ ...P, team: [row('x', 'Person X', 1000, '2026-10-03', { cur: 'USD' })] });
+  const ledX = { ...ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), filed('f-x', '2026-10-03', -1000, 'cogs', 'Person X', { cur: 'USD', at: AT2 })]), fx: { ...FX, USD: 1.25 } };
+  const paidX = (M) => [item(M, 'x').state, item(M, 'x').exp, item(M, 'x').done.fxBy, Math.round(item(M, 'x').done.fx * 100) / 100];
+  same([paidX(await C(withRates(ledX), X)), paidX(await C(withRates(ledX, moved), X))], [['done', 740.74, 'rows', 1.35], ['done', 740.74, 'rows', 1.35]],
+    'a dollar line closed by a dollar row stands at the row\'s own pounds, £740.74, whatever the day\'s rate or today\'s');
+
+  // The made-up studio, whole: today's rates are moved a long way, and nothing that is done moves.
+  const far = JSON.parse(JSON.stringify(DAYS));
+  far[T] = { USD: 1.6, EUR: 1.35, RUB: 150, AMD: 640 };
+  const pastOf = (M) => ({
+    lines: M.items.filter((it) => it.state === 'done').map((it) => [it.id, it.exp, it.expDone, it.done.got, it.done.by]),
+    month: SECS.map((k) => M.months.by[T.slice(0, 7)][k].done),
+    taxes: M.taxes.periods.filter((p) => p.state === 'paid').map((p) => [p.key, p.paid]),
+  });
+  const studio = async (days) => pastOf(await C({ ...demoLedger(T), fxd: JSON.parse(JSON.stringify(days)) }, demoPlan(T), T, { H: 60 }));
+  const near = await studio(DAYS);
+  ok(near.lines.length > 5 && near.lines.some((l) => !String(l[0]).includes('GBP')), 'the made-up studio has lines that are done', near.lines.length);
+  const moved2 = await studio(far);
+  const differ = [];
+  for (const k of ['lines', 'month', 'taxes']) near[k].forEach((v, i) => { if (JSON.stringify(v) !== JSON.stringify(moved2[k][i])) differ.push([k, v, moved2[k][i]]); });
+  same([differ, moved2.lines.length, moved2.taxes.length], [[], near.lines.length, near.taxes.length], 'the made-up studio at today\'s rates and at rates a fifth further off: every line that is done, the month\'s «получено» and «оплачено», every tax period that is paid - the same to the penny');
 
   // On the page. The stand hands the table over; «Настройки» shows the day's rates, one line a currency.
   serve(led, P);
@@ -5567,19 +5592,20 @@ await run('rv-rates-old', 'rows in another currency filed before the day\'s rate
   // Three rows in dollars and roubles filed since 1 October at the typed rates (1.35 and 118), one of September, one in
   // pounds. The table of rates has come.
   const rows = () => [filed('o1', '2026-10-02', 2700, 'rev', 'Client U', { cur: 'USD', v: 0 }), filed('o2', '2026-10-05', -1350, 'cogs', 'Person V', { cur: 'USD' }),
-    filed('o3', '2026-10-03', -11800, 'other', 'Landlord', { cur: 'RUB' }), filed('o4', '2026-09-20', -1350, 'cogs', 'Person V', { cur: 'USD' }), filed('o5', '2026-10-02', -300, 'other', 'Tool', {})];
+    filed('o3', '2026-10-03', -11800, 'other', 'Landlord', { cur: 'RUB' }), filed('o4', '2026-09-20', -1350, 'cogs', 'Person V', { cur: 'USD' }), filed('o5', '2026-10-02', -300, 'other', 'Tool', {}),
+    (() => { const r = filed('o6', '2026-10-04', -135, 'other', 'By hand', { cur: 'USD' }); r.a = 111; r.o.h = 1; return r; })()];
   const open2 = async (name, more = {}) => { serve(ledger(rows()), planW()); store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null }; if (more.reader) asReader(); const pg = await open(name, undefined, { hash: '#settings', ...(more.reader ? { who: 'Misha' } : {}) }); await pg.waitForSelector('#fx-card'); return pg; };
   const kept = () => Object.fromEntries(store.led.doc.tx.map((r) => [r.id, [r.a, (r.o || {}).r || null]]));
   let pg = await open2('old rows');
   same([await text(pg, '#fx-ask h2'), await pg.$$eval('#fx-ask tbody tr:not(.rc-tot)', (l) => l.map((r) => [...r.cells].map((c) => c.textContent.replace(/ /g, ' '))))],
     ['Строки в валюте — по курсу своего дня?спрашивается один раз',
       [['2 окт', 'Client U', '$2,700', '1.35', '£2,000.00', '1.3', '£2,076.92'], ['3 окт', 'Landlord', '−₽11,800', '118', '£100.00', '111', '£106.31'], ['5 окт', 'Person V', '−$1,350', '1.35', '£1,000.00', '1.36', '£992.65']]],
-    'the three rows of October in another currency, each with what it stands at and what it would stand at - not the row of September, not the row in pounds');
+    'the three rows of October in another currency, each with what it stands at and what it would stand at - not the row of September, not the row in pounds, not the row whose pounds somebody typed by hand in «Таблица»');
   same(await pg.$$eval('#fx-ask tr.rc-tot', (l) => l.map((r) => r.cells[r.cells.length - 1].textContent)), ['£2,076.92', '£1,098.96', '+£77.96'], 'and what it does to the month: 76.92 more came in, 1.04 less went out');
   await shot(pg, 'rv-rates-old');
   await pg.click('#fx-ask [data-fxdo="recount"]');
   same([await puts('led', 1), kept(), await pg.$('#fx-ask'), await toastText(pg)],
-    [1, { o1: [2076.92, 1.3], o2: [992.65, 1.36], o3: [106.31, 111], o4: [1000, null], o5: [300, null] }, null, 'Пересчитано: 3 строки по курсу своего дня'],
+    [1, { o1: [2076.92, 1.3], o2: [992.65, 1.36], o3: [106.31, 111], o4: [1000, null], o5: [300, null], o6: [111, null] }, null, 'Пересчитано: 3 строки по курсу своего дня'],
     '«Пересчитать»: the three are counted over in one save and carry their rate; the rest is as it was; the question is gone');
   await pg.click('#toastUndo');
   same([await puts('led', 2), kept().o1, await pg.isVisible('#fx-ask')], [2, [2000, null], true], '«Отменить» puts them back, and the question with them');
@@ -5599,6 +5625,35 @@ await run('rv-rates-old', 'rows in another currency filed before the day\'s rate
   pg = await open2('old rows, a reader', { reader: true });
   same([await pg.$('#fx-ask'), await pg.$$eval('#fx-card input[data-fxo]', (l) => [l.length, l.every((e) => e.disabled)]), await offered(pg)], [null, [4, true], []], 'a reader sees the day\'s rates, types none of their own, and is not asked the question');
   await pg.context().close();
+});
+
+await run('rv-rates-late', 'a row never keeps the rate of a wrong day: the table is asked again before a statement is read, and a row read ahead of its day is counted over once the day is in', async () => {
+  // review, 9 October 2026: the page has the table as it was when the page opened. A statement of days that came into
+  // the stand's table a second later was read at the rate of the last day the page had, and kept it for good.
+  const wise = (rows) => ['TransferWise ID,Date,Amount,Currency,Description,Payment Reference,Payer Name,Payee Name,Merchant,Card Holder Full Name', ...rows].join('\n');
+  const shop = (d, t = 'EXAMPLE SHOP') => (store.led.doc.inbox || []).concat(store.led.doc.tx).filter((r) => r.o && (r.o.t || '').includes(t)).map((r) => [r.d, Math.abs(r.a), r.o.r, r.o.rd]);
+  const before = { '2026-10-01': DAYS['2026-10-01'], '2026-10-03': DAYS['2026-10-03'] };
+  serve(ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD')]), planW());
+  store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(before)), asked: null };
+  const pg = await open('rates, a table behind', undefined, { hash: '#upload' });
+  store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null };          // the stand's table has moved on
+  await pg.setInputFiles('#fileIn', { name: 'statement_USD.csv', mimeType: 'text/csv', buffer: Buffer.from(wise(['CARD-1,05-10-2026,-680.00,USD,Card transaction of 680.00 USD issued by EXAMPLE SHOP,,,,EXAMPLE SHOP,'])) });
+  await puts('led', 1);
+  same(shop(), [['2026-10-05', 500, 1.36, '2026-10-05']], 'the page asked for the table again before it read the statement: the row of the 5th has the rate of the 5th, not of the 3rd');
+  await pg.context().close();
+
+  // A row of today, read before today's rate was out, stands at yesterday's - and says which day that was.
+  serve(ledger([reach('Wise', '2026-10-02'), reach('Wise', '2026-10-02', 'USD'), { ...filed('f-today', T, -680, 'other', 'Shop', { cur: 'USD' }), a: 500, o: { a: -680, cur: 'USD', t: 'Shop', r: 1.36, rd: '2026-10-05' } }]), planW());
+  store.rates = { base: 'GBP', days: JSON.parse(JSON.stringify(DAYS)), asked: null };          // today's rate, 1.40, has come
+  const next = await open('rates, the day has come', undefined, { hash: '#settings' });
+  await next.waitForSelector('#fx-card');
+  await sleep(900);
+  same([store.led.puts, store.led.doc.tx.find((r) => r.id === 'f-today').a], [0, 500], 'opening the page saves nothing');
+  await next.fill('#fxo-EUR', '1.2');                                                               // somebody changes something
+  await next.press('#fxo-EUR', 'Tab');
+  const row = (await puts('led', 1)) && store.led.doc.tx.find((r) => r.id === 'f-today');
+  same([row.a, row.o.r, row.o.rd], [485.71, 1.4, T], '… and with the next change the row goes to the server at the rate of its own day: $680 at 1.40');
+  await next.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

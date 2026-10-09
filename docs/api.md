@@ -490,17 +490,20 @@ page can still send a founder to.
 
 The table is filled by the server, from one open source that takes no key
 (`moneyd/rates.py`): a day's rates are asked once, checked - the day named,
-four numbers, each within the bounds a rate could have and near the day beside
-it - and kept. Nothing asks on a timer. This door is what begins a refresh,
-when the table lacks a day and the source was last asked more than half an
-hour ago; it waits for today's rate a moment (2.5 seconds at most) and answers
-with what it has. So a source that is slow, away or wrong never holds a page:
+four numbers, each within the bounds a rate could have and near the days
+beside it - and kept. Nothing asks on a timer. This door is what begins a
+refresh, when the table lacks a day and the source was last asked more than
+half an hour ago; it waits for that refresh 2.5 seconds at most and answers
+with what it has - the whole table, when the source answers in that time. So a
+source that is slow, away or wrong never holds a page:
 the page then counts by the latest day it was given, or - where the table is
 empty, as on a dev stand, which asks nobody - by the rates typed into it.
 
-The page asks once, when it opens. It counts what has already happened - a
-payment in a statement, a row marked paid - at the rate of that day, and only
-what is still ahead, and what the accounts hold today, at the latest.
+The page asks when it opens, and once more - by somebody's own act - before
+it reads a statement whose days its copy of the table does not hold. It counts
+what has already happened - a payment in a statement, a row marked paid - at
+the rate of that day, and only what is still ahead, and what the accounts hold
+today, at the latest.
 
 ## Who may do what
 

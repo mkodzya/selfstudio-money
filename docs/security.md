@@ -809,11 +809,16 @@ and a request id; the detail is in the log.
     a day. What comes back is read strictly - four numbers, each within the
     bounds a rate could have and within 12% a day of the day beside it - never
     followed to another address, and thrown away whole when it fails, with a
-    line in the security log. What remains: a source that is wrong within
-    those bounds is believed, and a day once in the table is not asked for
-    again; the owner sees the rates in «Настройки» and can type one of their
-    own over any of them. Outbound traffic is not restricted to those two
-    names.
+    line in the security log. One wrong day cannot shut the table against the
+    true ones: a day is held against three neighbours, and three days of the
+    source that say the same are believed over the table. What remains: the
+    first day into an empty table is held by the bounds alone; a source that
+    is wrong within what a market moves in a day is believed; and a day once
+    in the table is not asked for again. The owner sees the rates in
+    «Настройки» and can type one of their own over any of them for looking
+    ahead; a statement row keeps the rate it was read at, so a day that was
+    wrong moves no row that was read before or after it was. Outbound traffic
+    is not restricted to those two names.
 13. **Python fixes arrive only with a deploy.** Each deploy builds on the newest
     3.13 patch image; nothing rebuilds by itself. `ctl selfcheck` prints the
     image's age.

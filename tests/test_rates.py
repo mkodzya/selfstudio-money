@@ -150,23 +150,79 @@ class TableTests(Case):
         self.stand.clock.tick(hours=1)
         self.assertEqual(table.refresh(), 0)
         self.assertEqual([(entry["day"], entry["reason"]) for entry in self.events("rates-refused")], [("2026-10-08", "jump")])
+        for _attempt in range(8):                                      # a day in doubt is asked for again, however often
+            self.stand.clock.tick(hours=1)
+            self.assertEqual(table.refresh(), 0)
         self.source.says = {}
         self.stand.clock.tick(hours=1)
         self.assertEqual(table.refresh(), 1)
         self.assertEqual(table.table()["days"]["2026-10-08"], GOOD)
 
-    def test_a_week_without_a_refresh_allows_three_days_of_movement_and_no_more(self):
+    def test_a_long_silence_allows_three_days_of_movement_and_no_more(self):
         table = self.table()
         table.refresh()
         self.stand.clock.tick(days=40)
         day = "2026-11-16"
-        self.source.says = {day: answer_for(day, usd=GOOD["USD"] * 1.3)}
+        away = {"2026-11-%02d" % n: rates.Refused("no-answer") for n in range(7, 16)}       # only today's day can be had
+        self.source.says = dict(away, **{day: answer_for(day, usd=GOOD["USD"] * 1.4)})
         table.refresh()
-        self.assertEqual(table.table()["days"][day]["USD"], round(GOOD["USD"] * 1.3, 6), "within 36% of the nearest day held")
-        self.source.says = {"2026-11-15": answer_for("2026-11-15", usd=GOOD["USD"] * 1.3 * 1.2)}
+        self.assertNotIn(day, table.table()["days"], "40% from the last day held, forty days back: three days of movement is 36%")
+        self.source.says = dict(away, **{day: answer_for(day, usd=GOOD["USD"] * 1.3)})
         self.stand.clock.tick(hours=1)
         table.refresh()
-        self.assertNotIn("2026-11-15", table.table()["days"], "20% from the day beside it")
+        self.assertEqual(table.table()["days"][day]["USD"], round(GOOD["USD"] * 1.3, 6))
+
+    def test_a_day_is_held_by_what_a_market_moves_in_the_days_to_its_nearest_neighbour(self):
+        # Two days back 24% would pass; the day beside it is one day away, and one day is 12%.
+        table = self.table()
+        table.refresh()
+        self.stand.clock.tick(days=1)
+        self.source.says = {"2026-10-08": answer_for("2026-10-08", usd=GOOD["USD"] * 1.2)}
+        self.assertEqual(table.refresh(), 0)
+        self.assertNotIn("2026-10-08", table.table()["days"])
+
+    def test_one_wrong_day_in_the_table_does_not_shut_it_against_the_true_ones(self):
+        # review, 9 October 2026: the first answer into an empty table is held by the bounds alone. A wrong
+        # one that got in was then the day every true answer was "too far" from, for good.
+        self.stand.clock.set(_harness.FakeClock().now.replace(day=1))           # 1 October: the table is empty
+        self.source.says = {"2026-10-01": answer_for("2026-10-01", usd=2.19)}
+        table = self.table()
+        self.assertEqual(table.refresh(), 1)
+        self.source.says = {}
+        came = []
+        for _day in range(3):
+            self.stand.clock.tick(days=1)
+            came.append(table.refresh())
+        self.assertEqual(came, [0, 0, 3], "two true days are doubted; the third has two that say the same, and all three come in")
+        said = table.table()["days"]
+        self.assertEqual([said[d]["USD"] for d in sorted(said)], [2.19, GOOD["USD"], GOOD["USD"], GOOD["USD"]])
+        self.assertEqual([entry["day"] for entry in self.events("rates-moved")], ["2026-10-04"])
+        self.stand.clock.tick(days=1)
+        self.assertEqual(table.refresh(), 1, "and from then on a true day is near to its neighbours")
+
+    def test_a_market_that_really_moved_is_believed_on_the_third_day_that_says_so(self):
+        table = self.table()
+        table.refresh()
+        fallen = lambda day: answer_for(day, rub=GOOD["RUB"] * 1.5)             # by half in a day: more than three days allow
+        self.source.says = {"2026-10-08": fallen("2026-10-08"), "2026-10-09": fallen("2026-10-09"), "2026-10-10": fallen("2026-10-10")}
+        came = []
+        for _day in range(3):
+            self.stand.clock.tick(days=1)
+            came.append(table.refresh())
+        self.assertEqual(came, [0, 0, 3])
+        self.assertEqual([entry["day"] for entry in self.events("rates-moved")], ["2026-10-10"])
+        self.assertEqual(table.table()["days"]["2026-10-08"]["RUB"], round(GOOD["RUB"] * 1.5, 6))
+        self.assertEqual(table.table()["days"]["2026-10-08"]["USD"], GOOD["USD"], "the other three of that day came in with it")
+
+    def test_a_day_nobody_could_be_asked_for_is_not_given_up(self):
+        # review, 9 October 2026: five failures of any kind dropped a past day until the process was started again.
+        self.source.says = {day: rates.Refused("no-answer") for day in ("2026-10-0%d" % n for n in range(1, 8))}
+        table = self.table()
+        for _attempt in range(8):
+            table.refresh()
+            self.stand.clock.tick(hours=1)
+        self.source.says = {}
+        self.assertEqual(table.refresh(), 7, "the connection is back: every day is asked for and comes")
 
     def test_todays_day_that_is_not_out_yet_is_no_fault_and_a_past_day_that_never_comes_is_given_up(self):
         self.source.says = {TODAY: rates.Refused("status"), "2026-10-04": rates.Refused("status")}
@@ -277,8 +333,9 @@ class SocketTests(unittest.TestCase):
         with self.assertRaises(rates.Refused) as large:
             rates.fetch_day(self.base + "/large/x", 5.0)
         self.assertEqual(large.exception.reason, "too-large")
-        with self.assertRaises(rates.Refused):
+        with self.assertRaises(rates.Refused) as missing:
             rates.fetch_day(self.base + "/nothing", 5.0)
+        self.assertEqual(missing.exception.reason, "status", "the source answered: it has no such day")
 
     def test_a_source_that_says_nothing_is_waited_for_no_longer_than_its_time(self):
         began = time.monotonic()
@@ -322,7 +379,8 @@ class DoorTests(unittest.TestCase):
 
     def test_the_first_opening_of_a_day_gets_that_days_rate_in_its_own_answer(self):
         said = self.stand.get(RATES, cookie=self.stand.session("mika")).json()
-        self.assertIn(TODAY, said["days"], "the door waited the moment it takes")
+        self.assertEqual(sorted(said["days"]), ["2026-10-0%d" % n for n in range(1, 8)],
+                         "the door waited the moment it takes, and hands over the whole table, not today alone")
 
     def test_a_source_that_hangs_holds_no_page(self):
         stand = self.stand

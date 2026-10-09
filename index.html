@@ -798,7 +798,7 @@ const fxAt=(days,d)=>{
 function fxOn(days,typed,cur,d){
  if(!cur||cur==="GBP")return 1;
  const f=fxAt(days,d);if(f)for(let i=f.at;i>=0;i--){const v=+((days[f.k[i]]||{})[cur]);if(v>0)return v;}
- return +(typed&&typed[cur])||+FX0[cur]||1;
+ return +(typed&&Object.prototype.hasOwnProperty.call(typed,cur)?typed[cur]:FX0[cur])||1;
 }
 function fxDayOn(days,cur,d){const f=fxAt(days,d);if(f)for(let i=f.at;i>=0;i--)if(+((days[f.k[i]]||{})[cur])>0)return f.k[i];return "";}
 // The table of rates by day, as the stand handed it over when the page opened ({} where there is none), and the
@@ -845,7 +845,28 @@ const plural=(n,one,few,many)=>{const a=Math.abs(n)%100,k=a%10;return a>10&&a<20
 // A statement row is turned into pounds at the rate of its own day, once: from then on the sum is the row's. Where
 // the table gave the rate, the row says so (`o.r`): a row without it was counted by a rate somebody typed.
 const rowRate=(cur,d)=>fxOn(RATES.days,S.fx,cur,d);
-function reprice(r){const cur=r.o.cur;r.a=round2(Math.abs(cur==="GBP"?r.o.a:r.o.a/rowRate(cur,r.d)));if(cur!=="GBP"&&fxDayOn(RATES.days,cur,r.d))r.o.r=rowRate(cur,r.d);else delete r.o.r;return r;}
+// (`o.rd` is the day of the table that answered. It is the row's own day - or an earlier one, when the row's day was
+// not in the table yet: today's rate is out some hours into the day. Such a row is counted over, once, when its own
+// day has come in: settleRates, below.)
+function reprice(r){const cur=r.o.cur,day=cur==="GBP"?"":fxDayOn(RATES.days,cur,r.d);r.a=round2(Math.abs(cur==="GBP"?r.o.a:r.o.a/rowRate(cur,r.d)));if(day){r.o.r=rowRate(cur,r.d);r.o.rd=day;}else{delete r.o.r;delete r.o.rd;}return r;}
+// A row that was read before its own day was in the table took the latest day before it. Once the table has a
+// nearer day, the row is counted by that - here, when the page opens. Nothing is saved for it: the change goes to
+// the server with the next thing somebody changes, and until then every page works it out the same way.
+function settleRates(){
+ S.tx.concat(S.inbox).forEach(r=>{const o=r.o;if(!o||!o.cur||o.cur==="GBP"||!(o.r>0)||!o.rd||o.h||o.rd>=r.d)return;
+  if(fxDayOn(RATES.days,o.cur,r.d)>o.rd){const was=Math.abs(r.a),sign=r.a<0?-1:1;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);r.a*=sign;}});
+}
+// The table as the stand has it now. Asked when the page opens and - by somebody's own act - before a statement is
+// read whose days the page's copy of the table does not hold yet. Never on a timer.
+async function askRates(){
+ const stop=new AbortController(),t=setTimeout(()=>stop.abort(),8000);
+ try{const q=await fetch("/api/rates",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),j=q.ok?await q.json():null;if(j&&j.days&&typeof j.days==="object"&&!Array.isArray(j.days)){RATES={days:j.days,asked:j.asked||null};clearTimeout(t);return true;}}catch(e){}
+ clearTimeout(t);return false;
+}
+async function ratesFor(days){
+ if(!API||!Object.keys(RATES.days).length)return;const T=Live.today(),lack=()=>days.some(d=>typeof d==="string"&&d>=FX_FROM&&d<=T&&!RATES.days[d]);
+ for(let n=0;n<2&&lack();n++){if(n)await new Promise(r=>setTimeout(r,1500));await askRates();}
+}
 // What the forecast engine is handed of the ledger: its rows, and the rates - the typed ones (`fx`), the table by
 // day (`fxd`) and what a person typed over it for looking ahead (`fxo`).
 const ledIn=()=>({tx:S.tx,inbox:S.inbox,rules:S.rules,fx:S.fx,fxd:RATES.days,fxo:S.fxo,history:S.history,aliases:S.aliases||{}});
@@ -934,9 +955,8 @@ async function load(){
   }
   // The rates by day, once. The door answers at once with what the stand has (it waits for today's a moment);
   // without an answer the page counts by the rates typed into it, as it did before there was a table.
-  {const stop=new AbortController(),t=setTimeout(()=>stop.abort(),8000);
-   try{const q=await fetch("/api/rates",{credentials:"same-origin",cache:"no-store",signal:stop.signal}),j=q.ok?await q.json():null;if(j&&j.days&&typeof j.days==="object"&&!Array.isArray(j.days))RATES={days:j.days,asked:j.asked||null};}catch(e){}
-   clearTimeout(t);}
+  if(!(await askRates()))await askRates();
+  settleRates();
   if(ME){if(ME.firstName)Plan.name(ME.firstName);if(ME.canWrite===false)readOnly();if(ui.tab==="people")People.show();}
  }
  if(DISK){try{const r=await fetch("/api/data",{cache:"no-store"});if(r.ok){applyState(await r.json());disk=true;sync("сохранено на диск","ok");}}catch(e){}}
@@ -1212,7 +1232,7 @@ const keyOfText=r=>(norm(r.o&&r.o.p)||norm(String((r.o&&r.o.t)||"").replace(/\(f
 const seenKey=r=>{const k=keyOf(r);return k.length>=4?r.b+"|"+(r.o.a<0?"out":"in")+"|"+k:"";};
 // Looked up as the map's own key only: a label «constructor» or «__proto__» must not be answered by Object's.
 const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.hasOwnProperty.call(a,k.toLowerCase())?a[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
-const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0)t.o.r=r.o.r;if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
+const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
@@ -1262,6 +1282,7 @@ async function handleFiles(list){
    if(!p)p=parseGrid(grid,f.name);if(p.error)throw new Error(p.error);rec.pdf=!!p.pdf;rec.check=p.check;rec.acc=p.acc||"";rec.acn=p.acn||"";
    const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length){S.own.push(...fresh);saveSettings();}
    rec.bank=p.bank;rec.cur=p.defCur;rec.total=p.rows.length;rec.from=p.rows.reduce((a,r)=>r.d<a?r.d:a,"9");rec.to=p.rows.reduce((a,r)=>r.d>a?r.d:a,"0");rec.needCur=p.rows.some(r=>!r.hasCur);rec.left=p.left||"";
+   await ratesFor(p.rows.map(r=>r.d));
    Object.assign(rec,ingest(p,rec,"file"));
   }catch(e){rec.error=e.message||"Не получилось прочитать файл.";}
   S.files.unshift(rec);
@@ -1637,7 +1658,7 @@ function fxCard(){
 // The rows in another currency that were filed since the table began and counted by a rate somebody had typed.
 // Asked once (the owner's choice of 9 October 2026, «А»): count them over at the rate of their own day, or leave
 // them. What was filed before the table began is the founders' sheet, and is not touched either way.
-const fxOld=()=>S.tx.filter(r=>real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)&&Math.abs(+r.o.a)>0&&Math.abs(+r.a)>0&&fxDayOn(RATES.days,r.o.cur,r.d));
+const fxOld=()=>S.tx.filter(r=>real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)&&!r.o.h&&Math.abs(+r.o.a)>0&&Math.abs(+r.a)>0&&fxDayOn(RATES.days,r.o.cur,r.d));
 const fxNew=r=>round2(Math.abs(+r.o.a)/rowRate(r.o.cur,r.d));
 function fxAskCard(){
  if(RO||S.fxk)return "";const rows=fxOld().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);if(!rows.length)return "";
@@ -1659,9 +1680,9 @@ function fxAskCard(){
 // «Пересчитать»: each of those rows at the rate of its own day, in one save, with «Отменить».
 function fxRecount(){
  const rows=fxOld();if(!rows.length)return;snap();
- rows.forEach(r=>{const was=Math.abs(r.a),now=fxNew(r);if(r.v)r.v=round2(r.v*now/was);r.a=(r.a<0?-1:1)*now;r.o.r=rowRate(r.o.cur,r.d);});
+ rows.forEach(r=>{const was=Math.abs(r.a),now=fxNew(r);if(r.v)r.v=round2(r.v*now/was);r.a=(r.a<0?-1:1)*now;r.o.r=rowRate(r.o.cur,r.d);r.o.rd=fxDayOn(RATES.days,r.o.cur,r.d);});
  // The rows still waiting in «Разбор» were read by the typed rate too: they go into the table at the rate of their day.
- S.inbox.forEach(r=>{if(real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0))reprice(r);});
+ S.inbox.forEach(r=>{if(real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0)){const was=r.a;reprice(r);if(r.v&&was)r.v=round2(r.v*r.a/was);}});
  saveMonths(rows.map(r=>r.d.slice(0,7)));saveInbox();renderAll();toast(`Пересчитано: ${rows.length} ${plural(rows.length,"строка","строки","строк")} по курсу своего дня`,true);
 }
 function renderSettings(){
@@ -1996,7 +2017,7 @@ const Cash=(()=>{
  const isOpen=it=>{const e=Ed.open();return !!e&&e.k==="row"&&e.id===it.id&&(e.at||"")==="plan";};
  // «в £» is what the row is counted at. Where that is more than was typed because the invoice carries VAT, the
  // cell says so: 9,750 typed and £11,700 beside it, with no word, read as a mistake.
- const gbpText=it=>it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
+ const gbpText=it=>it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.state==="done"&&it.cur!=="GBP"?it.exp:it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
  // A tax the page worked out is shown in whole units of its currency.
  const shown=it=>it.kind!=="typed"&&it.state!=="done"?Math.round(it.amt):it.amt;
  // The first thing in a line of the statement («По дням»): what can be done about it in one press. (In a month the
@@ -3247,7 +3268,10 @@ const Live=(()=>{
   // into the page (led.fx). What has already happened is counted at the rate of its own day - rateOn, gbpOn - and so
   // does not move with today's. Without a table every day's rate is the typed one, and the two are the same.
   const fx0=Object.assign({},FX0,led.fx||{}),fxd=obj(led.fxd)?led.fxd:null,fxo=obj(led.fxo)?led.fxo:{},fx={};
-  Object.keys(fx0).forEach(c=>{fx[c]=+fxo[c]>0?+fxo[c]:fxOn(fxd,fx0,c,T);});
+  // (A rate of one's own stands over the table's, and only where the table answers: without a table the typed
+  // rates are the page's, and there is no box to take an own rate back in.)
+  const dayOn=(cur,d)=>fxDayOn(fxd,cur,d);
+  Object.keys(fx0).forEach(c=>{fx[c]=+fxo[c]>0&&dayOn(c,T)?+fxo[c]:fxOn(fxd,fx0,c,T);});
   const gbp=(a,cur)=>!cur||cur==="GBP"?+a||0:(+a||0)/(+fx[cur]||1),nat=(g,cur)=>!cur||cur==="GBP"?g:g*(+fx[cur]||1);
   // (natOn: a row's pounds as the other currency, by the rate of the row's own day - so that a line a row closed
   // last month is still closed by it when today's rate has moved on.)
@@ -3282,7 +3306,7 @@ const Live=(()=>{
   let reach=sheetEnd;Object.keys(lastOf).forEach(b=>{if(lastOf[b]>reach)reach=lastOf[b];});if(reach>T)reach=T;
   const skOf=r=>{if(r.c==="tax"){const f=owner(r);return f?"tax|@"+f:"";}if(FOUNDERS.includes(r.c))return "";const l=norm(r.l);return l?r.c+"|"+l:"";};
   let L="";pool.forEach(r=>{r.sk=skOf(r);r.lk=r.sk||(FOUNDERS.includes(r.c)?"@"+r.c:r.c==="tax"?"tax|":"");if(r.d>L)L=r.d;});
-  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
+  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
  }
 
  // ---- C1–C5. who is paid, or pays, every month ----
@@ -3513,7 +3537,7 @@ const Live=(()=>{
  function compute(led,plan0,T,opts){
   if(!isD(T))throw new Error("Live.compute: T is not a date");
   opts=opts||{};
-  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
+  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
   // «Не называть сумму вывода, если остатки старше … дней»: on, eight days, unless the founders set it otherwise.
   const fresh={on:!(obj(P.fresh)&&P.fresh.on===false),days:Math.min(90,Math.max(1,Math.round(+(obj(P.fresh)&&P.fresh.days)||8)))};
@@ -3779,7 +3803,18 @@ const Live=(()=>{
   // What a line that is done was worth in pounds - counted once, at the rate of the day it was closed on (the day
   // of the row that closed it, the day of a mark), and so the same tomorrow whatever today's rate does: what came
   // where that is known, else the whole of it. (A line in pounds is its own sum on any day.)
-  const doneDay=it=>isD(it.done.on)?it.done.on:it.date,doneG=it=>Math.abs(gbpOn(it.done.got!=null?+it.done.got:it.amt*it.vk,it.cur,doneDay(it)));
+  //  - closed by rows of the statement in the line's own currency: at the rate those rows stand in the table at
+  //    (their sum over their pounds), so that «Касса» says of a payment what the table says of it - also of a row
+  //    that was read at a typed rate and left so;
+  //  - otherwise - a mark, a row in another currency: at the rate of the day it was closed on;
+  //  - a tax the page worked out and found paid: the pounds it found (`dg`).
+  const doneDay=it=>isD(it.done.on)?it.done.on:it.date;
+  const doneRate=it=>{
+   if(!it.cur||it.cur==="GBP")return{r:1,by:"",day:""};
+   const d=it.done,ids=d.by==="row"&&Array.isArray(d.rows)?d.rows:[],rs=ids.map(id=>anyRow[id]).filter(f=>f&&f.o&&f.o.cur===it.cur&&Math.abs(+f.o.a)>0&&Math.abs(+f.a)>0);
+   if(rs.length&&rs.length===ids.length){const n=sum(rs,f=>Math.abs(+f.o.a)),g=sum(rs,f=>Math.abs(+f.a));return{r:n/g,by:"rows",day:doneDay(it)};}
+   const day=doneDay(it),at=dayOn(it.cur,day);return{r:rateOn(it.cur,day),by:at?"day":"",day:at};};
+  const doneG=it=>it.dg!=null?Math.abs(+it.dg):Math.abs(it.done.got!=null?+it.done.got:it.amt*it.vk)/doneRate(it).r;
   const OPEN=["due","blind","waiting","late","carry"];
   const stand=it=>{
    it.day="";it.late=0;it.step=0;it.cash0=it.dir*gbp(it.rem*it.vk,it.cur);it.cash=0;
@@ -3895,7 +3930,7 @@ const Live=(()=>{
    const last=()=>X.rows.reduce((d,f)=>f.d>d?f.d:d,"");
    if(st.none){X.state="none";X.by="none";return;}
    if(st.closed){X.state="paid";X.by="closed";X.on=last();return;}
-   if(X.W){if(X.W.done){X.state="paid";X.by="typed";X.on=X.W.done.on;X.paid=X.settled+doneG(X.W);}else{X.state="typed";if(X.left>=1)blocked[rule.id]=true;}return;}
+   if(X.W){if(X.W.done){X.state="paid";X.by="typed";X.on=X.W.done.on;X.paid=X.settled+(X.W.done.got?doneG(X.W):Math.abs(gbpOn(X.W.amt*X.W.vk,X.W.cur,doneDay(X.W))));}else{X.state="typed";if(X.left>=1)blocked[rule.id]=true;}return;}
    if(X.owed>=1&&X.settled>=0.85*X.owed){X.state="paid";X.by="parts";X.on=last();return;}
    const p=obj(st.paid)?st.paid:null;
    if(p&&p.ok){X.state="word";X.by="word";X.on=isD(p.on)?p.on:"";return;}
@@ -3931,6 +3966,10 @@ const Live=(()=>{
   // T7. The item: what a period still owes, on its due date, on the account the tax is paid from (homeOf, above).
   PER.forEach(X=>{const rule=X.rule,st=X.st;if(!counts(rule)||X.state==="gone"||X.asked||X.W)return;
    const [bank,cur]=homeOf(rule),p=obj(st.paid)?st.paid:null,amtOf=g=>r2(nat(g,cur)),ids=X.rows.map(f=>f.id);
+    // What was left of a period when it was shut by a word or a mark, in pounds for good: its sum in the account's
+    // own currency - which is what was counted - at the rate of the day it was shut. (While a period is open, what
+    // is owed for it is still ahead, and follows today's rate like every line that is.)
+    const shut=(g,d)=>cur==="GBP"?g:gbpOn(nat(g,cur),cur,isD(d)?d:T);
    const mk=(amt,o)=>{const it=add(Object.assign({id:"t|"+X.key,src:"tax",kind:"tax",list:"taxes",blk:"tax",grp:"tax",name:rule.name+" за "+perName(X.per),key:"",cur,vat:false,vk:1,dir:-1,bank,mon:"",sk:"",lk:"",how:"rule",label:"",c0:0,fixed:false,row:"",wd:false,ptax:false,
      of:false,guess:"",who:"",chain:"",ym0:"",carry:null,moved:isD(st.date),exc:st.amt!=null,rec:null,tax:{rule:rule.id,per:X.per,key:X.key},amt,date:X.d0,on:true,paid:p,tx:arr(st.tx),notx:arr(st.notx),closed:!!st.closed,rem:amt,got:0,gotG:0,done:null,hint:null,match:ids,last:"",g:10,cov:cov(bank),ck:"",lab:"tax#"+X.key},o));
     it.fullG=gbp(it.amt,cur);X.item=it;stand(it);settle(it);return it;};
@@ -3939,9 +3978,12 @@ const Live=(()=>{
     // T9. «Оплачено» first shows the payments that may be it: on the pay account, claimed by nothing, from a month
     // before the due date to today, of any size from a tenth of what is left — nearest sum first.
     it.pays=taxPool.filter(f=>!used.has(f.id)&&onPay(rule,f)&&!notx(X).includes(f.id)&&f.d>=plus(X.d0,-31)&&f.d<=T&&amtG(f)>=0.1*X.left).sort((a,b)=>Math.abs(amtG(a)-X.left)-Math.abs(amtG(b)-X.left)).map(f=>({id:f.id,d:f.d,gbp:r2(amtG(f)),label:f.l}));return;}
-   if(X.state==="paid"&&X.by==="mark")return void mk(amtOf(X.left),{done:{by:"mark",on:p.on,rows:[],note:""},markCov:X.markCov||""});
-   if(X.state==="word")return void mk(amtOf(X.left),{done:{by:"ok",on:X.on||"",rows:[],note:""}});
-   if(X.state==="paid"&&(X.by==="row"||(X.by==="closed"&&ids.length)))return void mk(amtOf(X.paid),{done:{by:"row",on:X.on,rows:ids,note:X.by==="row"?"bill":"hand",got:amtOf(X.paid)}});
+   if(X.state==="paid"&&X.by==="mark")return void mk(amtOf(X.left),{done:{by:"mark",on:p.on,rows:[],note:""},markCov:X.markCov||"",dg:shut(X.left,p.on)});
+   if(X.state==="word")return void mk(amtOf(X.left),{done:{by:"ok",on:X.on||"",rows:[],note:""},dg:shut(X.left,X.on||X.d0)});
+   if(X.state==="paid"&&(X.by==="row"||(X.by==="closed"&&ids.length))){
+     // The pounds are the ones that were found paid; the sum in the account's own currency is the rows' own.
+     const own=cur!=="GBP"&&X.rows.length&&X.rows.every(f=>f.o&&f.o.cur===cur&&Math.abs(+f.o.a)>0),paidN=own?r2(sum(X.rows,f=>Math.abs(+f.o.a))):cur==="GBP"?amtOf(X.paid):r2(natOn(X.paid,cur,X.on||T));
+     return void mk(paidN,{done:{by:"row",on:X.on,rows:ids,note:X.by==="row"?"bill":"hand",got:paidN},dg:X.paid});}
   });
   // What a period is called for the block «Налоги»: run — still running; open — ended, not paid, not late;
   // late; parts — being paid in parts; typed — a founder's row stands for it; and the closed ones.
@@ -4212,7 +4254,7 @@ const Live=(()=>{
   // ---- the model, as plain data ----
   const doneDays={},since31=plus(T,-31);
   const outItem=it=>{const d=it.done,p=it.paid;let done=null;
-   if(d){const f=d.rows.length?anyRow[d.rows[0]]:null,day=d.by==="row"?d.on:it.date||d.on;done={by:d.by,on:d.on,day,rows:d.rows.slice(),note:d.note,label:f?alias(f.l):"",over:d.over||0,got:d.got!=null?r2(d.got):0,fx:it.cur==="GBP"?0:rateOn(it.cur,doneDay(it)),fxDay:it.cur==="GBP"?"":doneDay(it)};if(day&&day>=since31)(doneDays[day]||(doneDays[day]=[])).push(it.id);}
+   if(d){const f=d.rows.length?anyRow[d.rows[0]]:null,day=d.by==="row"?d.on:it.date||d.on;done={by:d.by,on:d.on,day,rows:d.rows.slice(),note:d.note,label:f?alias(f.l):"",over:d.over||0,got:d.got!=null?r2(d.got):0};if(it.cur!=="GBP"&&it.dg==null){const q=doneRate(it);if(q.by){done.fx=q.r;done.fxDay=q.day;done.fxBy=q.by;}}if(day&&day>=since31)(doneDays[day]||(doneDays[day]=[])).push(it.id);}
    const dl=it.src==="occ"&&!it.sk&&DL[it.chain]?DL[it.chain]:null;
    return{id:it.id,src:it.src,kind:it.kind,list:it.list,sec:it.sec,sub:!!it.sub,blk:it.blk,grp:it.grp,name:it.name,key:it.key,amt:r2(it.amt),cur:it.cur,vat:it.vat,factor:it.vk,dir:it.dir,cash:r2(it.cash),full:r2(it.dir*it.fullG),exp:r2(it.exp),expDone:r2(it.expD),
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
@@ -4514,7 +4556,7 @@ const Ed=(()=>{
 
  // What a row shows for money: the part still expected or, once it is done, the sum that came. A tax the page
  // worked out is shown in whole pounds.
- function sum(it){const done=it.state==="done",d=it.done,v=done?it.dir*it.exp:it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
+ function sum(it){const done=it.state==="done",d=it.done,v=done?(it.exp?it.dir*it.exp:it.full):it.cash||it.full,a=Math.abs(v),s=it.dir>0?"+":"−";
   // Whole pounds, like every other figure of the two tabs: the pennies are in the row's card.
   return s+fmt(Math.round(a));}
  // «в т.ч. VAT £1,950» — for an open inflow whose invoice carries the tax on top: how much of the sum shown is tax.
@@ -4674,7 +4716,7 @@ const Ed=(()=>{
   else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?"вывод: закроется тем, что возьмут фаундеры":it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
   if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
   // What has happened is counted at the rate of its own day, and the card says which.
-  if(d&&d.fx>0&&d.fxDay)out.push(`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
+  if(d&&d.fx>0)out.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
   if(d){}
   else if(it.part)out.push(it.wd?`Взято ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`:`Пришла часть: ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`);
   else if(it.state==="late")out.push(`Просрочено на ${it.lateDays} дн.: в выписках ${it.bank} по ${dRu(it.cov)} ${inn?"денег":"платежа"} нет.`);
@@ -5870,7 +5912,7 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-rule]"))){S.rules.splice(+x.dataset.rule,1);saveRules();return renderSettings();}
  if(c("[data-esave]")){r=S.tx.find(q=>q.id===ui.edit);if(!r)return;const was=r.d.slice(0,7),cat=$("#e-c").value;
   if(!cat||!$("#e-d").value)return toast("Нужны дата и блок");
-  r.d=$("#e-d").value;r.a=round2(+$("#e-a").value||0);r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=cat==="rev"?round2(+$("#e-v").value||0):0;
+  r.d=$("#e-d").value;{const a=round2(+$("#e-a").value||0);if(a!==r.a&&r.o){r.o.h=1;delete r.o.r;delete r.o.rd;}r.a=a;}r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=cat==="rev"?round2(+$("#e-v").value||0):0;
   ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast("Строка сохранена");}
  if((x=c("[data-edel]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
   r=S.tx.find(q=>q.id===ui.edit);if(r){S.tx=S.tx.filter(q=>q!==r);ui.edit=null;saveMonths([r.d.slice(0,7)]);renderAll();toast("Строка удалена");}return;}

@@ -23,18 +23,29 @@ What is asked, and of whom
 
 What is believed
     The day the answer names must be the day that was asked. Each of the four must be a number
-    within the bounds a rate of that currency could have (``BOUNDS``), and within ``JUMP`` of the
-    latest day the table already holds: a source that has gone wrong - or been made to - must not
-    be able to move the studio's figures by more than a market does in a day. An answer that fails
-    is thrown away whole, with a line in the security log, and the day is asked again later.
+    within the bounds a rate of that currency could have (``BOUNDS``), and within ``JUMP`` a day
+    of one of the three days nearest to it that the table already holds: a source that has gone
+    wrong - or been made to - must not be able to move the studio's figures by more than a market
+    does in a day. An answer that fails is thrown away whole, with a line in the security log, and
+    the day is asked again later.
+
+    Two things keep one wrong answer from shutting the table against the true ones. It is held
+    against three neighbours, not one: a day that is wrong and got in (into an empty table, say,
+    where only the bounds stand) is outvoted as soon as two true days stand beside it. And when
+    the market really has moved further than ``JUMP`` allows, the days refused for it agree with
+    each other: an answer that is as near to two other refused days as it should have been to the
+    table is believed after all (``_doubted``).
 
 When
     Never on a timer. The page asks ``GET /api/rates`` once when it opens; if the table lacks a day
     between ``settings.rates_first_day`` and today (UTC) and the last attempt was more than
     ``settings.rates_wait`` seconds ago, a refresh is begun in a thread of its own - today first,
     then the days behind it, ``settings.rates_days_per_ask`` at most - and the door waits for it
-    only a moment: a source that is slow or away never holds a page. What did not come this time
-    comes at a later opening.
+    no longer than ``settings.rates_door_wait``: a source that is slow or away never holds a page,
+    and one that answers hands the page the whole table at once. What did not come this time
+    comes at a later opening. A day the source says it does not have is given up after
+    ``settings.rates_tries_per_day`` askings; a day that could not be asked for at all - no
+    connection - is not counted against it.
 
 On disk
     ``rates/days.json``, written whole (temporary file, fsync, rename). A file that cannot be read
@@ -42,6 +53,7 @@ On disk
     begins anew - every day in it can be asked again.
 """
 import datetime
+import http.client
 import ipaddress
 import json
 import math
@@ -60,10 +72,12 @@ __all__ = ["Rates", "CURRENCIES", "BOUNDS", "JUMP", "MAX_BYTES", "fetch_day", "r
 
 #: The currencies the page counts in beside the pound, as the page names them.
 CURRENCIES = ("USD", "EUR", "RUB", "AMD")
-#: What one pound could cost in each, generously. Outside it an answer is not a rate.
-BOUNDS = {"USD": (0.5, 3.0), "EUR": (0.5, 3.0), "RUB": (20.0, 1000.0), "AMD": (100.0, 3000.0)}
-#: How far a rate may stand from the latest day the table holds, per day between them (and three
-#: times that at most): 12% is more than any of the four has moved in a day in ten years.
+#: What one pound could cost in each: about half and about twice what it has cost in the last
+#: twenty years. Outside it an answer is not a rate. An empty table is guarded by nothing else.
+BOUNDS = {"USD": (0.9, 2.2), "EUR": (0.9, 1.8), "RUB": (40.0, 500.0), "AMD": (250.0, 1500.0)}
+#: How far a rate may stand from a day the table holds, per day between them (and three times that
+#: at most): 12% is more than three of the four have moved in a day in twenty years; the fourth,
+#: the rouble, has - and ``_doubted`` is for that.
 JUMP = 0.12
 #: The source's answer for one day is about 12 KiB.
 MAX_BYTES = 512 * 1024
@@ -141,8 +155,11 @@ def fetch_day(url: str, timeout: float) -> bytes:
             raw = answer.read(MAX_BYTES + 1)
     except Refused:
         raise
-    except (urllib.error.URLError, OSError, ValueError):
-        raise Refused("no-answer")
+    except urllib.error.HTTPError as answered:
+        answered.close()
+        raise Refused("status")                 # the source answered: it has no such day (yet), or will not say
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+        raise Refused("no-answer")              # nobody answered: no connection, a broken one, a slow one
     if len(raw) > MAX_BYTES:
         raise Refused("too-large")
     return raw
@@ -163,8 +180,9 @@ class Rates:
         self._landed = threading.Event()        # set whenever a refresh has brought a day in, or ended
         self._days = None  # type: Optional[Dict[str, Dict[str, float]]]
         self._asked = None  # type: Optional[datetime.datetime]
-        self._gaps = {}  # type: Dict[str, int]     day -> how often it was asked for and did not come
+        self._gaps = {}  # type: Dict[str, int]     day -> how often the source said it did not have it
         self._noted = set()  # type: set          (day, reason) already in the security log
+        self._doubt = {}  # type: Dict[str, Dict[str, float]]     day -> what was refused as too far from the table
 
     # -- the table -----------------------------------------------------------
 
@@ -305,13 +323,14 @@ class Rates:
                     came += 1
                 except Refused as refusal:
                     with self._lock:
-                        # Today's day is simply not out yet for some hours; that is no fault of anybody's.
-                        if day != self._today().strftime(_DAY_FORMAT):
+                        # Counted against a day only when the source answered and did not have it: a day
+                        # nobody could be asked for is asked for again, and so is one that is in doubt.
+                        # (Today's day is simply not out yet for some hours; that is no fault of anybody's.)
+                        if refusal.reason not in ("no-answer", "jump") and day != self._today().strftime(_DAY_FORMAT):
                             self._gaps[day] = self._gaps.get(day, 0) + 1
                     if refusal.reason not in ("no-answer", "status") and (day, refusal.reason) not in self._noted:
                         self._noted.add((day, refusal.reason))
                         self._note("rates-refused", day=day, reason=refusal.reason)
-                self._landed.set()              # whoever waits for today's day has it now, or will not get it
             return came
         finally:
             self._asking.release()
@@ -325,18 +344,38 @@ class Rates:
                 last = refusal
         raise last
 
+    def _apart(self, day: str, other: str) -> int:
+        return max(1, abs((self._day(other) - self._day(day)).days))
+
+    @staticmethod
+    def _near(quoted: Dict[str, float], held: Dict[str, float], days: int) -> bool:
+        """Whether ``quoted`` is as near to ``held`` as a market moves in ``days`` days (three at most)."""
+        allowed = JUMP * min(3, days)
+        return all(abs(quoted[currency] - held[currency]) <= allowed * held[currency] for currency in CURRENCIES)
+
     def _believe(self, day: str, quoted: Dict[str, float]) -> None:
-        """Hold the new day against the nearest day the table has. Raises ``Refused``. Under ``self._lock``."""
-        known = sorted(self._days or {})
+        """Hold the new day against the days the table has. Raises ``Refused``. Under ``self._lock``.
+
+        Near enough to one of the three days nearest to it - by what a market moves in the days to the
+        nearest of them: believed. Else it is kept as doubted, and believed all the same once two other
+        doubted days are that near to it - then it is the table that is out of step, and not the source
+        three days running.
+        """
+        known = sorted(self._days or {}, key=lambda other: self._apart(day, other))[:3]
         if not known:
             return
-        nearest = min(known, key=lambda other: abs((self._day(other) - self._day(day)).days))
-        apart = max(1, abs((self._day(nearest) - self._day(day)).days))
-        allowed = JUMP * min(3, apart)
-        for currency in CURRENCIES:
-            before = self._days[nearest][currency]
-            if abs(quoted[currency] - before) > allowed * before:
-                raise Refused("jump")
+        reach = self._apart(day, known[0])
+        if any(self._near(quoted, self._days[other], reach) for other in known):
+            self._doubt.pop(day, None)
+            return
+        agree = [other for other, held in self._doubt.items()
+                 if other != day and self._near(quoted, held, self._apart(day, other))]
+        self._doubt[day] = quoted
+        if len(agree) >= 2:
+            self._doubt.pop(day, None)
+            self._note("rates-moved", day=day)
+            return
+        raise Refused("jump")
 
     def idle(self, seconds: float = 10.0) -> bool:
         """For tests: wait until no refresh is running. True when none is."""
