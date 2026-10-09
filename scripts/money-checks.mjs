@@ -5760,9 +5760,10 @@ await run('rv-stmt-bal', 'an account stands on the balance its statement prints 
   // Mika, 9 October 2026: «почему на проде ошибочная цифра на wise gbp». A balance typed at midday; the statement
   // loaded the day after brought three payments of that day - one out, two in. The page took the one out to have
   // left after the balance and the two in to be inside it, and the account stood below zero. (Made-up figures.)
-  const typedAt = ms('2026-10-05T12:46:00Z'), up = AT2, late = AT3;
-  const plan = (b) => plan3({ banks: [b || bal('Wise', 'GBP', 1240, '2026-10-05', { at: typedAt })] });
-  const end = (r, v, at = up) => ({ ...r, o: { ...r.o, bal: v, balAt: at } });
+  const typedAt = ms('2026-10-05T12:46:00Z'), up = AT2, late = AT3, at9 = ms('2026-10-06T09:00:00Z'), at11 = ms('2026-10-06T11:00:00Z'), at12 = ms('2026-10-06T12:00:00Z');
+  const plan = (b, more = {}) => plan3({ banks: [b || bal('Wise', 'GBP', 1240, '2026-10-05', { at: typedAt })], ...more });
+  // what a statement says the account stood at after a row: the balance, when the statement was made, when it was read
+  const end = (r, v, made = up, read = made) => ({ ...r, o: { ...r.o, bal: v, balAt: made, balIn: read } });
   const day5 = [filed('s1', '2026-10-05', 900, 'skip', '', { at: up }), filed('s2', '2026-10-05', 350, 'skip', '', { at: up }), filed('s3', '2026-10-05', -1500, 'other', 'Office rent', { at: up })];
   const s4 = filed('s4', T, -12, 'fixed', 'Notes app', { at: up });
   const wise = (M, key = 'Wise|GBP') => { const a = acct(M, key); return [a.est, a.same, a.anchor && [a.anchor.amt, a.anchor.asOf, !!a.anchor.file], a.typed && a.typed.amt]; };
@@ -5771,28 +5772,47 @@ await run('rv-stmt-bal', 'an account stands on the balance its statement prints 
   same(wise(await C(ledger([...day5, end(s4, 978)]), plan())), [978, 0, [978, T, true], 1240],
     'the statement says the account stood at 978 after its last row, of the 6th: that is fresher than what was typed for the 5th, and nothing is guessed');
   same(wise(await C(ledger([...day5, end(s4, 978)]), plan(bal('Wise', 'GBP', 1000, T, { at: late })))), [1000, 0, [1000, T, false], 1000],
-    'a balance typed for the same day after the statement was read is the fresher one, and the account stands on it');
+    'a balance typed for the same day after the statement was made is the fresher one, and the account stands on it');
   same(wise(await C(ledger([...day5, end(s4, 978)]), plan(bal('Wise', 'GBP', 1000, T, { at: ms('2026-10-06T08:00:00Z') })))), [978, 0, [978, T, true], 1000],
-    '… typed for that day before the statement was read, it is the older one');
+    '… typed for that day before the statement was made, it is the older one');
   same(wise(await C(ledger([...day5, end(s4, 978), filed('s5', T, 100, 'skip', '', { at: late }), filed('s6', T, -40, 'fixed', 'Tool', { at: late })]), plan()))[0], 1038,
-    'payments of the statement\'s last day that come with a later file are after its balance, whichever way the money went: +100 and −40');
+    'payments of the statement\'s last day that the page reads afterwards are after its balance, whichever way the money went: +100 and −40');
   same(wise(await C(ledger([end(filed('s0', '2026-10-03', -10, 'fixed', 'Tool', { at: late }), 5000, late), ...day5, end(s4, 978)]), plan()))[0], 978,
     'an older statement loaded afterwards does not take the account back to its day');
   const rev = (more) => ledger([...day5, end(s4, 978), more]);
   const M0 = await C(rev(filed('r1', T, -20, 'fixed', 'Tool', { b: 'Revolut', at: up })), plan()), M1 = await C(rev(end(filed('r1', T, -20, 'fixed', 'Tool', { b: 'Revolut', at: up }), 480)), plan());
   same([M0.missing, M0.now, M1.missing, M1.now, acct(M1, 'Revolut|GBP').est], [['Revolut|GBP'], null, [], 1458, 480],
     'an account the plan does not hold, known only by its statement: with the statement\'s balance it has one, and «Денег сейчас» is no longer withheld for it');
+  // independent reading, 9 October 2026: the moment a file was read was taken for the moment the statement was made.
+  // A statement made at 9, read at 13, is older than a balance typed at 12 and than a payment marked by hand at 11.
+  const read13 = { ...s4, at: late };
+  same(wise(await C(ledger([...day5, end(read13, 978, at9, late)]), plan(bal('Wise', 'GBP', 1000, T, { at: at12 }))))[2], [1000, T, false],
+    'a statement made in the morning and read in the afternoon does not outvote a balance typed at noon');
+  const marked40 = { other: [row('m1', 'Courier', 40, T, { paid: { on: T, at: at11, by: BY } })] };
+  // (the rows were on the page since 10; the file that says what the account stood at was made at 9 and read at 13)
+  same([wise(await C(ledger([...day5, end(s4, 978, at9, late)]), plan(null, marked40)))[0], wise(await C(ledger([...day5, end(s4, 978, at12, late)]), plan(null, marked40)))[0]], [938, 978],
+    'a payment marked by hand at 11 is not in a statement made at 9, and is counted on top of its balance; it is inside one made at 12');
+  // … and two accounts of one bank and currency: a row without a number may be either's, and its balance is nobody's
+  const two = plan3({ banks: [bal('Wise', 'GBP', 1000, '2026-10-01'), bal('Wise', 'GBP', 5000, '2026-10-01', { id: 'b-jar', name: 'Wise — копилка' })] });
+  const M2 = await C(ledger([...day5, end(s4, 978)]), two);
+  same([acct(M2, 'Wise|GBP').anchor.file || false, acct(M2, 'Wise|GBP').est, M2.now, acct(M2, 'Wise|GBP').unsure], [false, 738, 5738, true],
+    'a second account in the same bank and currency: the statement does not say whose it is, and the accounts stand on what was typed, as before - and the model says a balance was there and not taken');
+  // (second reading: a leftover second row that nobody typed a balance for is no rival, and switches nothing off)
+  const left = plan3({ banks: [bal('Wise', 'GBP', 1240, '2026-10-05', { at: typedAt }), { ...bal('Wise', 'GBP', 5000, '2026-10-01', { id: 'b-old', name: 'Wise — старая Касса' }), legacy: true }] });
+  const M3 = await C(ledger([...day5, end(s4, 978)]), left);
+  same([!!acct(M3, 'Wise|GBP').anchor.file, acct(M3, 'Wise|GBP').est, acct(M3, 'Wise|GBP').unsure], [true, 978, false], 'a second row of that bank and currency without a typed balance takes nothing away: the statement\'s balance stands');
 
   // The reader. The column is believed only when it adds up with the rows, in one direction - which is also how the
   // page knows which way the file runs.
   const HEAD = 'TransferWise ID,Date,Amount,Currency,Description,Payment Reference,Running Balance,Payer Name,Payee Name,Merchant,Card Holder Full Name';
   const LINES = ['CARD-4,06-10-2026,-12.00,GBP,Card transaction of 12.00 GBP issued by NOTES APP,,978.00,,,NOTES APP,', 'TRANSFER-3,05-10-2026,-1500.00,GBP,Sent money to Office Landlord,,990.00,,Office Landlord,,',
     'BALANCE-2,05-10-2026,350.00,GBP,Converted 415.00 EUR to 350.00 GBP,,2490.00,,,,', 'TRANSFER-1,05-10-2026,900.00,GBP,Received money from STUDIO LTD,,2140.00,STUDIO LTD,,,'];
+  const FULL = ['CARD-5,06-10-2026,-50.00,GBP,Card transaction of 50.00 GBP issued by OTHER SHOP,,928.00,,,OTHER SHOP,', ...LINES];
   const csv = (lines, head = HEAD) => [head, ...lines].join('\n');
-  serve({ ...ledger([reach('Wise', '2026-10-02')]), rules: [{ k: 'notes app', c: 'fixed', l: 'Notes app' }] }, plan());
+  serve({ ...ledger([reach('Wise', '2026-10-02')]), rules: [{ k: 'other shop', c: 'fixed', l: 'Other shop' }] }, plan());
   const pg = await open('statement balance', undefined, { hash: '#upload' });
-  const read = (text) => pg.evaluate((text) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(text), 'statement_GBP.csv'); return p.rows.map((r) => [r.tid, r.a, r.eb == null ? null : r.eb, 'rb' in r]); }, text);
-  const ends = async (text) => (await read(text)).filter((r) => r[2] != null).map((r) => [r[0], r[2]]);
+  const read = (text, name = 'statement_GBP.csv') => pg.evaluate(([text, name]) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(text), name); return p.rows.map((r) => [r.tid, r.a, r.eb == null ? null : r.eb, 'rb' in r]); }, [text, name]);
+  const ends = async (text, name) => (await read(text, name)).filter((r) => r[2] != null).map((r) => [r[0], r[2]]);
   same([await read(csv(LINES)), await ends(csv(LINES.slice().reverse()))],
     [[['CARD-4', -12, 978, false], ['TRANSFER-3', -1500, null, false], ['BALANCE-2', 350, null, false], ['TRANSFER-1', 900, null, false]], [['CARD-4', 978]]],
     'Wise prints the newest row first; another bank the oldest: either way the row the file ends at carries what the account stood at after it');
@@ -5801,55 +5821,105 @@ await run('rv-stmt-bal', 'an account stands on the balance its statement prints 
   same(await read(csv(['FEE-TRANSFER-9,06-10-2026,-0.40,GBP,Wise Charges for: TRANSFER-9,,99.60,,,,', 'TRANSFER-9,06-10-2026,-100.00,GBP,Sent money to Person X,,100.00,,Person X,,'])), [['TRANSFER-9', -100.4, 99.6, false]],
     'a fee Wise prints as a row of its own is folded into its payment, and the balance after it goes with the payment');
   same(await ends(csv(['CARD-8,06-10-2026,-50.00,GBP,Card transaction A,,950.00,,,SHOP,', 'CARD-7,06-10-2026,50.00,GBP,Refund A,,1000.00,,,SHOP,'])), [], 'two rows of one day that add up both ways do not say which came last: nothing is marked');
+  // independent reading, 9 October 2026: where adding up proves nothing, or the account is not known, nothing is marked
+  same([await ends(csv([LINES[0]])),
+    await ends(csv(['CARD-2,06-10-2026,-10.00,PLN,Shop,,90.00,,,SHOP,', 'CARD-1,05-10-2026,-100.00,PLN,Shop,,100.00,,,SHOP,'])),
+    await ends(['ID,Date,Amount,Currency,Description,Balance', '2,06-10-2026,-12.00,GBP,Shop,978.00', '1,05-10-2026,-10.00,GBP,Shop,990.00'].join('\n'), 'export.csv'),
+    await ends(['Номер,Дата,Сумма,Валюта,Описание,Остаток', '2,06.10.2026,-12.00,RUB,Магазин,978.00', '1,05.10.2026,-10.00,RUB,Магазин,990.00'].join('\n'), 'export.csv'),
+    await ends(csv(['CARD-6,,-5.00,GBP,Card transaction not yet dated,,973.00,,,SHOP,', ...LINES])),
+    await ends(csv(['FEE-TRANSFER-8,07-10-2026,-0.60,GBP,Wise Charges for: TRANSFER-8,,859.40,,,,', 'CARD-9,07-10-2026,-20.00,GBP,Card transaction B,,860.00,,,SHOP,', 'TRANSFER-8,06-10-2026,-100.00,GBP,Sent money to Person Y,,880.00,,Person Y,,']))],
+  [[], [], [], [], [], []],
+  'nothing is marked by a lone row, by rows in a currency the page does not keep, in a file whose bank was only guessed - from nothing, or from the alphabet of its headers -, in a file with a row the page could not date, or when a fee folded into its payment would take the balance back a day');
 
   // A PDF prints the balance it opens with and the one it closes with. When its rows add up from the one to the other,
   // the closing one is what the account stood at after the last day in it.
   const cell = (x0, x1, s) => ({ x0, x1, s });
-  const pdf = (closing) => [[cell(40, 80, 'Date'), cell(100, 200, 'Description'), cell(320, 380, 'Money out'), cell(400, 460, 'Money in'), cell(480, 540, 'Balance')],
-    [cell(40, 140, 'Start balance'), cell(490, 540, '1,240.00')],
+  const HEADPDF = [cell(40, 80, 'Date'), cell(100, 200, 'Description'), cell(320, 380, 'Money out'), cell(400, 460, 'Money in'), cell(480, 540, 'Balance')];
+  const lines = (rows) => rows.map((cells, i) => ({ p: 1, y: 700 - 24 * i, h: 10, cells }));
+  const pdf = (closing) => lines([HEADPDF, [cell(40, 140, 'Start balance'), cell(490, 540, '1,240.00')],
     [cell(40, 95, '5 Oct 2026'), cell(100, 250, 'Received from STUDIO LTD'), cell(410, 460, '900.00'), cell(490, 540, '2,140.00')],
     [cell(40, 95, '5 Oct 2026'), cell(100, 250, 'Office rent'), cell(325, 380, '1,500.00'), cell(490, 540, '640.00')],
     [cell(40, 95, '6 Oct 2026'), cell(100, 250, 'Notes app'), cell(340, 380, '12.00'), cell(490, 540, '628.00')],
-    [cell(40, 140, 'End balance'), cell(490, 540, closing)]].map((cells, i) => ({ p: 1, y: 700 - 24 * i, h: 10, cells }));
+    [cell(40, 140, 'End balance'), cell(490, 540, closing)]]);
+  const flat = lines([HEADPDF, [cell(40, 140, 'Start balance'), cell(490, 540, '100.00')],
+    [cell(40, 95, '5 Oct 2026'), cell(100, 250, 'Shop'), cell(340, 380, '50.00'), cell(490, 540, '150.00')],
+    [cell(40, 95, '6 Oct 2026'), cell(100, 250, 'Refund'), cell(420, 460, '50.00'), cell(490, 540, '100.00')],
+    [cell(40, 140, 'End balance'), cell(490, 540, '100.00')]]);
   const readPdf = (lines) => pg.evaluate((lines) => { const p = window.__tx.parsePdfLines(lines, 'barclays.pdf'); return [p.check, (p.rows || []).map((r) => [r.d, r.a, r.eb == null ? null : r.eb])]; }, lines);
-  same([await readPdf(pdf('628.00')), (await readPdf(pdf('700.00')))[1].filter((r) => r[2] != null)], [['ok', [['2026-10-05', 900, null], ['2026-10-05', -1500, null], ['2026-10-06', -12, 628]]], []],
-    'a PDF whose rows add up to its closing balance marks its last day with it; one that does not add up marks nothing');
+  same([await readPdf(pdf('628.00')), (await readPdf(pdf('700.00')))[1].filter((r) => r[2] != null), await readPdf(flat)],
+    [['ok', [['2026-10-05', 900, null], ['2026-10-05', -1500, null], ['2026-10-06', -12, 628]]], [], ['ok', [['2026-10-05', -50, null], ['2026-10-06', 50, null]]]],
+    'a PDF whose rows add up to its closing balance marks its last day with it; one that does not add up marks nothing - nor one whose rows come to nothing, for the PDF\'s balances are read without their sign');
 
   // On the page: the file is read, the row it ends at is marked, and the account stands on the statement.
-  await pg.setInputFiles('#fileIn', { name: 'statement_GBP.csv', mimeType: 'text/csv', buffer: Buffer.from(csv(LINES)) });
-  await puts('led', 1);
-  const marked = () => (store.led.doc.inbox || []).concat(store.led.doc.tx).filter((r) => r.o && r.o.bal != null).map((r) => [r.key.split('|').pop(), r.o.bal, r.o.balAt > 0, (store.led.doc.tx || []).some((q) => q.id === r.id)]);
-  same([marked(), await pg.evaluate(() => (window.__money.model({ H: 30 }).accounts.find((a) => a.key === 'Wise|GBP') || {}).est)], [[['CARD-4', 978, true, false]], 978],
-    'the statement is read: the row it ends at says 978, and the account stands on it while the rows still wait in «Разбор»');
-  await pg.click('.nav [data-tab="settings"]');
-  await pg.click('#view-settings .set-nav [data-tabgo="upload"]');
-  ok(/остаток по выписке: £978\.00 на 6 окт/.test(await text(pg, '#view-upload')), 'the list of files says what balance it read, and for which day', (await text(pg, '#view-upload .file')).slice(0, 200));
+  const drop = (lines) => pg.setInputFiles('#fileIn', { name: 'statement_GBP.csv', mimeType: 'text/csv', buffer: Buffer.from(csv(lines)) });
+  const toUpload = async () => { await pg.click('.nav [data-tab="settings"]'); await pg.click('#view-settings .set-nav [data-tabgo="upload"]'); };
+  const est = () => pg.evaluate(() => (window.__money.model({ H: 30 }).accounts.find((a) => a.key === 'Wise|GBP') || {}).est);
+  const marked = () => (store.led.doc.inbox || []).concat(store.led.doc.tx).filter((r) => r.o && r.o.bal != null).map((r) => [r.key.split('|').pop(), r.o.bal, r.o.balAt > 0 && r.o.balIn >= r.o.balAt, (store.led.doc.tx || []).some((q) => q.id === r.id)]);
+  let saves = 0;
+  await drop(FULL);
+  saves = await puts('led', saves + 1);
+  same([marked(), await est()], [[['CARD-5', 928, true, false]], 928], 'the statement is read: the row it ends at says 928, and the account stands on it while the rows still wait in «Разбор»');
+  await toUpload();
+  ok(/остаток по выписке: £928\.00 на 6 окт/.test(await text(pg, '#view-upload')), 'the list of files says what balance it read, and for which day', (await text(pg, '#view-upload .file')).slice(0, 200));
   await pg.click('.nav [data-tab="today"]');
   await pg.waitForSelector('#view-today [data-live="verdict"]');
-  same([await text(pg, '[data-live="acct.Wise|GBP"]'), plain(await pg.$eval('[data-live="acct.Wise|GBP"]', (e) => e.closest('.td-ar').querySelector('.td-meta').textContent))],
-    ['£978', 'по выписке на 6 окт · остаток после последнего платежа взят из самой выписки'], '«Счета» says where the figure is from');
+  const said = async () => [await text(pg, '[data-live="acct.Wise|GBP"]'), plain(await pg.$eval('[data-live="acct.Wise|GBP"]', (e) => e.closest('.td-ar').querySelector('.td-meta').textContent))];
+  same(await said(), ['£928', 'по выписке на 6 окт · остаток после последнего платежа взят из самой выписки'], '«Счета» says where the figure is from');
   await shot(pg, 'rv-stmt-bal');
   // a row filed out of «Разбор» keeps what it says of the account
   await pg.click('.nav [data-tab="inbox"]');
   await pg.click('#view-inbox [data-acceptauto]');
-  await puts('led', 2);
-  same(marked(), [['CARD-4', 978, true, true]], 'filed into the table, the row still carries the statement\'s balance');
-  // the same statement again brings nothing new and changes nothing; a typed balance of today is the fresher one
-  const before = JSON.stringify(marked());
-  await pg.click('.nav [data-tab="settings"]');
-  await pg.click('#view-settings .set-nav [data-tabgo="upload"]');
-  await pg.setInputFiles('#fileIn', { name: 'statement_GBP.csv', mimeType: 'text/csv', buffer: Buffer.from(csv(LINES)) });
+  saves = await puts('led', saves + 1);
+  same(marked(), [['CARD-5', 928, true, true]], 'filed into the table, the row still carries the statement\'s balance');
+  // independent reading, 9 October 2026: an older export read after a newer one. It ends at an earlier row of the same
+  // day, which is here already - and the table holds a later row of that account that the file lacks.
+  await pg.clock.fastForward(60000);
+  await toUpload();
+  await drop(LINES);
   await sleep(700);
-  same([JSON.stringify(marked()), await pg.evaluate(() => window.__money.model({ H: 30 }).accounts.find((a) => a.key === 'Wise|GBP').est)], [before, 978], 'the same file again: the row is marked as it was');
+  saves = store.led.puts;
+  same([marked(), await est(), /остаток из выписки не взят: в таблице есть строки этого счёта за её последний день, которых в ней нет/.test(await text(pg, '#view-upload .file'))], [[['CARD-5', 928, true, true]], 928, true],
+    'an older export read after a newer one is not the last word on the account: its balance is not taken, and the list of files says so');
+  // … and the same file again after «Очистить разбор»: the rows it brings back are inside its balance, not on top
+  await pg.click('.nav [data-tab="inbox"]');
+  await pg.click('#view-inbox [data-clearinbox]');
+  saves = await puts('led', saves + 1);
+  await pg.clock.fastForward(60000);
+  await toUpload();
+  await drop(FULL);
+  saves = await puts('led', saves + 1);
+  same([marked(), await est(), (store.led.doc.inbox || []).length > 2], [[['CARD-5', 928, true, true]], 928, true], 'the same file read again brings its rows back inside its own balance');
+  // the sheet of balances says which of the two the account stands on
   await pg.click('.nav [data-tab="today"]');
   await pg.click('#view-today .td-kpi');
   const box = K('bal') + '[data-ed-acct="Wise|GBP"] ';
-  same(await text(pg, box + '.ed-an .note'), 'по расчёту £978 · по выписке на 6 окт — она свежее остатка, вписанного 5 окт', 'the sheet of balances says which of the two the account stands on');
+  same(await text(pg, box + '.ed-an .note'), 'по расчёту £928 · по выписке на 6 окт — она свежее остатка, вписанного 5 окт', 'the sheet of balances says which of the two the account stands on');
   await pg.fill(box + '[data-ed-bamt]', '1000');
   await pg.click(K('bal') + '[data-ed-save]');
   await saved(pg);
-  same([await text(pg, '[data-live="acct.Wise|GBP"]'), plain(await pg.$eval('[data-live="acct.Wise|GBP"]', (e) => e.closest('.td-ar').querySelector('.td-meta').textContent))], ['£1,000', 'вписан 6 окт, Mika'],
-    'a balance typed now is fresher than the statement, and the account stands on it');
+  same(await said(), ['£1,000', 'вписан 6 окт, Mika'], 'a balance typed now is fresher than the statement, and the account stands on it');
+  // independent reading, 9 October 2026: a row moved to another day in «Таблица» does not take the balance with it
+  const id = store.led.doc.tx.find((r) => r.key.endsWith('CARD-5')).id;
+  saves = store.led.puts;
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  await pg.click(`#view-ledger tbody tr[data-row="${id}"]`);
+  await pg.fill('#e-d', '2026-10-01');
+  await pg.click('#view-ledger [data-esave]');
+  await puts('led', saves + 1);
+  same(marked(), [], 'the balance was of the row where it stood: moved to another day, the row does not carry it');
+  // (second reading: … and the same file read again does not put it back on the row where it stands now)
+  await toUpload();
+  await drop(FULL);
+  await sleep(700);
+  same(marked(), [], 'the file read again finds its last row on another day than its own, and marks nothing');
+  // … and a statement is as old as its file, not as the moment the page read it
+  const made = ms('2026-10-06T07:30:00Z');
+  // (second reading: a row of a later day that the file lacks does not stand in its way - it is after the balance by its date)
+  const fed = await pg.evaluate(([text, made]) => { const feed = (t, m) => window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(t), 'revolut.csv'), 'revolut.csv', m);
+    feed('ID,Date,Amount,Currency,Description\n9,20-10-2026,-5.00,GBP,Tool of a later day', 0); feed(text, made); const a = window.__money.model({ H: 30 }).accounts.find((a) => a.key === 'Revolut|GBP'); return a && a.anchor ? [a.anchor.amt, a.anchor.at, a.anchor.read > a.anchor.at] : null; },
+    [['ID,Date,Amount,Currency,Description,Balance', '2,06-10-2026,-12.00,GBP,Shop,478.00', '1,05-10-2026,-10.00,GBP,Shop,490.00'].join('\n'), made]);
+  same(fed, [478, made, true], 'a file made at 7:30 and read at noon says what the account stood at at 7:30');
   await pg.context().close();
 });
 
