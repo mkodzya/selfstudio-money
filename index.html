@@ -2245,7 +2245,7 @@ const Cash=(()=>{
  function planView(adding){
   const m=cu.month,L=M.months.list,i=L.indexOf(m),ymT=M.T.slice(0,7),mn=MONF[+m.slice(5)-1].toLowerCase();
   const sw=`<div class="cs-month" id="cs-month"><button class="cs-step" data-cs-mon="-1"${i>0?"":" disabled"} aria-label="Предыдущий месяц">‹</button><b class="cs-mname" id="cs-mname">${ymFull(m)}</b><button class="cs-step" data-cs-mon="1"${i<L.length-1?"":" disabled"} aria-label="Следующий месяц">›</button>
-   <span class="cs-note">${m<ymT?"месяц прошёл":m===ymT?`идёт · сегодня ${dRuF(M.T)}`:"впереди"}</span>${m!==ymT?'<button class="sm ghost" data-cs-mon="now">К текущему месяцу</button>':""}</div>`;
+   <span class="cs-note">${m<ymT?"месяц прошёл":m===ymT?`идёт · сегодня ${dRuF(M.T)}`:m>M.months.to60?"впереди · дальше 60 дней: в «хватит ли денег» и «Можно вывести» не входит":"впереди"}</span>${m!==ymT?'<button class="sm ghost" data-cs-mon="now">К текущему месяцу</button>':""}</div>`;
   // A typed row that was not closed stays in the month of its date. From the running month a founder is told that
   // earlier months still hold some, and is taken there.
   const left=m===ymT?M.items.filter(it=>it.src!=="tax"&&it.open&&it.ym<ymT):[],last=left.reduce((a,it)=>it.ym>a?it.ym:a,"");
@@ -3182,9 +3182,10 @@ const Cash=(()=>{
 //                                  the month; div the three founders' blocks and their personal taxes, as one
 //    accrued                       what the month itself accrues in taxes, by every rule that counts
 //    M_EXP                         blocks.result.total
-//  months{list[], by{[ym]}}        the monthly constructor. list: the months the switcher walks — from the month of
-//                                  T to that of T+60, any earlier month that holds a line, any later one that holds
-//                                  a stored row. by[ym][list] = {rows[], expected, done}: line ids in date order
+//  months{list[], by{[ym]}, to60, more}  the monthly constructor. list: the months the switcher walks — from the
+//                                  month of T to the later of that of T+60 (`to60`) and `more` months after T's (six,
+//                                  unless opts.months says otherwise), any earlier month that holds a line, any later
+//                                  one that holds a stored row. Rows that repeat are written out that far too. by[ym][list] = {rows[], expected, done}: line ids in date order
 //                                  (undated last), for every month that holds a line. by[ym].tax = {gbp, rules[{id,
 //                                  name, gbp, due}]}: what the month itself accrues in taxes, and when that falls due
 //  clients[]                       {key, name, mark:"vat"|"no", set, last, banks[{bank, vat}], show, rows[], odd} —
@@ -3587,6 +3588,11 @@ const Live=(()=>{
   opts=opts||{};
   const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
+  // How far «Касса» by months is drawn (the owner's decision of 9 October 2026: «продли кассу на 6 месяцев»): the
+  // running month and six after it, with the rows that repeat written out in each. The verdict, «Можно вывести» and
+  // every day's balance still look sixty days ahead and no further - `months: 0` is the page as it was, and the
+  // check `rv-months6` holds everything of the first sixty days to it.
+  const MORE=opts.months>=0?Math.min(24,Math.round(opts.months)):6,ymFar=ymAdd(ymT,MORE);
   // «Не называть сумму вывода, если остатки старше … дней»: on, eight days, unless the founders set it otherwise.
   const fresh={on:!(obj(P.fresh)&&P.fresh.on===false),days:Math.min(90,Math.max(1,Math.round(+(obj(P.fresh)&&P.fresh.days)||8)))};
   const SER=seriesOf(R),find=linker(R,SER),byPool=Object.create(null);pool.forEach(r=>{byPool[r.id]=r;});
@@ -3615,7 +3621,7 @@ const Live=(()=>{
   // rec.from to rec.to — however old, back to two years before this month — each overridden by what a founder did
   // to that one month (rec.x[ym]). Nothing else is in the plan: no item comes from history.
   const items=[],byId={},rowIds={},add=it=>{items.push(it);byId[it.id]=it;return it;};
-  const genFrom=ymAdd(ymT,-24),genTo=FAR.slice(0,7);
+  const genFrom=ymAdd(ymT,-24),genTo=FAR.slice(0,7)>ymFar?FAR.slice(0,7):ymFar;
   const linkOf=(k,r)=>{
    if(k==="div"&&!r.ptax)return{lk:"@",sk:"",how:"block",blk:"div",label:""};
    const f=k==="div"?(FOUNDERS.includes(r.f)?r.f:""):k==="taxes"?owner({c:"tax",l:r.name}):null;
@@ -3927,7 +3933,7 @@ const Live=(()=>{
    for(let n=perStep(rule.per,p,1);dueOf(rule,n)<rule.from;n=perStep(rule.per,n,1))p=n;
    const lookTo=rule.born>rule.from?rule.born:rule.from,mk=(q,look)=>{const key=rule.id+"|"+q.key,st=obj(TX.per[key])?TX.per[key]:{},due=dueOf(rule,q);
     PER.push({rule,ri,key,per:q.key,start:q.start,end:q.end,due,st,d0:isD(st.date)?st.date:due,look,cur:acctOf(payAcct(rule)||"|GBP")[1],state:"",by:"",paid:0,found:0,left:0,owed:0,rows:[],parts:[],W:null,item:null});};
-   mk(p,true);rule.first=perStep(rule.per,p,1).key;for(let n=perStep(rule.per,p,1);n.start<=FAR;n=perStep(rule.per,n,1))mk(n,dueOf(rule,n)<lookTo);});
+   mk(p,true);rule.first=perStep(rule.per,p,1).key;for(let n=perStep(rule.per,p,1);n.start<=(FAR>mEnd(genTo)?FAR:mEnd(genTo));n=perStep(rule.per,n,1))mk(n,dueOf(rule,n)<lookTo);});
   PER.sort((a,b)=>a.d0<b.d0?-1:a.d0>b.d0?1:a.ri-b.ri||(a.per<b.per?-1:1));
   const perBy={};PER.forEach(X=>{perBy[X.key]=X;const a=factsOf(X.rule,X.start,X.end);X.accF=a.g;X.accN=a.n;X.sheet=a.sheet;
    X.accr=accr.filter(c=>c.rule===X.rule.id&&c.day>=X.start&&c.day<=X.end);X.accP=sum(X.accr,c=>c.v);});
@@ -4210,8 +4216,8 @@ const Live=(()=>{
   const counted_=it=>!["off","empty","doubt","missed"].includes(it.state);
   items.forEach(it=>{it.sec=it.sub?"subs":it.list;
    it.exp=!counted_(it)?0:it.done?doneG(it):Math.abs(it.fullG);it.expD=!it.exp?0:it.state==="done"?it.exp:it.gotG>0?Math.min(it.exp,it.gotG):0;});
-  const months={},m60=T60.slice(0,7),mset=new Set();for(let m=ymT;m<=m60;m=ymAdd(m,1))mset.add(m);
-  items.forEach(it=>{if(it.ym<=m60||it.src==="row")mset.add(it.ym);(months[it.ym]||(months[it.ym]={})).any=1;});
+  const months={},m60=T60.slice(0,7),mTo=m60>ymFar?m60:ymFar,mset=new Set();for(let m=ymT;m<=mTo;m=ymAdd(m,1))mset.add(m);
+  items.forEach(it=>{if(it.ym<=mTo||it.src==="row")mset.add(it.ym);(months[it.ym]||(months[it.ym]={})).any=1;});
   mset.forEach(m=>{months[m]=months[m]||{};});
   Object.keys(months).forEach(m=>{const o=months[m]={};SECS.forEach(k=>{const rs=items.filter(it=>it.ym===m&&it.sec===k).sort(byItem);o[k]={rows:rs.map(it=>it.id),expected:r2(sum(rs,it=>it.exp)),done:r2(sum(rs,it=>it.expD))};});});
   // What each month of the constructor accrues in taxes, rule by rule, and when that falls due — «За октябрь
@@ -4335,7 +4341,7 @@ const Live=(()=>{
      first:r.first||""})),periods:PER.filter(X=>X.state!=="gone").map(outPer)},
    verdict:{id,asOf:id!=="v0"&&id!=="vi"&&!nowIsToday?nowDate:"",subs,short:lack,lowRes:r2(lowRes)},cards,
    month:{ym:ymT,inInbox:r2(inInbox),through:mThrough,byWord:r2(byWord),before:{ym:prev,in:r2(before.in),out:r2(before.out)},blocks,accrued:r2(accrued),M_EXP:blocks.result.total},
-   months:{list:[...mset].sort(),by:months},clients,helper};
+   months:{list:[...mset].sort(),by:months,to60:m60,more:MORE},clients,helper};
  }
 
  // «Что из этого уже прошло?» — for the sheet where a balance is typed. The open lines of one account dated on or
