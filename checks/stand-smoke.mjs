@@ -841,6 +841,74 @@ try {
   const afterSheet = await ledgerAt(context);
   ok(JSON.stringify(afterSheet.doc).includes(sheetMark), 'the row of the Excel file reached the ledger at the door', { rev: afterSheet.rev, page: sheetRow });
 
+  // -- who may do what --
+  // The owner lets somebody in from the page; that somebody only looks. The link and the password never leave this
+  // process: what is shown of them is whether they are there.
+  section('the owner lets a reader in from «Настройки → Люди», and the reader\'s page saves nothing');
+  {   // a block of its own: the names below are this walk's
+  must(await quiet(page), 'the page comes to rest before «Люди» is opened', await pill(page));
+  await page.click('.nav [data-tab="settings"]');
+  await page.click('#view-settings .set-nav [data-tabgo="people"]');
+  await page.waitForSelector('#view-people [data-pp-open="misha"]');
+  const lines = await page.locator('#view-people .ppl-row').count();
+  ok(lines === 3 && responses.some((r) => r.method === 'GET' && r.path === '/api/people' && r.status === 200), '«Люди» lists the three logins of the stand, from the owner\'s door', lines);
+  await page.click('#view-people [data-pp-open="misha"]');
+  await page.click('#view-people [data-pp-link]');
+  await page.fill('#pp-own', PASSWORD);
+  await page.click('#view-people [data-pp-issue]');
+  let given = '';
+  try {
+    await page.waitForSelector('#pp-link', { timeout: 20000 });
+    given = await page.inputValue('#pp-link');
+  } catch (e) {
+    await picture(page, 'people-link');
+  }
+  must(given.startsWith(BASE + '/set-password#t=') && /#t=[A-Za-z0-9_-]{43}$/.test(given), 'after the owner\'s password the page shows a one-time link for Misha', { shown: !!given, screen: given ? undefined : await screen(page) });
+  await page.click('#view-people [data-pp-x]');
+  ok(!(await page.content()).includes('set-password#t='), 'the link is gone from the page once its card is shut');
+  await page.click('.nav [data-tab="today"]');
+
+  const guest = await openContext(browser);
+  const theirs = await guest.newPage();
+  await go(theirs, given);
+  must(await passwordField(theirs), 'the link opens /set-password in another browser', await screen(theirs));
+  const boxes = theirs.locator('input[type="password"]');
+  for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).fill(PASSWORD);
+  await submit(theirs, boxes.first());
+  const reader = await until(async () => {
+    const answer = await meOf(guest);
+    return answer.status === 200 ? answer : null;
+  }, 20000);
+  must(reader && reader.json && reader.json.id === 'misha' && reader.json.role === 'reader' && reader.json.canWrite === false && reader.json.canManage === false,
+    'the link signs Misha in, and /api/me says a reader: may not write, manages nobody', reader && reader.json);
+  mark = responses.length;
+  await go(theirs, BASE + '/');
+  try {
+    await theirs.waitForFunction(() => window.__cash && window.__cash.state() && window.__money && window.__money.readOnly === true, null, { timeout: 30000 });
+  } catch (e) {
+    await picture(theirs, 'reader-page');
+    must(false, 'the reader\'s page loads both documents and knows that it only looks', await screen(theirs));
+  }
+  await theirs.click('.nav [data-tab="cash"]');
+  await sleep(2500);
+  // (The answer of the set-password door may be heard a moment after the mark: it is the link's, not the page's.)
+  const sent = responses.slice(mark).filter((r) => r.method !== 'GET' && r.method !== 'HEAD' && r.path.startsWith('/api/') && r.path !== '/api/auth/setup');
+  ok(sent.length === 0, 'a reader\'s page reads, and sends nothing else: no save when it opens, none after', sent.map((r) => `${r.method} ${r.path} ${r.status}`));
+  const drawn = await theirs.evaluate(() => ({ say: document.querySelector('#roSay').textContent, shown: !document.querySelector('#roSay').hidden, boxes: document.querySelectorAll('#view-cash input.cs-amt').length, rows: document.querySelectorAll('#view-cash tr.cs-r').length }));
+  ok(drawn.shown && /только просмотр/.test(drawn.say) && drawn.boxes === 0 && drawn.rows > 0, 'it says «только просмотр», and the sums of «Касса» are figures, not boxes', drawn);
+  const refused = await expecting([/403/], () => theirs.evaluate(async () => {
+    const answer = await fetch('/api/founder/money', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base: 0, doc: '{"tx":[]}' }) });
+    return [answer.status, (await answer.json()).error];
+  }));
+  ok(refused[0] === 403 && refused[1] === 'read_only', 'a save sent from it by hand is refused by the server: 403 read_only', refused);
+  const sheet = await door('GET', '/data', { cookie: await cookieOf(guest) });
+  const markup = sheet.bytes.toString('utf8');
+  ok(sheet.status === 200 && markup.includes('data-state="reader"') && markup.includes('data-entries="[]"'), 'the reader\'s /data is the reader\'s: no security log in its markup', { status: sheet.status });
+  const others = await door('GET', '/api/people', { cookie: await cookieOf(guest) });
+  ok(others.status === 403 && others.json && others.json.error === 'not_owner', 'and the owner\'s list answers the reader 403 not_owner', { status: others.status });
+  await guest.close();
+  }
+
   // -- a session closed on the server --
   section('a session closed from `ctl` shuts the page');
   must(await quiet(page), 'the page comes to rest before its session is closed', await pill(page));

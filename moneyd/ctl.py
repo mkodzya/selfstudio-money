@@ -256,10 +256,14 @@ def _rev_of(body: bytes) -> Optional[int]:
 
 
 def _usable_login(stand: _Stand) -> str:
-    """A founder an internal session can be made for: the first one that may sign in."""
-    for user in stand.auth.users.list():
-        if user.can_sign_in:
+    """A login an internal session can be made for: the first that may sign in and may save - the
+    owner, unless the owner is disabled - or, where nobody may save, the first that may sign in."""
+    users = [user for user in stand.auth.users.list() if user.can_sign_in]
+    for user in users:
+        if user.role in ("owner", "editor"):
             return user.login
+    if users:
+        return users[0].login
     raise _Failed("every founder's login is disabled, so no session can be made for this command")
 
 
@@ -568,8 +572,9 @@ def _user_list(ctl: _Ctl, args: Any) -> int:
         may = "yes" if user.can_sign_in else ("no: disabled" if user.listed else "no: not in MONEY_FOUNDERS")
         password = "set %s" % user.password_set_at if user.has_password else "not set"
         link = "valid until %s" % user.invite_expires if user.invite_expires else "-"
-        rows.append((user.login, user.first_name, may, password, link))
-    _table(ctl, ("login", "name", "may sign in", "password", "one-time link"), rows)
+        # The role stands last: the columns before it are what the deploy rehearsals read, as they always were.
+        rows.append((user.login, user.first_name, may, password, link, user.role))
+    _table(ctl, ("login", "name", "may sign in", "password", "one-time link", "role"), rows)
     return EXIT_OK
 
 

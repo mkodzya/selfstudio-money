@@ -45,7 +45,10 @@ section { margin: 0 0 26px; }
 [data-when] { display: none; }
 body[data-state="form"] [data-when~="form"],
 body[data-state="ending"] [data-when~="ending"],
-body[data-state="signed-in"] [data-when~="signed-in"] { display: block; }
+body[data-state="signed-in"] [data-when~="signed-in"],
+body[data-state="owner"] [data-when~="owner"],
+body[data-state="editor"] [data-when~="editor"],
+body[data-state="reader"] [data-when~="reader"] { display: block; }
 
 label { display: block; margin: 14px 0 6px; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 input[type="text"], input[type="password"] {

@@ -45,6 +45,12 @@ SETUP = "/api/auth/setup"
 LOGOUT = "/api/auth/logout"
 LEDGER = "/api/founder/money"
 PLAN = "/api/founder/money/cash"
+PASSWORD_DOOR = "/api/auth/password"
+PEOPLE = "/api/people"
+PEOPLE_UPDATE = "/api/people/update"
+PEOPLE_LINK = "/api/people/link"
+#: A second password the rules accept, for the door that changes one.
+NEW_PASSWORD = "another horse battery staple"
 JSON = {"Content-Type": "application/json"}
 
 #: BUILD-SPEC 3: "the exact list of paths that answer without a session is pinned". Here.
@@ -71,6 +77,7 @@ DOORS = (
     ("POST /api/auth/setup", (("POST", SETUP),)),
     ("POST /api/auth/logout", (("POST", LOGOUT),)),
     ("GET /logout", (("GET", "/logout"),)),
+    ("POST /api/auth/password", (("POST", PASSWORD_DOOR),)),
     ("GET / and GET /index.html", (("GET", "/"), ("GET", "/index.html"))),
     ("GET /money/vendor/…", (("GET", "/money/vendor/pdf.min.js"), ("GET", "/money/vendor/pdf.worker.min.js"),
                              ("GET", "/money/vendor/xlsx.full.min.js"))),
@@ -79,6 +86,10 @@ DOORS = (
     ("The platform's old links", (("GET", "/tracker/board"), ("GET", "/dashboard"), ("GET", "/money/"),
                                   ("GET", "/money/index.html"))),
     ("GET /api/me", (("GET", "/api/me"),)),
+    ("GET /api/people", (("GET", PEOPLE),)),
+    ("POST /api/people", (("POST", PEOPLE),)),
+    ("POST /api/people/update", (("POST", PEOPLE_UPDATE),)),
+    ("POST /api/people/link", (("POST", PEOPLE_LINK),)),
     ("GET", (("GET", LEDGER), ("GET", PLAN))),
     ("PUT", (("PUT", LEDGER), ("PUT", PLAN))),
 )
@@ -88,7 +99,7 @@ TABLE_ONLY = (("GET", "/robots.txt"), ("GET", "/favicon.ico"), ("GET", "/healthz
 GENERIC = ("Conventions", "Every other request", "What every request passes first")
 
 #: Refusals of the code that belong to ``ctl`` and have no door (the document: "What has no door").
-NO_DOOR = {"unknown_login", "login_disabled", "no_such_snapshot", "bad_snapshot", "refused"}
+NO_DOOR = {"no_such_snapshot", "bad_snapshot", "refused"}
 
 #: Root is not stopped by a directory's mode, so "the disk refuses" cannot be staged for it.
 CAN_DENY = hasattr(os, "geteuid") and os.geteuid() != 0
@@ -518,6 +529,21 @@ class AnswerColumnTests(unittest.TestCase):
             return stand.post(SETUP, {"token": stand.invite("misha"), "password": PASSWORD}, cookie=cookie)
         if (row.method, row.path) == ("POST", LOGOUT):
             return stand.post(LOGOUT, {}, cookie=cookie)
+        if (row.method, row.path) == ("POST", PASSWORD_DOOR):
+            if cookie:                      # a password given without a link closes the sessions before it
+                stand.set_password("mika")
+                cookie = stand.session("mika")
+            return stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD}, cookie=cookie)
+        if (row.method, row.path) == ("POST", PEOPLE):
+            self.added = getattr(self, "added", 0) + 1
+            return stand.post(PEOPLE, {"login": "anna%d" % self.added, "name": "Anna"}, cookie=cookie)
+        if (row.method, row.path) == ("POST", PEOPLE_UPDATE):
+            return stand.post(PEOPLE_UPDATE, {"login": "misha", "role": "editor"}, cookie=cookie)
+        if (row.method, row.path) == ("POST", PEOPLE_LINK):
+            if cookie:
+                stand.set_password("mika")
+                cookie = stand.session("mika")
+            return stand.post(PEOPLE_LINK, {"login": "vanya", "password": PASSWORD}, cookie=cookie)
         if row.method == "PUT":
             text = ledger() if row.path == LEDGER else plan()
             return stand.put(row.path, {"base": 0, "doc": text}, cookie=cookie)
@@ -883,6 +909,7 @@ def refusals_of_a_document_put(path: str, kind: str) -> Callable[[unittest.TestC
             limit = stand.settings.put_limit(kind)
             lines = ("Origin: " + stand.origin, "Content-Type: application/json")
             out["no session"] = stand.put(path, good)
+            out["a reader"] = stand.put(path, good, cookie=stand.session("misha"))
             out["a foreign origin"] = stand.put(path, good, cookie=cookie, origin="https://evil.example")
             out["not json"] = stand.put(path, body=b"{}", cookie=cookie, headers={"Content-Type": "text/plain"})
             out["no length"] = bare(stand.raw(head(stand, "PUT", path, *lines, cookie=cookie), half_close=True))
@@ -911,6 +938,72 @@ def refusals_of_a_document_put(path: str, kind: str) -> Callable[[unittest.TestC
     return provoke
 
 
+def refusals_of_password(case: unittest.TestCase) -> Dict[str, Any]:
+    out = {}    # type: Dict[str, Any]
+    with _harness.Stand() as stand:
+        stand.set_password("misha")
+        cookie = stand.session("misha")                 # one's own password: a reader has this door too
+        good = {"current": PASSWORD, "password": NEW_PASSWORD}
+        out["no session"] = stand.post(PASSWORD_DOOR, good)
+        out["no current password"] = stand.post(PASSWORD_DOOR, {"password": NEW_PASSWORD}, cookie=cookie)
+        out["a wrong current password"] = stand.post(PASSWORD_DOOR, {"current": "wrong " + PASSWORD,
+                                                                    "password": NEW_PASSWORD}, cookie=cookie)
+        out["a weak password"] = stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": "short"}, cookie=cookie)
+        for _attempt in range(12):
+            last = stand.post(PASSWORD_DOOR, {"current": "wrong " + PASSWORD, "password": NEW_PASSWORD}, cookie=cookie)
+        out["after ten failures"] = last
+    with _harness.Stand() as stand:
+        stand.set_password("misha")
+        cookie = stand.session("misha")
+        # The password is stored, and then the sessions file cannot be written: its lock is held by
+        # somebody else (ctl is a second process) for longer than the door waits.
+        stand.auth.sessions = auth.Sessions(stand.data_dir, stand.clock, lock_timeout=0.05)
+        with store.FileLock(os.path.join(stand.data_dir, "auth", ".sessions.json.lock")):
+            out["the new sign-in cannot be written"] = stand.post(PASSWORD_DOOR, {"current": PASSWORD, "password": NEW_PASSWORD},
+                                                                  cookie=cookie)
+    return out
+
+
+def refusals_of_people(path: str, method: str, body: Any) -> Callable[[unittest.TestCase], Dict[str, Any]]:
+    """What every door of the owner's says to somebody who is not the owner, and to nobody."""
+    def provoke(case: unittest.TestCase) -> Dict[str, Any]:
+        out = {}    # type: Dict[str, Any]
+        with _harness.Stand() as stand:
+            stand.set_password("mika")
+            owner, reader = stand.session("mika"), stand.session("misha")
+            stand.auth.update_person("vanya", by="mika", role="editor")
+            ask = stand.get if method == "GET" else lambda where, **options: stand.post(where, body, **options)
+            out["no session"] = ask(path)
+            out["a reader"] = ask(path, cookie=reader)
+            out["an editor"] = ask(path, cookie=stand.session("vanya"))
+            if path == PEOPLE and method == "POST":
+                out["a login that is not one"] = stand.post(path, {"login": "Anna Maria", "name": "Anna"}, cookie=owner)
+                out["no name"] = stand.post(path, {"login": "anna"}, cookie=owner)
+                out["a founder's login"] = stand.post(path, {"login": "misha", "name": "Another"}, cookie=owner)
+                for number in range(auth.PEOPLE_MAX - 3):
+                    case.assertEqual(stand.post(path, {"login": "p%d" % number, "name": "P"}, cookie=owner).status, 200)
+                out["one more than the stand holds"] = stand.post(path, {"login": "last", "name": "Last"}, cookie=owner)
+            if path == PEOPLE_UPDATE:
+                out["nothing to change"] = stand.post(path, {"login": "misha"}, cookie=owner)
+                out["a role that is not one"] = stand.post(path, {"login": "misha", "role": "owner"}, cookie=owner)
+                out["nobody's login"] = stand.post(path, {"login": "nobody", "name": "N"}, cookie=owner)
+                out["the owner's own role"] = stand.post(path, {"login": "mika", "role": "reader"}, cookie=owner)
+                out["the owner disabled"] = stand.post(path, {"login": "mika", "disabled": True}, cookie=owner)
+            if path == PEOPLE_LINK:
+                wrong = {"login": "misha", "password": "wrong " + PASSWORD}
+                out["a wrong password"] = stand.post(path, wrong, cookie=owner)
+                out["no password"] = stand.post(path, {"login": "misha"}, cookie=owner)
+                out["nobody's login"] = stand.post(path, {"login": "nobody", "password": PASSWORD}, cookie=owner)
+                out["the owner's own login"] = stand.post(path, {"login": "mika", "password": PASSWORD}, cookie=owner)
+                stand.auth.set_disabled("vanya", True, by="mika")
+                out["a disabled login"] = stand.post(path, {"login": "vanya", "password": PASSWORD}, cookie=owner)
+                for _attempt in range(12):
+                    last = stand.post(path, wrong, cookie=owner)
+                out["after ten failures"] = last
+        return out
+    return provoke
+
+
 def nothing_of_its_own(case: unittest.TestCase) -> Dict[str, Any]:
     return {}
 
@@ -925,6 +1018,11 @@ PROVOCATIONS = {
     "GET /data": refusals_of_a_session_page("/data"),
     "The platform's old links": refusals_of_a_session_page("/dashboard"),
     "GET /api/me": refusals_of_a_session_page("/api/me"),
+    "POST /api/auth/password": refusals_of_password,
+    "GET /api/people": refusals_of_people(PEOPLE, "GET", None),
+    "POST /api/people": refusals_of_people(PEOPLE, "POST", {"login": "anna", "name": "Anna"}),
+    "POST /api/people/update": refusals_of_people(PEOPLE_UPDATE, "POST", {"login": "misha", "role": "editor"}),
+    "POST /api/people/link": refusals_of_people(PEOPLE_LINK, "POST", {"login": "misha", "password": PASSWORD}),
     "GET": refusals_of_a_document_get(LEDGER, "ledger"),
     "PUT": refusals_of_a_document_put(LEDGER, "ledger"),
 }   # type: Dict[str, Callable[[unittest.TestCase], Dict[str, Any]]]
@@ -1207,7 +1305,7 @@ class EveryRequestTests(unittest.TestCase):
         self.assertEqual(number(r"At most (\d+) concurrent connections per client address"), settings.max_connections_per_address)
         self.assertEqual(number(r"one of (\d+) signed-out slots"), settings.signed_out_slots)
         self.assertEqual(number(r"one of the (\d+) that its client address may hold"), settings.signed_out_body_slots_per_address)
-        self.assertEqual(number(r"(\d+) seconds for the three `/api/auth/` doors"), settings.auth_body_deadline)
+        self.assertEqual(number(r"(\d+) seconds for the doors with a 4 KiB body"), settings.auth_body_deadline)
         self.assertEqual(number(r"`(\d+) s \+ 1 s per [\d ]+ bytes of Content-Length`"), settings.put_deadline_base)
         self.assertEqual(number(r"`\d+ s \+ 1 s per ([\d ]+) bytes of Content-Length`"), settings.put_deadline_bytes_per_second)
         self.assertEqual(number(r"(\d+) seconds at most"), settings.put_deadline_max)

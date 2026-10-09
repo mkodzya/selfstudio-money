@@ -8,9 +8,11 @@ repository now, but the doors are still not free to change: the released page
 speaks them, and so does every tab a founder has open. On a host name that
 begins with `finance.` the page reads and saves the ledger at
 `/api/founder/money`, the cash plan at `/api/founder/money/cash`, asks
-`/api/me` for the founder's first name, and loads its Excel and PDF readers
-from `/money/vendor/`. Everything else in this document exists so that a person
-can sign in, sign out and move a document as a file.
+`/api/me` for who is signed in and what they may do, and loads its Excel and
+PDF readers from `/money/vendor/`. Its «Люди» screen speaks the four doors
+under `/api/people` and the door that changes one's own password. Everything
+else in this document exists so that a person can sign in, sign out and move a
+document as a file.
 
 `tests/test_routes_doc.py` holds this document to the server, both ways: the
 table under "Routes" against the server's route table and against what a
@@ -72,6 +74,7 @@ login.
 | POST | /api/auth/login | no | JSON, 4 KiB | 200 JSON and the session cookie |
 | POST | /api/auth/setup | no | JSON, 4 KiB | 200 JSON and the session cookie |
 | POST | /api/auth/logout | no | JSON, 4 KiB | 200 JSON, cookie cleared |
+| POST | /api/auth/password | yes | JSON, 4 KiB | 200 JSON and the session cookie |
 | GET | / | yes | | 200 the page; 302 to /login without a session that may open it |
 | GET | /index.html | yes | | as GET / |
 | GET | /money/vendor/pdf.min.js | yes | | 200 script |
@@ -83,6 +86,10 @@ login.
 | PUT | /api/founder/money | yes | JSON, 16 MiB | 200 JSON, the new revision |
 | GET | /api/founder/money/cash | yes | | 200 JSON, the cash plan |
 | PUT | /api/founder/money/cash | yes | JSON, 4 MiB | 200 JSON, the new revision |
+| GET | /api/people | yes | | 200 JSON, who can sign in |
+| POST | /api/people | yes | JSON, 4 KiB | 200 JSON, who can sign in |
+| POST | /api/people/update | yes | JSON, 4 KiB | 200 JSON, who can sign in |
+| POST | /api/people/link | yes | JSON, 4 KiB | 200 JSON, a one-time link |
 | GET | /tracker/board | yes | | 302 to / |
 | GET | /dashboard | yes | | 302 to / |
 | GET | /money/ | yes | | 302 to / |
@@ -192,10 +199,14 @@ Before the body:
   - anything but GET and HEAD must carry `Origin` equal to the stand's public
     URL, character for character;
   - a GET that does carry an `Origin` must carry the right one.
-- **`Content-Type`**, on the five doors that take a body (the rows with a
+- **What the door asks of the one who is signed in.** A door that saves is not
+  for a reader, and the doors under `/api/people` are the owner's alone (see
+  "Who may do what"). The refusal is given here, before the body, and is named
+  at each of those doors.
+- **`Content-Type`**, on the nine doors that take a body (the rows with a
   "Body" cell), must be `application/json` (a `charset` parameter is fine):
   `415 bad_content_type`. A body sent to any other door is never read.
-- **`Content-Length`**, on the same five doors, must be present and a number
+- **`Content-Length`**, on the same nine doors, must be present and a number
   written in digits: `411 length_required`. Over the door's limit — by however
   many digits — the request is refused unread: `413 body_too_large`.
 - **Room on the disk**, for a document `PUT`: free space must be above three
@@ -204,8 +215,8 @@ Before the body:
 
 The body:
 
-- **A deadline**, total and not per read: 5 seconds for the three `/api/auth/`
-  doors; `20 s + 1 s per 10 000 bytes of Content-Length` for a document, and
+- **A deadline**, total and not per read: 5 seconds for the doors with a 4 KiB
+  body; `20 s + 1 s per 10 000 bytes of Content-Length` for a document, and
   600 seconds at most (about four minutes for a ledger of 2 MB). The edge does
   not hold a body back until it is whole, so this clock runs against the
   founder's own connection: 10 000 bytes a second is what a phone has on a
@@ -359,6 +370,33 @@ The body is `{}`; an empty body (`Content-Length: 0`) is taken as well.
 
 `302` to `/login`, where the «Выйти» button is. It changes nothing by itself.
 
+### POST /api/auth/password
+
+A signed-in person chooses a new password. The body is
+`{"current": "<the password now>", "password": "<the new one>"}`.
+
+- `200` `{"ok": true}` and the session cookie. The password is replaced, every
+  session of that login is closed — the one that asked included — and a new
+  one is opened for this browser.
+- `403 wrong_password` — `current` is absent, not a string, or not the
+  password. It is counted: for the address in the sign-in door's own count,
+  for the login in a count of its own (30 in 15 minutes as well). So a session
+  somebody walked away from is not a way to guess the password without a
+  limit, and a stranger who keeps failing to sign in as somebody cannot shut
+  this door for the person it belongs to. `403` and not `401`: the page reads
+  `401` as "the sign-in has ended".
+- `400 weak_password`, with `min: 12` — the rules of the set-password door.
+  Nothing is changed.
+- `429 too_many_attempts`, with `retryAfter` and `Retry-After`.
+- `503 password_changed` — the new password is stored, and with it every
+  sign-in of the login is void, but no new sign-in could be written for this
+  browser (the disk refused the sessions file, or its lock stayed taken). It
+  is not "nothing happened": the person signs in again, with the new password.
+- `401 unauthenticated`.
+
+A disk that refuses the write of the password itself and a lock that stays
+taken answer as they do at the sign-in door, and then nothing was changed.
+
 ## The page and its files
 
 ### GET / and GET /index.html
@@ -393,6 +431,13 @@ session needed. Exact paths only.
 document from a file, and the last 50 entries of the security log. Documents
 move through the four document doors below; `/data` adds no door for them.
 
+The page is sent in one of three states, by the role of the one who asks
+(`data-state` on `<body>`; what belongs to another state carries `hidden`): a
+reader gets the two downloads and nothing else — the upload would be refused
+by the document doors anyway; an editor gets the uploads too; the security log
+is the owner's alone, and its entries are not in the markup sent to anybody
+else.
+
 - **«Скачать выписки» / «Скачать план»** save the **bare document**: the text
   between the head and the tail of the door's answer, cut out as it stands —
   not the `{rev, doc, updatedAt}` answer around it. Either file goes back in
@@ -422,9 +467,96 @@ page can still send a founder to.
 
 ### GET /api/me
 
-- `200` `{"id", "name", "firstName", "isFounderTier": true, "stand", "version"}`.
-  The page reads `firstName` only, to sign a change to the plan. `firstName` is
-  the name given for the login in `MONEY_FOUNDERS`.
+- `200` `{"id", "name", "firstName", "isFounderTier": true, "role", "canWrite", "canManage", "stand", "version"}`.
+  `id` is the login. `firstName` is the name the owner gave the person, or the
+  one `MONEY_FOUNDERS` gives the login; the page signs a change to the plan
+  with it. `role` is `"owner"`, `"editor"` or `"reader"`; `canWrite` says
+  whether the document doors take a save from this person, `canManage` whether
+  the doors under `/api/people` answer them. The page draws nothing that
+  changes anything for a person who cannot write.
+- `401 unauthenticated`.
+
+## Who may do what
+
+The first login `MONEY_FOUNDERS` names is the stand's **owner**. Everybody
+else is a **reader** until the owner says otherwise, and may be made an
+**editor**:
+
+| | owner | editor | reader |
+|---|---|---|---|
+| reads both documents | yes | yes | yes |
+| saves them | yes | yes | no |
+| changes their own password, signs out | yes | yes | yes |
+| adds people, issues their links, disables them, says what each may do | yes | no | no |
+| reads the security log on `/data` | yes | no | no |
+
+The role is read from the accounts file at every request: what the owner
+changes holds from the next request of the person it is about, on a page they
+have open as well. Nothing here is a matter of what the page draws — a door
+judges for itself.
+
+### GET /api/people
+
+- `200` `{"people": [{"login", "name", "role", "me", "hasPassword", "passwordSetAt", "disabled", "linkExpires", "added", "lastSeen"}], "max"}`.
+  Everybody who can be signed in, the logins of `MONEY_FOUNDERS` first, then
+  the people the owner added, in that order. `me` marks the one who asks.
+  `linkExpires` is the end of a pending one-time link, `lastSeen` the latest
+  use of a sign-in of that login that is still open; both `null` when there is
+  none. `added` is true for a login the page added. `max` is how many accounts
+  a stand holds. Never a hash, a token or a link.
+- `403 not_owner` — anybody but the owner.
+- `401 unauthenticated`.
+
+### POST /api/people
+
+The owner adds a person. The body is `{"login": "<login>", "name": "<first name>"}`:
+a login of lower-case letters, digits, dot, dash or underscore that starts
+with a letter, 32 characters at most; a name of 1 to 40 characters. The new
+account has no password and only looks; its link is issued by the door below.
+
+- `200` — the list, as `GET /api/people` answers it.
+- `400 bad_person`, with `reason` (`"login"` or `"name"`).
+- `409 login_taken` — somebody has that login, or had it: a login is never
+  handed to a second person.
+- `409 too_many_people` — the stand holds as many accounts as it is built for.
+- `403 not_owner`.
+- `401 unauthenticated`.
+
+### POST /api/people/update
+
+The body names a login and what changes:
+`{"login": "<login>", "name": "<first name>", "role": "reader" | "editor", "disabled": true | false}`
+— any of the last three, at least one. Disabling closes the login's sessions
+and retires its pending link; a role holds from that person's next request.
+
+- `200` — the list, as `GET /api/people` answers it.
+- `400 bad_person`, with `reason`: `"name"`, `"role"`, or `"nothing"` when the
+  body names nothing to change.
+- `404 unknown_login`.
+- `409 owner_fixed` — a role or the switch, for the owner's own login: nobody
+  could undo it from the page.
+- `403 not_owner`.
+- `401 unauthenticated`.
+
+### POST /api/people/link
+
+A one-time link for somebody, shown to the owner once. The body is
+`{"login": "<whose link>", "password": "<the owner's own password>"}`: the
+password is asked for again, because a link signs its holder in and sets their
+password — a session somebody walked away from must not be enough to make one.
+
+- `200` `{"login", "link", "expires"}`. `link` is the whole address, with the
+  token in its fragment; it works once, until `expires`, and retires the link
+  issued for that login before it. It is in this answer and nowhere else: the
+  server keeps its sha256.
+- `403 wrong_password` — counted, as at `POST /api/auth/password`.
+- `429 too_many_attempts`, with `retryAfter` and `Retry-After`.
+- `404 unknown_login`.
+- `409 login_disabled` — enable the login first.
+- `409 owner_fixed` — the owner's own login: the owner changes their password
+  at its own door, and a way back in for an owner who has lost it is made on
+  the server.
+- `403 not_owner`.
 - `401 unauthenticated`.
 
 ## The two documents
@@ -474,6 +606,8 @@ Answers:
   `tx` array; a plan without a `banks` array.
 - `401 unauthenticated`.
 - `403 bad_origin`.
+- `403 read_only` — the one who asks is a reader. Said before a byte of the
+  body is read.
 - `409` `{"error": "money_stale", "message": …, "rev": <the stored revision>}` —
   somebody saved after this copy was read. Nothing is written.
 - `411 length_required`, `413 body_too_large`, `415 bad_content_type`.
@@ -486,7 +620,7 @@ Answers:
   cut, is answered `200`: every reader gets it from then on.)
 
 The checks run in this order. Before the body is read: the session, the
-cross-site rules, the type, the length, and room on the disk for the announced
+cross-site rules, the role, the type, the length, and room on the disk for the announced
 length (`507`) — so on a disk that is short every save is told so, a stale or a
 malformed one included. Then, inside the door, the platform's own order: the
 shape of `base` and `doc` (`400`), the size of the document (`413`), the state
@@ -505,9 +639,15 @@ restored on the server (`docs/deploy.md`).
 
 - `409` — «данные изменились в другом окне — обновите страницу»; the page
   stops saving until it is reloaded.
-- `401` or `403` — «вход закончился — войдите заново и обновите страницу»; the
-  page stops saving, and what is typed afterwards is lost. This is why a
-  session in its last day is sent to sign in again before the page opens.
+- `403 read_only` — the owner has made this person a reader while their page
+  stood open. The page says «Теперь у вас только просмотр: сохранить нельзя»,
+  becomes a reader's page — nothing on it changes anything any more — and
+  sends no further save. (A page that knew from `/api/me` that its person only
+  looks never sent one.)
+- `401`, or any other `403` — «вход закончился — войдите заново и обновите
+  страницу»; the page stops saving, and what is typed afterwards is lost. This
+  is why a session in its last day is sent to sign in again before the page
+  opens.
 - any other refusal — «не сохранено — проверьте связь». That includes `413`,
   so a ledger near its limit would be told to check the connection.
 
@@ -521,8 +661,9 @@ differences:
 - before the first save `updatedAt` is `null` (the platform answers the moment
   its migration ran);
 - `503 storage_damaged` and `507 storage_failed` exist here only;
-- a caller is one of the three founders or nobody: there is no
-  `403 founder_tier_required`.
+- a caller is somebody the stand knows or nobody: there is no
+  `403 founder_tier_required`. Who may save is the stand's own matter
+  (`403 read_only`, above).
 
 ## Headers on every answer
 
@@ -546,10 +687,11 @@ edge, not by `moneyd`.
 ## What has no door
 
 - Snapshots and their restore: `ctl snapshots`, `ctl restore`, on the server.
-- Accounts and one-time links: `money-user`, on the server (`ctl user invite`
-  prints the login on a line of its own above the link; `ctl user retire-links`
-  ends every pending link after a whole stand was put back from a backup).
-  Closing somebody's sessions: `ctl sessions`, on the server.
+- The owner's own way back in: a link for the owner is issued on the server
+  only (`money-user`; `ctl user invite` prints the login on a line of its own
+  above the link). `ctl user retire-links` ends every pending link after a
+  whole stand was put back from a backup. Closing somebody's sessions without
+  disabling them: `ctl sessions`, on the server.
 - Lifting the revisions above what open pages may hold: `ctl floor`, on the
   server.
 - Seeding: `ctl seed`, test and dev only.

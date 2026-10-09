@@ -8,9 +8,10 @@ Almost everything goes through one object::
     auth.boot()                       # __main__: makes users.json and its founders; raises AuthDamaged
 
     auth.session(token) -> Identity | None           # every request; cheap. Raises AuthDamaged
-        Identity(login, first_name, session, may_open_page)
+        Identity(login, first_name, session, may_open_page, role)
         ``may_open_page`` is False in a session's last 24 hours: GET / then redirects to /login,
         while every /api/ door still answers, so an open page keeps saving.
+        ``role`` is "owner", "editor" or "reader"; ``can_write`` and ``can_manage`` are read off it.
 
     auth.sign_in(login, password, addr, agent="", presented=None) -> NewSession(token, identity)
         MissingCredentials 400 | TooManyAttempts 429 (.retry_after) | Busy 503 |
@@ -19,6 +20,18 @@ Almost everything goes through one object::
         TooManyAttempts 429 | InvalidLink 404 | WeakPassword 400 (.minimum == 12) | Busy 503 |
         AuthDamaged 503 | AuthStorageFailed 507
     auth.sign_out(token, addr=None) -> bool
+    auth.change_password(identity, current, password, addr, agent="") -> NewSession
+        WrongPassword 403 | TooManyAttempts 429 | WeakPassword 400 | Busy 503 | AuthDamaged 503 |
+        AuthStorageFailed 507 | PasswordChanged 503. The login's other sessions are closed; the answer
+        carries a new one. PasswordChanged: the password is stored, the new session could not be opened.
+
+  Who may do what (see "Roles" below). The owner's own doors, each with ``by`` = the owner's login::
+
+    auth.people() -> [Person, ...]                             everybody, with when each was last here
+    auth.add_person(login, name, by) -> User                   BadPerson 400 | LoginTaken 409 | TooManyPeople 409
+    auth.update_person(login, by, name=None, role=None) -> User    BadPerson | UnknownLogin 404 | OwnerFixed 409
+    auth.confirm_password(login, password, addr)               WrongPassword 403 | TooManyAttempts 429
+    auth.issue_invite(login, by) / auth.set_disabled(login, disabled, by)      as for ``ctl``, below
 
   Nothing but an ``AuthError`` comes out of these doors for a reason outside the program:
   a disk that refuses a write is ``AuthStorageFailed``, a lock that stays taken is ``Busy``.
@@ -39,6 +52,14 @@ Almost everything goes through one object::
     auth.internal_session(login, ttl=300, purpose="selfcheck", by="ctl") -> (token, Session)
     auth.users.list() | auth.sessions.list() | auth.status()
     verify(data_dir) -> dict          module function: counts of any directory's auth files, read-only
+
+Roles
+    The first login ``MONEY_FOUNDERS`` names is the stand's **owner**: it saves the documents and
+    is the only one who adds people, issues their links, disables them and says what each may do.
+    Everybody else is a **reader** - the documents are sent to them and never taken from them -
+    until the owner makes them an **editor**, who saves like the owner and manages nobody. The
+    role is read from ``users.json`` at every request, so a change holds from the next one.
+    People the owner adds from the page live in ``users.json`` only (``added``: by whom, when).
 
 The parts, for tests and for anything unusual: ``auth.users`` (``Users``), ``auth.invites``
 (``Invites``), ``auth.sessions`` (``Sessions``), ``auth.limiter`` (``Limiter``).
@@ -65,8 +86,9 @@ Pure functions for the HTTP layer::
 
 On disk (``<data>/auth/``, written whole: temporary file, fsync, rename, under flock)
     ``users.json``     per login: password hash, generation, disabled, a reserved ``totp``, and the
-                       sha256 and expiry of a pending one-time link. Damaged -> ``AuthDamaged``;
-                       it is never repaired by guessing.
+                       sha256 and expiry of a pending one-time link; where the owner has said so,
+                       a ``name``, a ``role`` ("reader" | "editor") and, for a login the page added,
+                       ``added``. Damaged -> ``AuthDamaged``; it is never repaired by guessing.
     ``USERS_WRITTEN``  left beside it by its first write. With it there, a ``users.json`` that is
                        missing was lost: ``AuthDamaged``, as for a damaged one - never "no accounts
                        yet". (To begin the accounts anew on purpose, a person deletes both.)
@@ -105,6 +127,7 @@ __all__ = [
     "Auth", "Identity", "NewSession", "Users", "User", "Invites", "Sessions", "Session", "Limiter", "Attempt",
     "AuthError", "MissingCredentials", "InvalidCredentials", "TooManyAttempts", "Busy", "InvalidLink",
     "WeakPassword", "AuthDamaged", "AuthStorageFailed", "UnknownLogin", "LoginDisabled",
+    "WrongPassword", "PasswordChanged", "BadPerson", "LoginTaken", "TooManyPeople", "OwnerFixed", "Person", "ROLES", "PEOPLE_MAX",
     "hash_password", "verify_password", "Verdict", "check_password", "normalize_password",
     "client_address", "address_key", "is_loopback", "host_ok", "origin_ok", "fetch_site_ok", "api_refusal",
     "is_json", "cookie_token", "session_cookie", "clear_session_cookie", "has_legacy_cookie",
@@ -204,10 +227,10 @@ class AuthStorageFailed(AuthError):
 
 
 class UnknownLogin(AuthError):
-    """For ``ctl``: the login is not one of MONEY_FOUNDERS."""
+    """For ``ctl`` and the owner's doors: nobody on this stand has that login."""
     status = 404
     code = "unknown_login"
-    sentence = "That login is not one of this stand's founders."
+    sentence = "That login is not one of this stand's people."
 
 
 class LoginDisabled(AuthError):
@@ -215,6 +238,59 @@ class LoginDisabled(AuthError):
     status = 409
     code = "login_disabled"
     sentence = "That login is disabled. Enable it first."
+
+
+class WrongPassword(AuthError):
+    """A signed-in person was asked for their own password again, and it is not this one.
+
+    403 and never 401: the page reads 401 as "the sign-in has ended" and stops saving.
+    """
+    status = 403
+    code = "wrong_password"
+    sentence = "That is not your password."
+
+
+class PasswordChanged(AuthError):
+    """The new password is stored and every sign-in of the login is void, but no new sign-in could be
+    opened for the browser that asked (the sessions file would not be written). It is not "nothing
+    happened": the caller signs in again, with the new password."""
+    status = 503
+    code = "password_changed"
+    sentence = "The password was changed, but a new sign-in could not be opened. Sign in with the new password."
+
+
+class BadPerson(AuthError):
+    """A login, a name or a role the owner's doors cannot take. ``reason`` says which."""
+    status = 400
+    code = "bad_person"
+    sentence = "That login, name or role cannot be used."
+
+    def __init__(self, reason: str):
+        super().__init__()
+        #: "login" | "name" | "role" | "nothing"
+        self.reason = reason
+
+    def extra(self) -> Dict[str, Any]:
+        return {"reason": self.reason}
+
+
+class LoginTaken(AuthError):
+    status = 409
+    code = "login_taken"
+    sentence = "Somebody on this stand has that login already."
+
+
+class TooManyPeople(AuthError):
+    status = 409
+    code = "too_many_people"
+    sentence = "This stand holds as many people as it is built for."
+
+
+class OwnerFixed(AuthError):
+    """The owner cannot be disabled or given another role from the page: nobody could undo it."""
+    status = 409
+    code = "owner_fixed"
+    sentence = "The owner's own sign-in is not changed from the page."
 
 
 # ---------------------------------------------------------------------------
@@ -686,10 +762,17 @@ def _noting(security_log: Any) -> Any:
 # Accounts
 # ---------------------------------------------------------------------------
 
+#: What a person may do. "owner" is never stored: it is the first login MONEY_FOUNDERS names.
+ROLES = ("owner", "editor", "reader")
+#: How many accounts a stand holds at most, MONEY_FOUNDERS and the people the owner added together.
+PEOPLE_MAX = 20
+
+
 class User(NamedTuple):
     login: str
     first_name: str
-    #: Named by MONEY_FOUNDERS. An account the list no longer names cannot sign in.
+    #: Named by MONEY_FOUNDERS, or added by the owner from the page. An account that is neither -
+    #: one the list has dropped - cannot sign in.
     listed: bool
     disabled: bool
     has_password: bool
@@ -701,10 +784,20 @@ class User(NamedTuple):
     invite_expires: Optional[str]
     #: Reserved for a one-time code from an authenticator app. Always None in this version.
     totp: Any = None
+    #: "owner" | "editor" | "reader". Without a word from the owner a person only looks.
+    role: str = "reader"
+    #: Added by the owner from the page, and so known to ``users.json`` alone.
+    added: bool = False
 
     @property
     def can_sign_in(self) -> bool:
         return self.listed and not self.disabled
+
+
+def _is_name(value: Any) -> bool:
+    """A first name as MONEY_FOUNDERS would take one: 1 to 40 characters, no control character, no colon."""
+    return (isinstance(value, str) and 0 < len(value) <= 40 and value == value.strip() and ":" not in value
+            and not any(ord(ch) < 32 or ord(ch) == 127 for ch in value))
 
 
 def _check_users(data: Any) -> None:
@@ -718,7 +811,13 @@ def _check_users(data: Any) -> None:
             and isinstance(record.get("gen"), int) and not isinstance(record.get("gen"), bool) and record["gen"] >= 0
             and isinstance(record.get("disabled"), bool)
             and (record.get("setAt") is None or _is_time(record["setAt"]))
+            and (record.get("name") is None or _is_name(record["name"]))
+            and record.get("role") in (None, "reader", "editor")
         )
+        added = record.get("added") if ok else None
+        if ok and added is not None:
+            ok = (isinstance(added, dict) and isinstance(added.get("by"), str)
+                  and _LOGIN.fullmatch(added["by"]) is not None and _is_time(added.get("at")))
         invite = record.get("invite") if ok else None
         if ok and invite is not None:
             ok = (isinstance(invite, dict) and isinstance(invite.get("sha256"), str)
@@ -733,9 +832,12 @@ def _blank_user() -> Dict[str, Any]:
 
 
 class Users:
-    """The accounts: exactly the logins of ``MONEY_FOUNDERS``, kept in ``<data>/auth/users.json``.
+    """The accounts: the logins of ``MONEY_FOUNDERS`` and the people the owner added, kept in
+    ``<data>/auth/users.json``.
 
-    ``founders`` is ``settings.founders`` (pairs or a mapping login -> first name).
+    ``founders`` is ``settings.founders`` (pairs or a mapping login -> first name). The first of
+    them is the stand's owner (``owner``); a name or a role the owner has given somebody is in
+    the file and comes before what the list says.
     The file is read again whenever it changes on disk, so what ``ctl`` does
     reaches a running server at its next request. Every method raises
     ``AuthDamaged`` while the file cannot be read; writers may raise ``Busy``
@@ -756,6 +858,8 @@ class Users:
     def __init__(self, data_dir: str, founders: Any, clock: Clock = utcnow, *, lock_timeout: float = 10.0,
                  security_log: Any = None):
         self._founders = collections.OrderedDict(founders.items() if hasattr(founders, "items") else founders)
+        #: The first login MONEY_FOUNDERS names: the one who saves and who manages the others.
+        self.owner = next(iter(self._founders), None)
         self._clock = clock
         self._data_dir = data_dir
         self.path = os.path.join(data_dir, "auth", "users.json")
@@ -795,14 +899,21 @@ class Users:
             return {}
         return data["users"]
 
+    def _listed(self, login: str, record: Optional[Dict[str, Any]]) -> bool:
+        """Named by MONEY_FOUNDERS, or added by the owner."""
+        return login in self._founders or bool(record and record.get("added"))
+
     def _user(self, login: str, record: Optional[Dict[str, Any]]) -> User:
         record = record or _blank_user()
         invite = record.get("invite")
         return User(
-            login=login, first_name=self._founders.get(login, login), listed=login in self._founders,
+            login=login, first_name=record.get("name") or self._founders.get(login, login),
+            listed=self._listed(login, record),
             disabled=bool(record["disabled"]), has_password=record["hash"] is not None, gen=record["gen"],
             password_set_at=record.get("setAt"), invite_expires=invite["expires"] if invite else None,
-            totp=record.get("totp"))
+            totp=record.get("totp"),
+            role="owner" if login == self.owner else (record.get("role") or "reader"),
+            added=bool(record.get("added")))
 
     def get(self, login: Any) -> Optional[User]:
         """The account of ``login``, or None when neither the founders list nor the file knows it."""
@@ -814,10 +925,13 @@ class Users:
         return self._user(login, record)
 
     def list(self) -> List[User]:
-        """The founders in the order MONEY_FOUNDERS names them, then accounts the list has dropped."""
+        """The founders in the order MONEY_FOUNDERS names them, then the people the owner added, in the
+        order they were added, then accounts the list has dropped."""
         records = self._records()
         users = [self._user(login, records.get(login)) for login in self._founders]
-        users += [self._user(login, records[login]) for login in sorted(records) if login not in self._founders]
+        rest = [login for login in records if login not in self._founders]
+        rest.sort(key=lambda login: (not records[login].get("added"), (records[login].get("added") or {}).get("at", ""), login))
+        users += [self._user(login, records[login]) for login in rest]
         return users
 
     def password_hash(self, login: str) -> Optional[str]:
@@ -848,6 +962,7 @@ class Users:
             "state": "ok" if os.path.exists(self.path) else "missing",
             "problem": None,
             "founders": sum(1 for user in users if user.listed),
+            "added": sum(1 for user in users if user.added),
             "withPassword": sum(1 for user in users if user.listed and user.has_password),
             "disabled": sum(1 for user in users if user.disabled),
             "pendingLinks": sum(1 for user in users if user.invite_expires),
@@ -916,6 +1031,22 @@ class Users:
             return True, True
         return self._change(None, change)
 
+    def change_password(self, login: str, old_hash: str, new_hash: str) -> User:
+        """Store a password its holder chose while signed in, and move the generation on.
+
+        Only over the hash the current password was checked against: ``Busy`` when the password
+        has changed in between, and nothing is written.
+        """
+        def change(records: Dict[str, Any]) -> Tuple[bool, User]:
+            record = records.get(login)
+            # ... and only for an account that may still sign in: one the owner shut out while the new
+            # hash was being made gets no new password and no new session.
+            if record is None or record["hash"] != old_hash or record["disabled"] or not self._listed(login, record):
+                raise Busy("That sign-in has just been changed from somewhere else; sign in again.")
+            record.update(hash=new_hash, gen=record["gen"] + 1, setAt=iso(self._clock()), invite=None)
+            return True, self._user(login, record)
+        return self._change(None, change)
+
     def set_disabled(self, login: str, disabled: bool) -> User:
         def change(records: Dict[str, Any]) -> Tuple[bool, User]:
             record = records[login]
@@ -924,6 +1055,44 @@ class Users:
             if disabled:
                 record["invite"] = None
             return changed or disabled, self._user(login, record)
+        return self._change(login, change)
+
+    def add(self, login: str, name: str, by: str) -> User:
+        """A new account without a password, for a person the owner adds. It only looks.
+
+        Raises ``LoginTaken`` (also for a login MONEY_FOUNDERS names and for one the list has
+        dropped: a login is never handed to a second person) and ``TooManyPeople``.
+        """
+        def change(records: Dict[str, Any]) -> Tuple[bool, User]:
+            if login in records or login in self._founders:
+                raise LoginTaken()
+            if len(set(records) | set(self._founders)) >= PEOPLE_MAX:
+                raise TooManyPeople()
+            record = _blank_user()
+            record.update(name=name, role="reader", added={"by": by, "at": iso(self._clock())})
+            records[login] = record
+            return True, self._user(login, record)
+        return self._change(None, change)
+
+    def update(self, login: str, name: Optional[str] = None, role: Optional[str] = None) -> Tuple[User, User]:
+        """Give a person another name, another role, or both: ``(as it was, as it is)``.
+
+        Raises ``UnknownLogin`` for a login nobody has and for an account the list has dropped,
+        ``OwnerFixed`` when a role is named for the owner.
+        """
+        def change(records: Dict[str, Any]) -> Tuple[bool, Tuple[User, User]]:
+            record = records[login]
+            if not self._listed(login, record):
+                raise UnknownLogin()
+            if role is not None and login == self.owner:
+                raise OwnerFixed()
+            before = self._user(login, record)
+            if name is not None:
+                record["name"] = name
+            if role is not None:
+                record["role"] = role
+            after = self._user(login, record)
+            return after != before, (before, after)
         return self._change(login, change)
 
 
@@ -945,14 +1114,14 @@ class Invites:
 
     def issue(self, login: str) -> Tuple[str, datetime.datetime]:
         """A fresh token for ``login`` and the moment it runs out. Raises ``UnknownLogin``, ``LoginDisabled``."""
-        if login not in self._users._founders:
-            raise UnknownLogin()
         token = secrets.token_urlsafe(32)
         now = as_utc(self._clock())
         expires = now + datetime.timedelta(seconds=self._ttl)
 
         def change(records: Dict[str, Any]) -> Tuple[bool, None]:
             record = records[login]
+            if not self._users._listed(login, record):
+                raise UnknownLogin()            # an account the list has dropped gets no way back in
             if record["disabled"]:
                 raise LoginDisabled()
             record["invite"] = {"sha256": _sha256(token), "issued": iso(now), "expires": iso(expires)}
@@ -989,7 +1158,7 @@ class Invites:
             if login is None:
                 raise InvalidLink()
             record = records[login]
-            if record["disabled"] or login not in self._users._founders:
+            if record["disabled"] or not self._users._listed(login, record):
                 raise InvalidLink()
             record.update(hash=password_hash, gen=record["gen"] + 1, setAt=iso(self._clock()), invite=None)
             return True, self._users._user(login, record)
@@ -1312,7 +1481,7 @@ class Limiter:
         self._max_keys = max(8, int(max_keys))
         self._hash_wait = float(hash_wait)
         self._slots = threading.BoundedSemaphore(max(1, int(hash_slots)))
-        self._pinned = frozenset(("login", login) for login in pinned_logins)
+        self._pinned = frozenset((kind, login) for login in pinned_logins for kind in ("login", "recheck"))
         self._lock = threading.Lock()
         # key -> [moments of the counted attempts, oldest first; when a refusal was last reported]
         self._table = collections.OrderedDict()  # type: collections.OrderedDict
@@ -1322,6 +1491,19 @@ class Limiter:
         return self._begin([
             (("address", address_key(addr)), self._per_address),
             (("login", login), self._per_login),
+        ])
+
+    def begin_recheck(self, login: str, addr: str) -> Attempt:
+        """Count a signed-in person's own password, asked for again. Raises ``TooManyAttempts``.
+
+        For the address it is the count of the sign-in door: whoever guesses from there has filled
+        it or not, at either door. For the login it is a count of its own (30 as well): a stranger
+        who keeps failing to sign in as somebody must not be able to shut that person's own doors,
+        and a stolen session still gets no more guesses than these.
+        """
+        return self._begin([
+            (("address", address_key(addr)), self._per_address),
+            (("recheck", login), self._per_login),
         ])
 
     def begin_setup(self, addr: str) -> Attempt:
@@ -1415,6 +1597,25 @@ class Identity(NamedTuple):
     session: Session
     #: False in the session's last 24 hours: GET / then goes to /login; the /api/ doors still answer.
     may_open_page: bool
+    #: "owner" | "editor" | "reader", as ``users.json`` and MONEY_FOUNDERS have it at this request.
+    role: str = "reader"
+
+    @property
+    def can_write(self) -> bool:
+        """May save the documents. A reader is sent them and saves nothing."""
+        return self.role in ("owner", "editor")
+
+    @property
+    def can_manage(self) -> bool:
+        """May add people, issue their links, disable them and say what each may do: the owner."""
+        return self.role == "owner"
+
+
+class Person(NamedTuple):
+    """One line of the owner's list: an account, and when its holder was last here."""
+    user: User
+    #: The latest use of any of the login's sign-ins that are still open; None when there is none.
+    last_seen: Optional[datetime.datetime]
 
 
 class NewSession(NamedTuple):
@@ -1496,7 +1697,7 @@ class Auth:
             self._note("login-flood", count=self.FLOOD)
 
     def _identity(self, user: User, session: Session) -> Identity:
-        return Identity(user.login, user.first_name, session, not self.sessions.in_last_day(session))
+        return Identity(user.login, user.first_name, session, not self.sessions.in_last_day(session), user.role)
 
     # -- every request -------------------------------------------------------
 
@@ -1625,6 +1826,114 @@ class Auth:
         self._note("sign-out", login=session.login, addr=addr)
         return True
 
+    # -- one's own password, again ---------------------------------------------
+
+    def _check_current(self, login: str, password: Any, addr: str, what: str) -> Tuple[User, str]:
+        """The account and the hash its current password was just checked against. Raises ``WrongPassword``.
+
+        Counted before anything is hashed - for the address in the sign-in door's own count, for
+        the login in a count of its own (``Limiter.begin_recheck``): a stolen session must not be a
+        way to guess the password without a limit, and a stranger's failed sign-ins must not be a
+        way to shut these doors for the person they belong to.
+        """
+        if not isinstance(password, str) or not password:
+            raise WrongPassword()
+        try:
+            attempt = self.limiter.begin_recheck(login, addr)
+        except TooManyAttempts as refusal:
+            if refusal.first:
+                self._refused("sign-in-blocked", addr=addr, login=login, reason=refusal.key,
+                              retryAfter=refusal.retry_after)
+            raise
+        try:
+            with self.limiter.hash_slot():
+                user, stored = self.users.credentials(login)
+                if user is None or not user.can_sign_in:
+                    stored = None
+                verdict = verify_password(password, stored if stored is not None else self._dummy(),
+                                          kdf=self.settings.kdf, allow_pbkdf2=self.settings.is_dev)
+        except BaseException:
+            attempt.abandon()
+            raise
+        if not verdict.ok or stored is None or user is None:
+            self._refused("password-check-failed", addr=addr, login=login, what=what,
+                          n=attempt.counts.get("address", 0))
+            raise WrongPassword()
+        attempt.succeeded()
+        return user, stored
+
+    def confirm_password(self, login: str, password: Any, addr: str, what: str = "link") -> None:
+        """A signed-in person says their password again, before something that outlives the session.
+
+        Raises ``WrongPassword``, ``TooManyAttempts``, ``Busy``, ``AuthDamaged``.
+        """
+        self._check_current(login, password, addr, what)
+
+    def change_password(self, identity: Identity, current: Any, password: Any, addr: str,
+                        agent: str = "") -> NewSession:
+        """A signed-in person chooses a new password: the current one is asked for, every sign-in of
+        the login is closed, and a new one is opened for this browser.
+
+        Raises ``WrongPassword``, ``TooManyAttempts``, ``WeakPassword``, ``Busy``, ``AuthDamaged``,
+        ``AuthStorageFailed``: then nothing was changed. And ``PasswordChanged``: the password is stored
+        - which voids every sign-in of the login, whatever the sessions file holds - but no new sign-in
+        could be written for this browser. The line in the security log is written either way.
+        """
+        login = identity.login
+        user, stored = self._check_current(login, current, addr, "password")
+        check_password(password, login, user.first_name)
+        with self.limiter.hash_slot():
+            new_hash = hash_password(password, self.settings.kdf)
+        user = self.users.change_password(login, stored, new_hash)      # from here on the password is the new one
+        try:
+            closed = self.sessions.close_login(login)
+            token, session = self.sessions.create(login, addr, agent, gen=user.gen)
+        except AuthError:
+            self._note("password-changed", login=login, addr=addr, detail="no new sign-in could be opened")
+            raise PasswordChanged()
+        self._note("password-changed", login=login, addr=addr, count=closed)
+        return NewSession(token, self._identity(user, session))
+
+    # -- the owner's doors -----------------------------------------------------
+
+    def people(self) -> List[Person]:
+        """Everybody ``users.list()`` has, each with the latest use of a sign-in that is still open."""
+        seen = {}  # type: Dict[str, datetime.datetime]
+        for session in self.sessions.list():
+            if session.kind == "web" and (session.login not in seen or session.seen > seen[session.login]):
+                seen[session.login] = session.seen
+        return [Person(user, seen.get(user.login)) for user in self.users.list()]
+
+    def add_person(self, login: Any, name: Any, by: str) -> User:
+        """A new login that only looks, without a password: the owner issues its link next.
+
+        Raises ``BadPerson`` (``reason`` "login" or "name"), ``LoginTaken``, ``TooManyPeople``.
+        """
+        if not isinstance(login, str) or _LOGIN.fullmatch(login) is None:
+            raise BadPerson("login")
+        if not _is_name(name):
+            raise BadPerson("name")
+        user = self.users.add(login, name, by)
+        self._note("user-added", login=login, by=by)
+        return user
+
+    def update_person(self, login: Any, by: str, name: Any = None, role: Any = None) -> User:
+        """Another name, another role, or both. Raises ``BadPerson``, ``UnknownLogin``, ``OwnerFixed``."""
+        if not isinstance(login, str) or _LOGIN.fullmatch(login) is None:
+            raise UnknownLogin()
+        if name is None and role is None:
+            raise BadPerson("nothing")
+        if name is not None and not _is_name(name):
+            raise BadPerson("name")
+        if role is not None and role not in ("reader", "editor"):
+            raise BadPerson("role")
+        before, after = self.users.update(login, name=name, role=role)
+        if after.role != before.role:
+            self._note("role-changed", login=login, by=by, role=after.role)
+        if after.first_name != before.first_name:
+            self._note("user-renamed", login=login, by=by)
+        return after
+
     # -- for ctl -------------------------------------------------------------
 
     def issue_invite(self, login: str, by: str = "ctl") -> Tuple[str, datetime.datetime]:
@@ -1662,15 +1971,27 @@ class Auth:
         return logins
 
     def set_disabled(self, login: str, disabled: bool, by: str = "ctl") -> User:
-        """Disable or enable a login. Disabling closes its sessions and retires its pending link."""
-        if login not in self.settings.logins and self.users.get(login) is None:
+        """Disable or enable a login. Disabling closes its sessions and retires its pending link.
+
+        A sign-in that was open when a login was shut out never works again: the sessions are closed
+        when it is disabled, and once more before it is enabled - so that a disabling whose sessions
+        could not be written away (a full disk, a lock that stayed taken) does not hand them back
+        later. Such a disabling is in the log all the same, and raises: it is done again.
+        """
+        if not isinstance(login, str) or (login not in self.settings.logins and self.users.get(login) is None):
             raise UnknownLogin()
-        user = self.users.set_disabled(login, disabled)
-        if disabled:
-            closed = self.sessions.close_login(login)
-            self._note("user-disabled", login=login, by=by, count=closed)
-        else:
+        if not disabled:
+            self.sessions.close_login(login)        # first: an account is not let back in over sessions of before
+            user = self.users.set_disabled(login, False)
             self._note("user-enabled", login=login, by=by)
+            return user
+        user = self.users.set_disabled(login, True)     # from here on the login cannot sign in, and its sessions are void
+        try:
+            closed = self.sessions.close_login(login)
+        except AuthError:
+            self._note("user-disabled", login=login, by=by, detail="its sessions could not be closed; disable it again")
+            raise
+        self._note("user-disabled", login=login, by=by, count=closed)
         return user
 
     def close_sessions(self, login: Optional[str] = None, by: str = "ctl") -> int:

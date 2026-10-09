@@ -85,7 +85,7 @@ class StandCase(unittest.TestCase):
 class RouteTableTests(unittest.TestCase):
     def test_the_table_is_whole_and_exact(self):
         rows = [(route.method, route.path) for route in httpd.ROUTES]
-        self.assertEqual(len(rows), 26)
+        self.assertEqual(len(rows), 31)
         self.assertEqual(len(set(rows)), len(rows), "a method and a path are one row")
         for route in httpd.ROUTES:
             self.assertIn(route.method, ("GET", "POST", "PUT"))
@@ -284,7 +284,7 @@ class OwnPagesTests(unittest.TestCase):
         return {
             "login": web.render("login", state="form", firstName="", login=""),
             "set-password": web.render("set-password"),
-            "data": web.render("data", firstName="Mika", entries="[]"),
+            "data": web.render("data", state="owner", firstName="Mika", entries="[]"),
         }
 
     def test_no_inline_script_no_inline_style_no_web_font(self):
@@ -332,7 +332,7 @@ class OwnPagesTests(unittest.TestCase):
         self.assertIn("&lt;i&gt;o&#x27;neil&lt;/i&gt;", text)
         self.assertEqual(httpd.inspect_page(text.encode("utf-8")), httpd.PageFacts((), 0))
         entries = json.dumps([{"t": "x", "event": "\"><script>alert(1)</script>"}])
-        page = web.render("data", firstName="Mika", entries=entries)
+        page = web.render("data", state="owner", firstName="Mika", entries=entries)
         self.assertEqual(httpd.inspect_page(page), httpd.PageFacts((), 0))
 
     def test_the_pages_are_whole_and_hold_what_their_script_asks_for(self):
@@ -698,7 +698,7 @@ class PageScriptTests(unittest.TestCase):
     def test_the_download_is_the_bare_document_cut_out_of_the_doors_answer_as_it_stands(self):
         today = datetime.date.today().isoformat()
         for stand in ("dev", "test"):       # the test stand draws no upload, and hands a document over all the same
-            page = self.web(stand).render("data", firstName="Mika", entries="[]")
+            page = self.web(stand).render("data", state="owner", firstName="Mika", entries="[]")
             out = self.run_page(page, self.DOORS + r"""
               await button.click();
               const first = { saved: saved.slice(), done: shown('data-done'), error: shown('data-error') };
@@ -732,7 +732,7 @@ class PageScriptTests(unittest.TestCase):
                 self.assertEqual(out["empty"], {"saved": [], "done": None, "error": "Скачивать нечего: на сервере ещё нет выписок."})
 
     def test_a_replace_first_saves_what_it_replaces_and_replaces_nothing_without_that_copy(self):
-        page = self.web().render("data", firstName="Mika", entries="[]")
+        page = self.web().render("data", state="owner", firstName="Mika", entries="[]")
         began = datetime.date.today()
         out = self.run_page(page, self.DOORS + r"""
           const NEW = '{"tx":[{"id":"n"}],"note":"новый"}';
@@ -789,7 +789,7 @@ class PageScriptTests(unittest.TestCase):
 
     def test_the_same_file_can_be_chosen_again_after_it_was_refused(self):
         # A browser reports no change when the file chosen is the one the control already holds.
-        page = self.web().render("data", firstName="Mika", entries="[]")
+        page = self.web().render("data", state="owner", firstName="Mika", entries="[]")
         out = self.run_page(page, self.DOORS + r"""
           const tries = {};
           const cases = { 'not json': 'not json', 'the other document': '{"banks":[]}', 'no document': '{"x":1}', 'too large': null };
@@ -821,7 +821,7 @@ class PageScriptTests(unittest.TestCase):
         entries = [{"t": "2026-10-07T12:00:00Z", "event": "floor-raised", "doc": "ledger", "floor": 108, "was": 100, "by": "ctl"},
                    {"t": "2026-10-07T12:00:01Z", "event": "link-retired", "login": "vanya", "by": "ctl"},
                    {"t": "2026-10-07T12:00:02Z", "event": "storage-unsynced", "file": "ledger", "rev": 9, "by": "mika"}]
-        page = self.web().render("data", firstName="Mika", entries=json.dumps(entries))
+        page = self.web().render("data", state="owner", firstName="Mika", entries=json.dumps(entries))
         out = self.run_page(page, r"""
           const rows = $('journal').querySelector('tbody').children.map(
             (row) => [row.className].concat(row.children.map((cell) => cell.textContent).slice(1)));
@@ -927,6 +927,7 @@ class WalkTests(StandCase):
         # -- who am I
         me = stand.get("/api/me", cookie=cookie)
         self.assertEqual(me.json(), {"id": "mika", "name": "Mika", "firstName": "Mika", "isFounderTier": True,
+                                     "role": "owner", "canWrite": True, "canManage": True,
                                      "stand": "dev", "version": "dev"})
         self.assertEqual(me.header("Cache-Control"), "no-store")
         self.assertEqual(me.header("Content-Security-Policy"), httpd.CSP_JSON)
@@ -1136,7 +1137,9 @@ class ServerStandTests(unittest.TestCase):
         self.assertEqual(stand.get("/api/me", cookie="ssp_session=x; " + cookie).all("Set-Cookie"),
                          ["ssp_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"])
         self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie, origin="http://finance.test.selfstudio.se").status, 403)
-        self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json(), {"rev": 1})
+        # Misha only looks: a reader's save is turned away, the owner's is taken.
+        self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).json()["error"], "read_only")
+        self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=stand.session("mika")).json(), {"rev": 1})
 
         # /data on test: the band, both downloads, and no way to upload.
         data = stand.get("/data", cookie=cookie)
@@ -1775,8 +1778,8 @@ class CtlTests(StandCase):
         self.assertEqual(listed.status, 0)
         lines = listed.out.splitlines()
         self.assertEqual(lines[0].split()[:2], ["login", "name"])
-        self.assertRegex(lines[1], r"^mika +Mika +yes +set 2026-10-07T12:00:00Z")
-        self.assertRegex(lines[2], r"^misha +Misha +yes +not set")
+        self.assertRegex(lines[1], r"^mika +Mika +yes +set 2026-10-07T12:00:00Z +- +owner$")
+        self.assertRegex(lines[2], r"^misha +Misha +yes +not set +- +reader$")
         sessions = stand.ctl("sessions", "list")
         self.assertEqual(sessions.status, 0)
         self.assertIn("2 session(s)\n", sessions.out)
@@ -1934,7 +1937,7 @@ class CtlTests(StandCase):
         self.assertEqual(lines[2:], stand.ctl("user", "list").out.splitlines())
         self.assertEqual(len(lines), 6)
         for row in lines[3:]:
-            self.assertTrue(row.rstrip().endswith(" -"), "no link is pending any more: %r" % row)
+            self.assertRegex(row, r" - +(owner|reader|editor)$", "no link is pending any more: %r" % row)
         for token in (spent, waiting):
             self.assertRefused(stand.post("/api/auth/setup", {"token": token, "password": PASSWORD}), 404, "invalid_link")
         self.assertNotIn(spent, done.out)

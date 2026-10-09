@@ -88,7 +88,7 @@ STANDS = ("prod", "test", "dev")
 ENV_NAMES = (
     "MONEY_STAND",               # prod | test | dev
     "MONEY_PUBLIC_URL",          # https://finance.selfstudio.se
-    "MONEY_FOUNDERS",            # mika:Mika,misha:Misha,vanya:Vanya
+    "MONEY_FOUNDERS",            # mika:Mika,misha:Misha,vanya:Vanya - the first one named is the owner
     "MONEY_DATA_DIR",            # /data
     "MONEY_BIND",                # 0.0.0.0:8080 (default 127.0.0.1:8080)
     "MONEY_TRUSTED_PROXIES",     # 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
@@ -310,6 +310,11 @@ class Settings:
     @property
     def logins(self) -> Tuple[str, ...]:
         return tuple(login for login, _name in self.founders)
+
+    @property
+    def owner(self) -> str:
+        """The first login ``MONEY_FOUNDERS`` names: the one who saves the documents and manages the others."""
+        return self.founders[0][0]
 
     def first_name(self, login: str) -> Optional[str]:
         """The first name ``MONEY_FOUNDERS`` gives a login, or None when it names no such login."""

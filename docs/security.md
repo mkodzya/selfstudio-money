@@ -33,7 +33,9 @@ word and are written down in `docs/handoff.md`.
 ## What the reader needs first
 
 What is behind the sign-in: the studio's income, what each person is paid, what
-each founder took out, and what is in the bank. Three people may see it.
+each founder took out, and what is in the bank. The people the owner has let
+in may see it; the owner, and whoever the owner says, may change it (see
+"People and what each may do").
 
 What stands between a stranger and those two documents:
 
@@ -66,19 +68,78 @@ document in the same change.
   (`mika:Mika,misha:Misha,vanya:Vanya`; the page hard-codes the same three
   first names). They are created without a password at the stand's first
   start.
-- An account in `users.json` that the list no longer names cannot sign in.
-- No roles, no admin screen, no e-mail, no self-service reset.
-- An account can be switched off and on from the server:
-  `money-user <stand> disable <login>` / `enable <login>`. Disabling closes the
-  login's sessions and retires its pending link; both take effect at the next
-  request.
+- People the owner adds from the page («Настройки → Люди») are accounts of
+  `users.json` alone: a login, a name, and a note of who added them and when.
+  A stand holds 20 accounts at most, the list's and the added ones together.
+- An account in `users.json` that the list no longer names and nobody added
+  cannot sign in, gets no link, and its login is never handed to anyone else.
+- No e-mail, no self-service reset: a forgotten password is a new link.
+- An account can be switched off and on: by the owner from the page, and from
+  the server (`money-user <stand> disable <login>` / `enable <login>`).
+  Disabling closes the login's sessions and retires its pending link; both
+  take effect at the next request.
 - The user record reserves a `totp` field for a second factor. Nothing reads it
   yet.
 
+## People and what each may do
+
+Since 9 October 2026 (the owner's decision: «я хочу сам создать профили для
+Миши и Вани, они могут только читать, писать могу пока только я»).
+
+- **The owner** is the first login `MONEY_FOUNDERS` names — `mika` on both
+  stands, and a test holds the stand files to that. The owner saves the
+  documents and is the only one who adds people, issues their links, disables
+  them and says what each may do. "Owner" is never a value in `users.json`: no
+  edit of an account can make a second one, and a file that says so is a
+  damaged file.
+- **A reader** is everybody else, until the owner says otherwise: both
+  documents are sent to them, and neither is taken from them. A reader's `PUT`
+  is `403 read_only`, said before a byte of its body is read. The page draws a
+  reader nothing that changes anything, but that is a courtesy: the door
+  judges by itself. (Where `/api/me` gives the page no answer at all - it is
+  asked twice - the page is drawn as a writer's, and becomes a reader's when
+  its first save is refused.)
+- **An editor** is a person the owner has let save. An editor manages nobody.
+- The role is read from `users.json` at every request, so a change holds from
+  that person's next request, on a page they have open as well.
+- **The owner's own sign-in is not changed from the page**: no role, no
+  switching off, no link for the owner's own login. Nobody could undo the
+  first two from there; and a way back in for an owner who has lost the
+  password is made on the server, by somebody who can reach it.
+- **Before a link is made the owner's password is asked for again**, and a
+  wrong one is counted (10 per address, in the sign-in door's own count; 30
+  per login in 15 minutes, in a count of its own): a link signs its holder in
+  for thirty days and sets their password, so a page somebody walked away from
+  must not be enough to make one, nor a way to guess the password without a
+  limit. The count per login is not the sign-in door's, on purpose: a stranger
+  who keeps failing to sign in as the owner must not be able to shut the
+  owner's own doors.
+- **Anybody changes their own password** at a door of its own, which asks for
+  the current one, closes every sign-in of that login and opens a new one for
+  the browser that asked. Should the new sign-in fail to be written, the
+  answer says that the password was changed all the same
+  (`503 password_changed`), and the log has its line.
+- **A sign-in that was open when a login was shut out never works again**:
+  the sessions are closed when a login is disabled, and once more before it is
+  enabled.
+- Every one of these — a person added, a role, a name, a link issued, a login
+  switched off or on, a password changed, a password asked for again and not
+  given — is a line in the security log with who did it.
+- **The security log on `/data` is the owner's to read.** It names everybody's
+  sign-ins and the addresses they came from; its entries are not in the markup
+  sent to anybody else. A reader's `/data` has the two downloads and no upload.
+
+What this changed. Until that day nobody who had a founder's password could
+give anybody access: that took root on the server. Now the owner's password,
+in a browser, is enough to let a person in — as a reader. It cannot make an
+owner, and it cannot be done with a session alone.
+
 ## One-time links
 
-A password is set, and reset, in one way: a person issues a one-time link on
-the server.
+A password is set, and reset, through a one-time link. A person issues one on
+the server, or the owner issues one for somebody else from the page
+(`POST /api/people/link`, after the owner's own password); for the owner's own
+login only the server does.
 
 ```
 ssh -t root@204.168.164.31 money-user prod invite mika
@@ -113,8 +174,11 @@ It prints the login on a line of its own (`login: mika`) and, under it,
 - `ctl` prints a link only when its output is a terminal. That is a tripwire,
   not a lock (`ssh -t` provides a terminal), so the rule is written down as
   well: **a session never runs `invite`** (`CLAUDE.md`).
-- Mika runs the line once per founder and passes the login and the link in the
-  messenger the founders already use. A link that turns out to be dead when
+- A link issued from the page is in that one answer and nowhere else: the page
+  shows it once, and neither log nor any file holds it — the server keeps its
+  sha256, as for a link issued on the server.
+- Mika issues a link once per person — from the page, or with the line above —
+  and passes the login and the link in the messenger the founders already use. A link that turns out to be dead when
   its founder opens it is the alarm that somebody else used it; issuing and
   use are both in the security log.
 - **A backup must not bring a used link back.** A pending link is a record in
@@ -227,10 +291,11 @@ Set-Cookie: __Host-money=<token>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Ag
   (`money-user <stand> logout <login>`). Whoever holds a copy of that cookie
   could go on using it. Money's own pages say so in words instead of "nothing
   changed".
-- The page has no sign-out control. Until it gets one, the way out is the
-  address `/login` (or `/logout`, which redirects there): for a signed-in
-  founder it shows «Вы вошли как {firstName}», the login of that session
-  («Ваш логин: …»), a link «Открыть Money» and a button «Выйти».
+- The page signs out from «Настройки → Люди», one's own card: «Выйти»
+  (since 9 October 2026). The address `/login` (or `/logout`, which redirects
+  there) is the other way out: for a signed-in founder it shows «Вы вошли как
+  {firstName}», the login of that session («Ваш логин: …»), a link «Открыть
+  Money» and a button «Выйти».
 - `GET /login` never redirects. That removes the loop a design draft had
   between `/` and `/login` for a session in its last day; the form that such
   a session is shown comes with its login filled in. The server says which of
@@ -286,8 +351,9 @@ signing in on a new device. Four things bound this:
 4. **one address cannot shut the door that link leads to** — see the next
    section.
 
-What remains: only a person with root ssh can issue that link. If Mika cannot
-be reached, nobody can reset a password.
+What remains: only the owner can issue that link for somebody else, and only
+a person with root ssh for the owner. If Mika cannot be reached, nobody can
+reset a password.
 
 ## Signed-out slots: strangers do not hold the threads founders need
 
@@ -620,6 +686,9 @@ aside holds its lines for the days since the backup. Its events:
 | `boot` | the service started |
 | `sign-in`, `sign-out` | a founder signed in; a session was closed by its owner |
 | `sign-in-failed` | a wrong sign-in: the address and the count; the login only when it is a founder's |
+| `password-changed` | a signed-in person chose a new password; the login's other sessions were closed |
+| `password-check-failed` | a signed-in person was asked for their own password again — before a link was issued or a password changed — and gave another |
+| `user-added`, `user-renamed`, `role-changed` | the owner added a person, gave one another name, said what one may do |
 | `sign-in-blocked`, `link-blocked` | the limiter refused the sign-in door or the set-password door; once per key and window |
 | `login-flood` | more than 200 attempts were turned away within one clock hour; the rest of that hour's are not written one by one |
 | `link-issued`, `link-used`, `link-refused` | a one-time link was issued on the server, used, or tried when it does not work |
@@ -634,8 +703,9 @@ aside holds its lines for the days since the backup. Its events:
 | `floor-raised` | the server was told that no revision of a document at or below a number may be given out again — after a stand was put back from a backup, or before the cut-over import |
 | `storage-unsynced` | a file was put in place, but the disk did not confirm that it will survive a power cut |
 
-The `/data` page lists the last 50 entries for a signed-in founder, so what was
-done with root on the server leaves a trace the founders can see.
+The `/data` page lists the last 50 entries for the owner, so what was done
+with root on the server leaves a trace the owner can see. Nobody else is sent
+them.
 
 Errors are codes plus fixed English sentences. A `500` is `{error: "internal"}`
 and a request id; the detail is in the log.
@@ -663,6 +733,9 @@ and a request id; the detail is in the log.
 | Path traversal, reading the data folder over HTTP | no path mapping exists; a fixed table of exact paths; the post-deploy smoke asks for `/server.py`, `/.git/config`, `/data/ledger/current.json` and a path that climbs out of the vendor folder, and expects none of them |
 | What a stranger can learn | signed out, only the pinned list of paths answers; everything else answers alike. The three vendor names answer `401` where other names under `/money/vendor/` answer `302`: they are the names of the libraries the page loads and say nothing about what a stand holds |
 | Secrets in logs | fixed log fields; tokens only in bodies and fragments. Caddy redacts `Cookie` in its own log by default — not verified on the server |
+| A reader, or somebody with a reader's password, changing the documents | the document doors refuse a reader's save before its body is read (`403 read_only`); the role is the server's, read at every request; `/data` offers a reader no upload and the doors would refuse one |
+| Somebody who is let in letting others in, or making themselves more | the doors under `/api/people` answer the owner alone (`403 not_owner`); "owner" is not a value an account can hold |
+| A page the owner walked away from being used to make a link | the owner's password is asked for again, and counted like a failed sign-in when it is wrong. Residual 22 |
 | A link intercepted on its way to a founder | single use, 48 hours; issuing and use are in the security log and on `/data`; a dead link is the alarm. Residual: no confirmation code yet |
 | A used link, an old password or a re-enabled login coming back with a backup | a whole-stand restore keeps the newer accounts file when it reads, and otherwise retires every pending link before the stand serves |
 | A page left open from before a restore or the cut-over saving its old copy over what came after | revisions never come back: the floor (`ctl floor`), raised by `money-restore` for both documents and before the cut-over import |
@@ -718,12 +791,13 @@ and a request id; the detail is in the log.
 9. **The edge is the platform's.** Money's two proxy blocks live in the
    platform's `Caddyfile.edge`; a mistake in that file takes every name of both
    products down. `docs/deploy.md` has the guards.
-10. **The page has not been changed for the split yet.** It draws with
-    `innerHTML`, has no sign-out control and no stand mark, its own import
-    works on the test stand, and behind a closed door it still says that Money
-    opens under the platform's sign-in. Since the hand-over it is this
-    repository's to change; none of these is changed yet. The policy is the
-    compensating control for the first; rules for the import.
+10. **The page is only partly changed for the split.** It draws with
+    `innerHTML` — the names the owner gives people included, each through the
+    page's own escape — has no stand mark, its own import works on the test
+    stand, and behind a closed door it still says that Money opens under the
+    platform's sign-in. The sign-out control came on 9 October 2026 with
+    «Люди». The policy is the compensating control for the first; rules for
+    the import.
 11. **The vendored SheetJS is 0.18.5**, which has a published prototype-pollution
     advisory. Until it is replaced the enforced policy is the compensating
     control.
@@ -758,6 +832,13 @@ and a request id; the detail is in the log.
     `/data` downloads under the pages' policy, and that password managers file
     the login with the password on the set-password page, is checked only
     there; Safari, Firefox and the real edge are unchecked.
+22. **The owner's password, in a browser, lets a person in.** Until 9 October
+    2026 a link could be issued only with root on the server. Now whoever
+    holds the owner's password and a sign-in of the owner's can issue one from
+    the page — for a reader or an editor, never for a second owner — and so
+    can add a login of their own choosing. There is no second factor and no
+    confirmation code. Every such step is a line in the security log, which
+    the owner reads on `/data`.
 
 ## Before prod
 
@@ -799,7 +880,8 @@ Not in the first version; none of these is built.
   the server's Caddy: it takes stalled bodies and slow uploads off the stand.
 - A cap on how far ahead a prod policy override may be dated.
 - A longer reach for the request log within one container's life.
-- A sign-out control and a stand mark in the page, and its closed-door words.
+- A stand mark in the page, and its closed-door words. (The sign-out control
+  is there since 9 October 2026: «Настройки → Люди», one's own card.)
 - Blocking outbound network for the container.
 - A scheduled rebuild for Python patch releases (today `selfcheck` only prints
   the image's age).

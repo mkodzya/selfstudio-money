@@ -37,8 +37,10 @@ and so is every text a person sees on Money's pages.
 3. **Prod only on the owner's word.** That includes the edge proxy, which is
    read from the platform's prod checkout. A word for test is not a word for
    prod.
-4. **A session never runs `invite` on a stand.** The command prints a one-time
-   sign-in link. A person runs it, in their own Terminal.
+4. **A session never runs `invite` on a stand, and never presses «Ссылка для
+   входа».** The command prints a one-time sign-in link, and so does the page's
+   «Настройки → Люди» for the owner (`POST /api/people/link`). A person runs
+   the one in their own Terminal and presses the other in their own browser.
 5. **Secrets never pass through a chat**: no password, no one-time link, no
    session cookie, no private key.
 6. **The laptop tool changes only on the owner's word.** `server.py`, the
@@ -265,7 +267,22 @@ a deploy:
   exactly one: an older plan rewritten as version 3, once. A request on a
   timer would also keep a session from ever going idle.
 - **`/api/me` is short**: `id` (the login), `name`, `firstName`,
-  `isFounderTier`, `stand`, `version`. Nothing else of the platform's is there.
+  `isFounderTier`, `role`, `canWrite`, `canManage`, `stand`, `version`. Nothing
+  else of the platform's is there. The page waits for this answer before it
+  draws: what it may offer depends on it.
+- **A reader saves nothing** (the owner's decision of 9 October 2026). The
+  first login `MONEY_FOUNDERS` names is the owner; everybody else reads until
+  the owner makes them an editor. For a reader (`canWrite: false`) the page
+  draws nothing that changes a document and sends no `PUT` — not the save it
+  makes when it opens either — and the server answers a reader's `PUT` with
+  `403 read_only` whatever the page does. **Every new control that changes a
+  document is added to `ACT` in `index.html`**: that list is what a reader's
+  page hides, shuts and ignores, and the check `rv-reader` walks every tab for
+  a control that is in neither.
+- **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
+  `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
+  `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them
+  is asked before the screen is opened.
 - **Four methods**: `GET`, `HEAD`, `POST`, `PUT`. A `POST` to a document door
   is `405`, so `sendBeacon` cannot save on a stand.
 - **Addresses**: the page is at `/` on a host that begins with `finance.`. Of
@@ -273,9 +290,11 @@ a deploy:
   `/money/` and `/money/index.html` lead anywhere.
 - **Refusals the platform never sent**: `storage_busy`, `storage_damaged`,
   `storage_failed`, `body_too_large`, `bad_origin`, `busy`,
-  `too_many_connections`, `auth_damaged`; and `updatedAt` is `null` before the
-  first save. The page words `409` as "reload", `401` and `403` as "sign in
-  again", and everything else as "check the connection".
+  `too_many_connections`, `auth_damaged`, `read_only`, `not_owner`; and
+  `updatedAt` is `null` before the first save. The page words `409` as
+  "reload", `403 read_only` as "you only look now" (and becomes a reader's
+  page), any other `401` or `403` as "sign in again", and everything else as
+  "check the connection".
 
 If a page has to ship before it fits the policy, the policy can be sent as
 report-only for a dated while (`docs/deploy.md`, "If a page breaks under the
@@ -399,8 +418,11 @@ GitHub runner; that guard is a last line, not a permission.
   word once given for the test stand does not cover any of these.
 - **A session never runs `invite` on a server stand**, prod or test — not
   `money-user <stand> invite <login>`, not `python -m moneyd.ctl user invite`
-  in the stand's container, not with `ssh -t`. The link it prints signs its
-  holder in as a founder. Mika runs the line in a Terminal and passes each
+  in the stand's container, not with `ssh -t` — **and never asks the page for
+  a link there**: not «Ссылка для входа» in «Настройки → Люди», not
+  `POST /api/people/link` by hand. The link signs its holder in. A session
+  that drives a stand's page in a browser stays away from that card; it also
+  never types the owner's password, which that card asks for. Mika runs the line in a Terminal and passes each
   link to its founder, together with the login the command prints above it; a
   session may write the line out for Mika to copy - as plain text, never as a
   block the app can run. Run from inside a conversation, the command prints

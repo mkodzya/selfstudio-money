@@ -3,7 +3,7 @@
 API for ``__main__``, ``ctl`` and the tests
 -------------------------------------------
 ``ROUTES``
-    The whole surface as data: ``Route(method, path, session, handler, body, doc)``, one row
+    The whole surface as data: ``Route(method, path, session, handler, body, doc, need)``, one row
     per method and path, in the order of ``docs/api.md``. Nothing is served that is not a
     row here, and no path is ever mapped to a file. ``HEAD`` is answered wherever ``GET``
     is, with the same headers and no body; it has no rows of its own.
@@ -42,6 +42,8 @@ What a request passes, in this order, and what it is told when it does not
     the route                                 signed out: 401 under /api/ and for the vendor files,
                                               302 /login for the rest; signed in: 404, or 405 with Allow
     /api/ only: Origin and Sec-Fetch-Site     403 bad_origin
+    what the door asks of the one signed in   403 read_only (a door that saves, and a reader)
+                                              403 not_owner (a door of the owner's, and anybody else)
     a door with a body: Content-Type          415 bad_content_type
                         Content-Length        411 length_required, 413 body_too_large
                         free space (PUT)      507 storage_failed
@@ -138,6 +140,7 @@ class Route(NamedTuple):
     handler: str            # Handler._do_<handler>
     body: Optional[str] = None   # "auth" | "ledger" | "plan": a JSON body under that limit and deadline
     doc: Optional[str] = None    # "ledger" | "plan": which document a document door is for
+    need: str = ""          # "write": not for a reader; "owner": for the owner alone. Judged before the body is read
 
 
 ROUTES = (
@@ -152,6 +155,7 @@ ROUTES = (
     Route("POST", "/api/auth/login", False, "api_login", body="auth"),
     Route("POST", "/api/auth/setup", False, "api_setup", body="auth"),
     Route("POST", "/api/auth/logout", False, "api_logout", body="auth"),
+    Route("POST", "/api/auth/password", True, "api_password", body="auth"),
     Route("GET", "/", True, "page_money"),
     Route("GET", "/index.html", True, "page_money"),
     Route("GET", "/money/vendor/pdf.min.js", True, "vendor"),
@@ -160,9 +164,13 @@ ROUTES = (
     Route("GET", "/data", True, "page_data"),
     Route("GET", "/api/me", True, "api_me"),
     Route("GET", "/api/founder/money", True, "api_doc_get", doc="ledger"),
-    Route("PUT", "/api/founder/money", True, "api_doc_put", body="ledger", doc="ledger"),
+    Route("PUT", "/api/founder/money", True, "api_doc_put", body="ledger", doc="ledger", need="write"),
     Route("GET", "/api/founder/money/cash", True, "api_doc_get", doc="plan"),
-    Route("PUT", "/api/founder/money/cash", True, "api_doc_put", body="plan", doc="plan"),
+    Route("PUT", "/api/founder/money/cash", True, "api_doc_put", body="plan", doc="plan", need="write"),
+    Route("GET", "/api/people", True, "api_people", need="owner"),
+    Route("POST", "/api/people", True, "api_people_add", body="auth", need="owner"),
+    Route("POST", "/api/people/update", True, "api_people_update", body="auth", need="owner"),
+    Route("POST", "/api/people/link", True, "api_people_link", body="auth", need="owner"),
     Route("GET", "/tracker/board", True, "redirect_home"),
     Route("GET", "/dashboard", True, "redirect_home"),
     Route("GET", "/money/", True, "redirect_home"),
@@ -216,6 +224,12 @@ _TYPE_JSON = "application/json; charset=utf-8"
 _TYPE_JS = "text/javascript; charset=utf-8"
 _TYPE_CSS = "text/css; charset=utf-8"
 _TYPE_TEXT = "text/plain; charset=utf-8"
+
+#: What a door says to somebody who is signed in and may not use it: ``Route.need`` -> (code, sentence).
+_NEEDS = {
+    "write": ("read_only", "This sign-in can look, not change."),
+    "owner": ("not_owner", "Only the owner manages who can sign in."),
+}
 
 #: What a refusal of the HTTP layer itself says: status -> (code, a fixed English sentence).
 _REFUSALS = {
@@ -507,10 +521,11 @@ _WHEN = re.compile(r'<[a-z][a-z0-9]*\b[^<>]*?\bdata-when="([a-z -]*)"')
 _PAGES = {
     "login": ("stand", "state", "firstName", "login"),
     "set-password": ("stand",),
-    "data": ("stand", "firstName", "entries"),
+    "data": ("stand", "state", "firstName", "entries"),
 }
-#: The states a page with states can be asked for: its ``state`` value picks one.
-_STATES = {"login": ("form", "ending", "signed-in")}
+#: The states a page with states can be asked for: its ``state`` value picks one. /data has the
+#: three roles for states: what is not for a reader is not shown to one.
+_STATES = {"login": ("form", "ending", "signed-in"), "data": ("owner", "editor", "reader")}
 
 
 class WebFiles:
@@ -895,6 +910,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 code = auth.api_refusal(settings, method, self._single("Origin"), self._single("Sec-Fetch-Site"))
                 if code is not None:
                     return self._refuse(403, code)
+            # What the door asks of the one who is signed in - said before a byte of a body is
+            # read: a reader's save is turned away whole, however large it is.
+            if route.need and not (identity.can_manage if route.need == "owner" else identity.can_write):
+                return self._refuse(403, *_NEEDS[route.need])
             if route.body is not None and not self._read_body(route):
                 return
             getattr(self, "_do_" + route.handler)(route)
@@ -1159,15 +1178,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _do_page_data(self, route: Route) -> None:
         server = self.server
-        entries = server.security_log.tail(50) if server.security_log is not None else []
-        self._html(server.web.render("data", firstName=self._identity.first_name,
+        identity = self._identity
+        # The journal names everybody's sign-ins and where they came from: it is the owner's to read.
+        entries = server.security_log.tail(50) if identity.can_manage and server.security_log is not None else []
+        self._html(server.web.render("data", state=identity.role, firstName=identity.first_name,
                                      entries=json.dumps(entries, separators=(",", ":"))))
 
     def _do_api_me(self, route: Route) -> None:
         identity = self._identity
         settings = self.server.settings
         self._json(200, {"id": identity.login, "name": identity.first_name, "firstName": identity.first_name,
-                         "isFounderTier": True, "stand": settings.stand, "version": settings.version})
+                         "isFounderTier": True, "role": identity.role, "canWrite": identity.can_write,
+                         "canManage": identity.can_manage, "stand": settings.stand, "version": settings.version})
 
     def _do_api_doc_get(self, route: Route) -> None:
         # The stored file is the answer, byte for byte.
@@ -1242,6 +1264,96 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except config.Refusal as refusal:
             return self._refusal(refusal, gone)
         self._json(200, {"ok": True}, headers=gone)
+
+    def _do_api_password(self, route: Route) -> None:
+        server = self.server
+        fields = self._fields()
+        if fields is None:
+            return
+        new = server.auth.change_password(self._identity, fields.get("current"), fields.get("password"),
+                                          self._addr, self._agent())
+        self._json(200, {"ok": True}, headers=(("Set-Cookie", auth.session_cookie(server.settings, new.token)),))
+
+    # -- the owner's doors: who can sign in, and what each may do ---------------
+
+    def _people(self) -> Dict[str, Any]:
+        """The list as the page draws it. Never a hash, a token or a link."""
+        people = []
+        for person in self.server.auth.people():
+            user = person.user
+            if not user.listed:
+                continue                    # an account MONEY_FOUNDERS has dropped: nobody's to manage
+            people.append({
+                "login": user.login, "name": user.first_name, "role": user.role, "me": user.login == self._identity.login,
+                "hasPassword": user.has_password, "passwordSetAt": user.password_set_at, "disabled": user.disabled,
+                "linkExpires": user.invite_expires, "added": user.added,
+                "lastSeen": config.iso(person.last_seen) if person.last_seen is not None else None})
+        return {"people": people, "max": auth.PEOPLE_MAX}
+
+    def _fields(self) -> Optional[Dict[str, Any]]:
+        """The body of a small door as an object; None after the 400 has been sent."""
+        body = self._parse(self._take())
+        if body is _NOT_JSON:
+            return None
+        return body if isinstance(body, dict) else {}
+
+    def _do_api_people(self, route: Route) -> None:
+        self._json(200, self._people())
+
+    def _do_api_people_add(self, route: Route) -> None:
+        fields = self._fields()
+        if fields is None:
+            return
+        login, name = fields.get("login"), fields.get("name")
+        self.server.auth.add_person(login.strip().lower() if isinstance(login, str) else login,
+                                    name.strip() if isinstance(name, str) else name, by=self._identity.login)
+        self._json(200, self._people())
+
+    def _do_api_people_update(self, route: Route) -> None:
+        """A name, a role, or the switch that shuts a login out - whichever of them the body names."""
+        server = self.server
+        fields = self._fields()
+        if fields is None:
+            return
+        login, name, role, disabled = (fields.get(key) for key in ("login", "name", "role", "disabled"))
+        by = self._identity.login
+        if disabled is not None and not isinstance(disabled, bool):
+            raise auth.BadPerson("nothing")
+        if name is None and role is None and disabled is None:
+            raise auth.BadPerson("nothing")
+        if login == server.auth.users.owner and (role is not None or disabled is not None):
+            raise auth.OwnerFixed()         # nobody could undo it from the page
+        if name is not None or role is not None:
+            server.auth.update_person(login, by, name=name.strip() if isinstance(name, str) else name, role=role)
+        if disabled is not None:
+            user = server.auth.users.get(login) if isinstance(login, str) else None
+            if user is None or not user.listed:
+                raise auth.UnknownLogin()
+            server.auth.set_disabled(login, disabled, by=by)
+        self._json(200, self._people())
+
+    def _do_api_people_link(self, route: Route) -> None:
+        """A one-time link for somebody, shown to the owner once - after the owner's password, again.
+
+        A link signs its holder in for thirty days and sets their password; a session somebody
+        walked away from must not be enough to mint one.
+        """
+        server = self.server
+        fields = self._fields()
+        if fields is None:
+            return
+        login = fields.get("login")
+        user = server.auth.users.get(login) if isinstance(login, str) else None
+        if user is None or not user.listed:
+            raise auth.UnknownLogin()
+        by = self._identity.login
+        if login == by:
+            # The owner changes their own password at its own door; a way back in for an owner who
+            # has lost it is made on the server, by somebody who can reach it.
+            raise auth.OwnerFixed()
+        server.auth.confirm_password(by, fields.get("password"), self._addr)
+        link, expires = server.auth.issue_invite(login, by=by)
+        self._json(200, {"login": login, "link": link, "expires": config.iso(expires)})
 
     def _agent(self) -> str:
         return self._single("User-Agent") or ""

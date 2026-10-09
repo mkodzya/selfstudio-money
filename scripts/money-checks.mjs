@@ -310,13 +310,59 @@ const store = {
   led: { rev: 3, doc: demoLedger(T), puts: 0 },
   cash: { rev: 2, doc: demoPlan(T), puts: 0, clash: null, bases: [], fail: false },
 };
+// Who the stand says is signed in. Without a role - a server of before there were readers, and every check but the
+// last few - the page offers everything, as it always did. `people` is the owner's list, `asked` what the page sent
+// to the doors of «Люди» (a password is noted as given or not, never as it is), `pass` the password the doors accept.
+const ME0 = { id: 'p1', name: 'Mika Example', firstName: 'Mika', isFounderTier: true };
+const PASS = 'correct horse battery staple';
+const LINK = `http://localhost:8097/set-password#t=${'A'.repeat(43)}`;
+Object.assign(store, { me: ME0, people: null, asked: [], pass: PASS });
 // A fresh pair of documents for a check that loads the page on them. Each pair starts at revisions nobody has seen:
 // a page of the check before, closing with a change half a second old, still sends it — and must be refused.
 let gen = 100;
 const serve = (led, cash) => {
   gen += 100;
   Object.assign(store.led, { rev: gen + 1, doc: JSON.parse(JSON.stringify(led)), puts: 0 });
-  Object.assign(store.cash, { rev: gen, rev0: gen, doc: JSON.parse(JSON.stringify(cash)), puts: 0, clash: null, bases: [], fail: false, putFail: false, failed: 0 });
+  Object.assign(store.cash, { rev: gen, rev0: gen, doc: JSON.parse(JSON.stringify(cash)), puts: 0, clash: null, bases: [], fail: false, putFail: false, failed: 0, deny: false });
+  Object.assign(store.led, { deny: false });
+  Object.assign(store, { me: ME0, people: null, asked: [], pass: PASS });
+};
+// The doors of «Люди», as docs/api.md has them: the owner's four, one's own password, and the way out.
+const peopleDoor = (method, url, b) => {
+  const list = () => [200, { people: store.people, max: 20 }];
+  const refuse = (status, error, more = {}) => [status, { error, message: error, ...more }];
+  if (url === '/api/auth/logout') return [200, { ok: true }];
+  if (url === '/api/auth/password') {
+    if (b.current !== store.pass) return refuse(403, 'wrong_password');
+    if (typeof b.password !== 'string' || b.password.length < 12) return refuse(400, 'weak_password', { min: 12 });
+    store.pass = b.password;
+    return [200, { ok: true }];
+  }
+  if (!store.me.canManage || !store.people) return refuse(403, 'not_owner');
+  const who = store.people.find((p) => p.login === b.login);
+  if (url === '/api/people' && method === 'GET') return list();
+  if (url === '/api/people') {
+    if (!/^[a-z][a-z0-9._-]{0,31}$/.test(b.login || '')) return refuse(400, 'bad_person', { reason: 'login' });
+    if (!b.name) return refuse(400, 'bad_person', { reason: 'name' });
+    if (who) return refuse(409, 'login_taken');
+    store.people.push({ login: b.login, name: b.name, role: 'reader', me: false, hasPassword: false, passwordSetAt: null, disabled: false, linkExpires: null, added: true, lastSeen: null });
+    return list();
+  }
+  if (!who) return refuse(404, 'unknown_login');
+  if (url === '/api/people/update') {
+    if (who.role === 'owner' && (b.role !== undefined || b.disabled !== undefined)) return refuse(409, 'owner_fixed');
+    if (b.name !== undefined) who.name = b.name;
+    if (b.role !== undefined) who.role = b.role;
+    if (b.disabled !== undefined) { who.disabled = b.disabled; if (b.disabled) who.linkExpires = null; }
+    return list();
+  }
+  if (url === '/api/people/link') {
+    if (b.password !== store.pass) return refuse(403, 'wrong_password');
+    if (who.disabled) return refuse(409, 'login_disabled');
+    who.linkExpires = '2026-10-08T11:00:00Z';
+    return [200, { login: who.login, link: LINK, expires: who.linkExpires }];
+  }
+  return refuse(404, 'not_found');
 };
 http
   .createServer(async (req, res) => {
@@ -324,12 +370,23 @@ http
     const send = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     const body = () => new Promise((r) => { let s = ''; req.on('data', (c) => (s += c)); req.on('end', () => r(s)); });
     // The page asks who is signed in, to sign the changes it makes to the plan.
-    if (url === '/api/me') return send(200, { id: 'p1', name: 'Mika Example', firstName: 'Mika', isFounderTier: true });
+    if (url === '/api/me') return send(200, store.me);
+    if (url === '/api/people' || url.startsWith('/api/people/') || url === '/api/auth/password' || url === '/api/auth/logout') {
+      const b = req.method === 'GET' ? {} : JSON.parse((await body()) || '{}');
+      const noted = { ...b };
+      for (const k of ['password', 'current']) if (k in noted) noted[k] = noted[k] ? 'given' : 'empty';
+      store.asked.push([req.method, url, noted]);
+      return send(...peopleDoor(req.method, url, b));
+    }
+    // Where «Выйти» leads: the stand's own sign-in page, which is not this file's to check.
+    if (url === '/login') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end('<title>login</title>the sign-in page'); }
     const doc = url === '/api/founder/money' ? store.led : url === '/api/founder/money/cash' ? store.cash : null;
     if (doc) {
       // The plan's server can be made to fail, for the check of a plan that does not load.
       if (req.method === 'GET') return doc.fail ? send(500, { error: 'boom' }) : send(200, { rev: doc.rev, doc: doc.doc, updatedAt: null });
       const b = JSON.parse(await body());
+      // The owner has made the person a reader since the page was opened: the server takes no save from them.
+      if (doc.deny) { doc.denied = (doc.denied || 0) + 1; return send(403, { error: 'read_only', message: 'This sign-in can look, not change.' }); }
       // A page that has been closed may still be heard from; what it sends is not this check's.
       if (b.base < doc.rev - 50) return send(409, { error: 'money_stale', rev: doc.rev });
       // The server can be made to fail a save, for the check of a change that did not reach it.
@@ -363,7 +420,7 @@ const errs = [];
 // drawn away only when that motion ends. A check presses and reads at once, so every page here asks for less
 // motion - the page then plays none and waits for none; `motion` is for the one check of the motion itself.
 const CALM = { reducedMotion: 'reduce' };
-async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null, folded = false, motion = false } = {}) {
+async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900, hash = '', quiet = null, folded = false, motion = false, who = 'Mika' } = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: w < 500 ? 2 : 1, ...(motion ? {} : CALM) });
   // «Аналитика» on «Сегодня» is folded until a founder opens it, and the page remembers that he did. The checks read
   // and press what is under it, so they come as that founder; `folded` is for the check of the fold itself.
@@ -377,7 +434,7 @@ async function open(name, at = '2026-10-06T12:00:00+01:00', { w = 1320, h = 900,
   await page.clock.install({ time: new Date(at) });
   await page.goto(BASE + '/money/index.html' + hash);
   await page.waitForFunction(() => !document.querySelector('#sync').textContent.includes('загружаю'));
-  await page.waitForFunction(() => window.__cash && window.__cash.state() && window.__money.by === 'Mika');
+  await page.waitForFunction((who) => window.__cash && window.__cash.state() && window.__money.by === who, who);
   return page;
 }
 const page = await open('money');
@@ -4027,8 +4084,8 @@ await run('old plan', 'the one way in for the old planner\'s plan: wrapped or ba
   const pg = await open('old plan in');
   await pg.waitForSelector('#view-today');
   await goCash(pg);
-  same([await pg.$$eval('#view-cash [data-cs-data], #view-cash #cs-data, #view-cash [data-cs-export]', (l) => l.length), await pg.$eval('#cs-old', (e) => e.open), await text(pg, '#cs-old summary'), await pg.evaluate(() => /скопировать/i.test(document.body.textContent))], [0, false, 'Загрузить план из старой Кассы', false],
-    'the «Данные» panel, its export and its copy buttons are gone; one quiet line at the foot of «План» is left, closed until asked for — and no element on the page says «Скопировать»');
+  same([await pg.$$eval('#view-cash [data-cs-data], #view-cash #cs-data, #view-cash [data-cs-export]', (l) => l.length), await pg.$eval('#cs-old', (e) => e.open), await text(pg, '#cs-old summary'), await pg.evaluate(() => /скопировать/i.test(document.querySelector('main').textContent))], [0, false, 'Загрузить план из старой Кассы', false],
+    'the «Данные» panel, its export and its copy buttons are gone; one quiet line at the foot of «План» is left, closed until asked for — and nothing drawn on any screen says «Скопировать» (the one such button of the page stands beside a one-time link in «Люди», while that link is shown: rv-people)');
   await pg.click('#cs-old summary');
   const out = () => pg.$eval('#cs-imp-out', (e) => [...e.querySelectorAll('p, span, button')].filter((x) => !x.querySelector('button')).map((x) => x.textContent.replace(/\s+/g, ' ').trim()).join(' '));
   for (const [junk, why] of [['hello', 'Это не похоже на план старой Кассы — проверьте, что текст взят целиком.'], ['{"foo":1}', 'В этих данных нет счетов и курсов — это не план старой Кассы.'], [JSON.stringify(ledA()), 'В этих данных нет счетов и курсов — это не план старой Кассы.'], ['{"fx":{},"banks":"x"}', 'В этих данных нет счетов и курсов — это не план старой Кассы.'], ['[1,2]', 'В этих данных нет счетов и курсов — это не план старой Кассы.'], ['', 'Сначала вставьте текст в поле.']]) {
@@ -5211,6 +5268,216 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
   await holds(one, 'day one');
   await shot(one, 'live-d-day-one');
   await one.context().close();
+});
+
+// =====================================================================================================================
+// WHO MAY DO WHAT. A reader's page, and «Настройки → Люди» (the owner's decision of 9 October 2026: Misha and Vanya
+// read, Mika alone writes, and Mika makes their sign-ins himself, from the page).
+// =====================================================================================================================
+const man = (login, name, role, more = {}) => ({ login, name, role, me: false, hasPassword: false, passwordSetAt: null, disabled: false, linkExpires: null, added: false, lastSeen: null, ...more });
+const asOwner = () => {
+  store.me = { id: 'mika', name: 'Mika', firstName: 'Mika', isFounderTier: true, role: 'owner', canWrite: true, canManage: true };
+  store.people = [man('mika', 'Mika', 'owner', { me: true, hasPassword: true, passwordSetAt: '2026-10-01T09:00:00Z', lastSeen: '2026-10-06T10:55:00Z' }), man('misha', 'Misha', 'reader'), man('vanya', 'Vanya', 'reader')];
+};
+const asReader = () => { store.me = { id: 'misha', name: 'Misha', firstName: 'Misha', isFounderTier: true, role: 'reader', canWrite: false, canManage: false }; };
+// Every control of the screen in view whose press, change or typing would change a document, and that can be used.
+const offered = (pg) => pg.evaluate(() => [...document.querySelectorAll(window.__money.acts)].filter((e) => {
+  const view = e.closest('main > [id^="view-"]');
+  if (view && view.hidden) return false;
+  return e.matches('button,a,label,details,input,select,textarea') && !e.disabled && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+}).map((e) => `${e.tagName.toLowerCase()} ${(e.textContent || e.getAttribute('aria-label') || e.id || '').trim().slice(0, 30)}`));
+const metas = (pg) => texts(pg, '#view-people .ppl-meta');
+
+await run('rv-reader', 'a reader is shown everything and offered nothing that changes it, and the page sends no save', async () => {
+  // An older plan is rewritten as version 3 by whoever opens it first - the one save a page makes unasked. A reader
+  // is not that somebody: their page reads the plan as version 3 and writes nothing.
+  const v1 = {
+    v: 1, savedAt: '2026-10-01T09:30:00.000Z', cushion: 5000, horizon: '2026-11-10', fx: { USD: 1.3, RUB: 110, EUR: 1.2, AMD: 500 },
+    banks: [{ id: 'r1', name: 'Wise — GBP', amt: 18000, cur: 'GBP', bank: 'Wise', on: true, tag: '', info: false, date: '' }],
+    inflows: [{ id: 'r3', name: 'Client A', amt: 8000, cur: 'GBP', bank: 'Wise', on: true, tag: '', info: false, date: '2026-10-27' }],
+    team: [], taxes: [], other: [],
+  };
+  serve(ledA(), v1);
+  const writer = await open('somebody who may save');
+  same(await puts('cash', 1), 1, 'for somebody who may save, opening this plan saves it once (the check is not vacuous)');
+  await writer.context().close();
+  serve(ledA(), v1);
+  asReader();
+  const old = await open('a reader, an older plan', undefined, { who: 'Misha' });
+  await sleep(1500);
+  same([store.cash.puts, store.led.puts, store.cash.doc.v, await old.evaluate(() => window.__cash.state().v)], [0, 0, 1, 3],
+    'a reader\'s page sends no save when it opens: the older plan is read as version 3 and left as it lies');
+  await old.context().close();
+
+  // The made-up studio, as a reader sees it.
+  serve(demoLedger(T), demoPlan(T));
+  asReader();
+  const pg = await open('a reader', undefined, { who: 'Misha' });
+  same([await pg.evaluate(() => window.__money.readOnly), await text(pg, '#roSay'), await pg.isVisible('#roSay'), await pg.isHidden('#sync')],
+    [true, 'Misha · только просмотр', true, true], 'the bar says whose page this is and that it only looks; the «сохранено» pill has nothing to say here');
+  const fig = (await look(pg)).live;
+  ok(Object.keys(fig).length > 5, 'the figures of «Сегодня» are read', Object.keys(fig).length);
+  for (const t of ['today', 'cash', 'inbox', 'dashboard', 'reports', 'settings']) {
+    await pg.click(`.nav [data-tab="${t}"]`);
+    await sleep(120);
+    same(await offered(pg), [], `«${t}»: nothing that changes anything can be pressed or typed`);
+  }
+  await shot(pg, 'rv-reader-settings');
+  same(await texts(pg, '#view-settings .set-nav button'), ['Общие', 'Таблица', 'Люди'], '«Настройки» has no «Загрузка выписок» for a reader');
+  same(await pg.$$eval('#view-settings input[data-fx]', (l) => [l.length, l.every((e) => e.disabled)]), [4, true], 'the rates are shown, and not to be typed in');
+  await pg.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  same(await offered(pg), [], '«Таблица»: the same');
+  await pg.click('#view-ledger tbody tr[data-row]');
+  same(await pg.$('#e-l'), null, 'a row of «Таблица» does not open the form that changes it');
+  // «Касса»: the sum is a figure, not a box; a row opens to be read
+  await pg.click('.nav [data-tab="cash"]');
+  same([await pg.$$eval('#view-cash input.cs-amt', (l) => l.length), (await pg.$$eval('#cs-sec-team .cs-at', (l) => l.length)) > 3, await pg.isVisible('#view-cash [data-cs-fold]')],
+    [0, true, true], 'in a month of «Касса» every sum is a figure; «Показать N строк» of «Подписки» is still there to press');
+  await pg.click('#cs-sec-team tr.cs-r:not(.cs-done)');
+  await pg.waitForSelector('#view-cash [data-ed-card="row"]');
+  same([await texts(pg, '#view-cash [data-ed-card="row"] button'), /Счёт: \S+ [A-Z]{3}/.test(await text(pg, '#view-cash [data-ed-card="row"] .ed-why')), await pg.$$eval('#view-cash [data-ed-card="row"] input, #view-cash [data-ed-card="row"] select', (l) => l.length)],
+    [['Закрыть'], true, 0], 'its card says what the row is - whose it is, the account, the day - and has «Закрыть» and nothing else');
+  await shot(pg, 'rv-reader-cash');
+  await pg.click('#view-cash [data-ed-card="row"] [data-ed-x]');
+  await pg.click('#view-cash [data-cs-view="days"]');
+  await sleep(120);
+  same(await offered(pg), [], '«Касса · По дням»: the same');
+  // «Сегодня»: «Денег сейчас» opens «Вписать остаток» for somebody who may save - and nothing for a reader
+  await pg.click('.nav [data-tab="today"]');
+  await pg.click('#view-today [data-ed-bal]');
+  same(await pg.$('[data-ed-card]'), null, 'a press on «Денег сейчас» opens nothing');
+  same((await look(pg)).live, fig, 'and every figure of «Сегодня» is what it was when the page opened');
+  await sleep(900);
+  same([store.led.puts, store.cash.puts], [0, 0], 'after all of it: not one save was sent, to either document');
+  await pg.context().close();
+
+  // The address of «Загрузка выписок» leads a reader to «Настройки».
+  serve(demoLedger(T), demoPlan(T));
+  asReader();
+  const up = await open('a reader at #upload', undefined, { who: 'Misha', hash: '#upload' });
+  same([await up.isHidden('#view-upload'), await up.isVisible('#view-settings')], [true, true], 'the address of «Загрузка выписок» shows a reader «Настройки»');
+  await up.context().close();
+});
+
+await run('rv-reader-late', 'somebody the owner makes a reader while their page stands open is told so at their next save, and offered nothing after it', async () => {
+  serve(demoLedger(T), demoPlan(T));
+  asOwner();
+  store.me = { ...store.me, id: 'vanya', name: 'Vanya', firstName: 'Vanya', role: 'editor', canManage: false };
+  const pg = await open('an editor', undefined, { who: 'Vanya', quiet: /403/ });
+  await pg.click('.nav [data-tab="cash"]');
+  same([await pg.evaluate(() => window.__money.readOnly), (await pg.$$eval('#view-cash input.cs-amt', (l) => l.length)) > 3], [false, true], 'an editor\'s page is the page of somebody who saves');
+  store.cash.deny = true;                              // the owner: «только смотрит»
+  const box = '#cs-sec-team tr.cs-r:not(.cs-done) input.cs-amt';
+  await pg.fill(box, '4321');
+  await pg.press(box, 'Tab');
+  await pg.waitForFunction(() => window.__money.readOnly);
+  same([await toastText(pg), await text(pg, '#roSay'), await pg.$$eval('#view-cash input.cs-amt', (l) => l.length), store.cash.puts, store.cash.denied],
+    ['Теперь у вас только просмотр: сохранить нельзя', 'Vanya · только просмотр', 0, 0, 1],
+    'the save is refused once, the page says so out loud and in the bar, and is a reader\'s page from then on');
+  await sleep(1200);
+  same([store.cash.denied, await offered(pg)], [1, []], '… it does not try again, and offers nothing that changes anything');
+  await pg.context().close();
+});
+
+await run('rv-people', '«Настройки → Люди»: the owner adds a person, issues a link after saying the password again, says what each may do and shuts a login out', async () => {
+  serve(demoLedger(T), demoPlan(T));
+  asOwner();
+  const pg = await open('the owner at «Люди»', undefined, { hash: '#people', quiet: /40[039]/ });
+  await pg.waitForSelector('#view-people .ppl-row >> nth=2');
+  same([await texts(pg, '#view-settings .set-nav button'), await text(pg, '#view-people h1'), await text(pg, '#view-people .ppl h2 .note')],
+    [['Общие', 'Загрузка выписок', 'Таблица', 'Люди'], 'Люди', '3 человека'], '«Люди» is the fourth screen of «Настройки», and the bar lights «Настройки»');
+  same(await pg.$eval('.nav [data-tab="settings"]', (b) => b.classList.contains('active')), true, '… which is the tab lit');
+  same(await metas(pg), ['mika · это вы · правит и управляет людьми · последний вход сегодня', 'misha · только смотрит · пароля ещё нет', 'vanya · только смотрит · пароля ещё нет'],
+    'a person is one line: the login, what they may do, and how things stand with their sign-in');
+  await shot(pg, 'rv-people');
+  // a link: only after the owner's own password
+  await pg.click('#view-people [data-pp-open="misha"]');
+  same([await texts(pg, '#view-people [data-pp-card] button'), await pg.inputValue('#pp-name'), await pg.inputValue('#pp-role')],
+    [['Ссылка для входа', 'Отключить', 'Закрыть'], 'Misha', 'reader'], 'a press on a line opens the person\'s card');
+  await pg.click('#view-people [data-pp-link]');
+  await pg.fill('#pp-own', 'not the password');
+  await pg.click('#view-people [data-pp-issue]');
+  await pg.waitForFunction(() => !document.querySelector('#toast').hidden);
+  same([await toastText(pg), await pg.$('#pp-link'), await pg.inputValue('#pp-own'), store.people[1].linkExpires], ['Пароль не тот', null, '', null],
+    'with a wrong password no link is made, and the box is emptied to type it again');
+  await pg.fill('#pp-own', PASS);
+  await pg.press('#pp-own', 'Enter');
+  await pg.waitForSelector('#pp-link');
+  // The stand names the moment in UTC; the page says it by the clock of the browser, which is this machine's.
+  const end = new Date('2026-10-08T11:00:00Z');
+  const ends = `${end.getDate()} окт ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+  same([await pg.inputValue('#pp-link'), await pg.$eval('#pp-link', (e) => e.readOnly), (await metas(pg))[1]],
+    [LINK, true, `misha · только смотрит · ссылка выдана, действует до ${ends}`], 'with the right one the link is shown, once, and the line says until when it holds - on the clock of whoever reads it');
+  same(store.asked.filter((a) => a[1] === '/api/people/link'), [['POST', '/api/people/link', { login: 'misha', password: 'given' }], ['POST', '/api/people/link', { login: 'misha', password: 'given' }]],
+    'the door was asked for misha\'s link, with a password each time');
+  await shot(pg, 'rv-people-link');
+  const held = await pg.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]));
+  // The owner goes to another tab without shutting the card: the link does not stay behind in a screen nobody looks at.
+  await pg.click('.nav [data-tab="today"]');
+  same([held.includes('set-password'), (await pg.content()).includes('set-password#t=')], [false, false], 'the link is kept in no storage, and is gone from the page the moment «Люди» is left');
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="people"]');
+  await pg.waitForSelector('#view-people .ppl-row >> nth=2');
+  same([await pg.$('#view-people [data-pp-card]'), (await metas(pg))[1]], [null, `misha · только смотрит · ссылка выдана, действует до ${ends}`], 'coming back, every card is shut, and the line still says that a link is out');
+  // what a person may do; the switch
+  await pg.click('#view-people [data-pp-open="vanya"]');
+  await pg.selectOption('#pp-role', 'editor');
+  await pg.waitForFunction(() => document.querySelectorAll('#view-people .ppl-meta')[2].textContent.includes('смотрит и правит'));
+  await pg.fill('#pp-name', 'Ваня');
+  await pg.press('#pp-name', 'Enter');
+  await pg.waitForFunction(() => document.querySelectorAll('#view-people .ppl-nm')[2].textContent === 'Ваня');
+  await pg.click('#view-people [data-pp-off]');
+  await pg.waitForFunction(() => document.querySelectorAll('#view-people .ppl-meta')[2].textContent.includes('вход отключён'));
+  same([(await metas(pg))[2], await texts(pg, '#view-people [data-pp-card] button'), store.people[2]].map((x) => (x && x.login ? [x.name, x.role, x.disabled] : x)),
+    ['vanya · смотрит и правит · вход отключён', ['Включить', 'Закрыть'], ['Ваня', 'editor', true]],
+    'a role, a name and the switch are each sent as they are changed; a login that is shut out is offered no link');
+  // a new person
+  await pg.click('#view-people [data-pp-new]');
+  await pg.fill('#pp-add-name', 'Anna');
+  await pg.fill('#pp-add-login', 'Anna M');
+  await pg.click('#view-people [data-pp-add]');
+  await pg.waitForFunction(() => document.querySelector('#toastText').textContent.includes('латинские'));
+  same(store.people.length, 3, 'a login that cannot be one is refused in words, and nobody is added');
+  await pg.fill('#pp-add-login', 'anna');
+  await pg.press('#pp-add-login', 'Enter');
+  await pg.waitForSelector('#view-people [data-pp-open="anna"]');
+  same([await text(pg, '#view-people .ppl h2 .note'), (await metas(pg))[3], await pg.$eval('#view-people .ppl-open .ppl-nm', (e) => e.textContent), await pg.$('#pp-add-name')],
+    ['4 человека', 'anna · только смотрит · пароля ещё нет', 'Anna', null], 'a new person only looks and has no password yet; their card stands open for the link');
+  // one's own card: the password, and the way out
+  await pg.click('#view-people [data-pp-open="mika"]');
+  same(await texts(pg, '#view-people [data-pp-card] button'), ['Сменить пароль', 'Выйти', 'Закрыть'], 'one\'s own card changes the password and signs out');
+  await pg.click('#view-people [data-pp-pw]');
+  await pg.fill('#pp-cur', 'not the password');
+  await pg.fill('#pp-new', 'another horse battery staple');
+  await pg.click('#view-people [data-pp-pwsave]');
+  await pg.waitForFunction(() => document.querySelector('#toastText').textContent === 'Пароль не тот');
+  await pg.fill('#pp-cur', PASS);
+  await pg.fill('#pp-new', 'short');
+  await pg.click('#view-people [data-pp-pwsave]');
+  await pg.waitForFunction(() => document.querySelector('#toastText').textContent.includes('не короче 12'));
+  same(store.asked.filter((a) => a[1] === '/api/auth/password').length, 1, 'a new password that is too short is not sent at all');
+  await pg.fill('#pp-new', 'another horse battery staple');
+  await pg.press('#pp-new', 'Enter');
+  await pg.waitForFunction(() => document.querySelector('#toastText').textContent.startsWith('Пароль сменён'));
+  same([store.pass, await pg.$('#pp-cur')], ['another horse battery staple', null], 'the password is changed after the current one is given, and the boxes are gone');
+  same([store.led.puts, store.cash.puts], [0, 0], 'nothing of «Люди» touched either document');
+  await pg.click('#view-people [data-pp-out]');
+  await pg.waitForURL(/\/login$/);
+  same(store.asked[store.asked.length - 1].slice(0, 2), ['POST', '/api/auth/logout'], '«Выйти» closes the sign-in on the server and leaves for the sign-in page');
+  await pg.context().close();
+
+  // somebody who is not the owner sees their own line and nobody else's
+  serve(demoLedger(T), demoPlan(T));
+  asReader();
+  const me = await open('a reader at «Люди»', undefined, { who: 'Misha', hash: '#people' });
+  await me.waitForSelector('#view-people .ppl-row');
+  same([await metas(me), await text(me, '#view-people .ppl h2'), await me.$('#view-people [data-pp-new]'), store.asked.filter((a) => a[1] === '/api/people').length],
+    [['misha · это вы · только смотрит'], 'Ваш вход', null, 0], 'a reader\'s «Люди» is their own line: nobody is listed, nobody can be added, and the owner\'s list is never asked for');
+  await me.click('#view-people [data-pp-open="misha"]');
+  same(await texts(me, '#view-people [data-pp-card] button'), ['Сменить пароль', 'Выйти', 'Закрыть'], '… with their own password and the way out');
+  same(await offered(me), [], 'and still nothing that changes a document');
+  await shot(me, 'rv-people-reader');
+  await me.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
