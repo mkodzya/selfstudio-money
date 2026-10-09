@@ -2011,6 +2011,7 @@ class WholeStandRestoreTests(DoorCase):
 
     def test_a_page_left_open_from_before_the_restore_gets_409_and_never_saves_over_what_came_after(self):
         stand = self.stand
+        stand.auth.update_person("vanya", by="mika", role="editor")     # Vanya saves too: a reader's tab saves nothing anyway
         for rev in range(3):
             self.assertSaved(self.put(LEDGER, rev, ledger(30, "before the backup, save %d" % (rev + 1))), rev + 1)
         backup = self.back_up()                             # last night's tarball: the ledger at revision 3

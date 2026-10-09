@@ -775,8 +775,9 @@ class AuthTests(AuthCase):
         with self.assertRaises(auth.InvalidCredentials):
             self.auth.sign_in("mika", PASSWORD, "203.0.113.7")
         self.assertEqual(self.auth.status()["users"], {
-            "state": "ok", "problem": None, "founders": 3, "withPassword": 0, "disabled": 0, "pendingLinks": 0,
-            "notListed": 0})
+            "state": "ok", "problem": None, "founders": 3, "added": 0, "withPassword": 0, "disabled": 0,
+            "pendingLinks": 0, "notListed": 0})
+        self.assertEqual([u.role for u in users], ["owner", "reader", "reader"])    # the first one named, and the rest
 
     def test_a_one_time_link_sets_a_password_and_signs_in(self):
         link, expires = self.auth.issue_invite("mika")

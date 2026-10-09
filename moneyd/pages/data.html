@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/assets/auth.css">
 <script src="/assets/auth.js" defer></script>
 </head>
-<body data-page="data">
+<body data-page="data" data-state="{{state}}">
 <!--only:test-->
 <div class="band" role="note">Тестовый стенд Money — проверка перед выпуском</div>
 <!--/only-->
@@ -22,7 +22,8 @@
     <button type="button" id="logout">Выйти</button>
   </p>
   <p class="error" id="logout-error" role="alert" hidden></p>
-  <p>Money хранит два документа: выписки и план кассы. Здесь каждый можно скачать файлом<!--except:test--> и загрузить из файла<!--/except-->.</p>
+  <p data-when="owner editor">Money хранит два документа: выписки и план кассы. Здесь каждый можно скачать файлом<!--except:test--> и загрузить из файла<!--/except-->.</p>
+  <p data-when="reader">Money хранит два документа: выписки и план кассы. Здесь каждый можно скачать файлом. У вас просмотр: заменить документ здесь нельзя.</p>
 
   <section class="doc" data-doc="ledger">
     <h2>Выписки</h2>
@@ -31,7 +32,7 @@
       <button type="button" data-download="ledger">Скачать выписки</button>
     </p>
 <!--except:test-->
-    <p class="upload">
+    <p class="upload" data-when="owner editor">
       <label for="upload-ledger">Загрузить выписки из файла</label>
       <input id="upload-ledger" type="file" accept=".json,application/json" data-upload="ledger">
     </p>
@@ -45,7 +46,7 @@
       <button type="button" data-download="plan">Скачать план</button>
     </p>
 <!--except:test-->
-    <p class="upload">
+    <p class="upload" data-when="owner editor">
       <label for="upload-plan">Загрузить план из файла</label>
       <input id="upload-plan" type="file" accept=".json,application/json" data-upload="plan">
     </p>
@@ -70,7 +71,7 @@
   <p class="error" id="data-error" role="alert" hidden></p>
   <p class="ok" id="data-done" role="status" hidden></p>
 
-  <section>
+  <section data-when="owner">
     <h2>Журнал безопасности</h2>
     <p class="note">Последние 50 записей: входы и отказы, одноразовые ссылки, смена паролей и всё, что делали с сервера. Время — ваше местное.</p>
     <div class="scroll">

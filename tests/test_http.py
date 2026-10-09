@@ -48,6 +48,14 @@ ME = "/api/me"
 LEDGER = "/api/founder/money"
 PLAN = "/api/founder/money/cash"
 AUTH_DOORS = (LOGIN, SETUP, LOGOUT)
+PASSWORD_DOOR = "/api/auth/password"
+PEOPLE = "/api/people"
+PEOPLE_UPDATE = "/api/people/update"
+PEOPLE_LINK = "/api/people/link"
+#: The doors with a small body that ask for a session: one's own password, and the owner's three.
+SESSION_DOORS = (PASSWORD_DOOR, PEOPLE, PEOPLE_UPDATE, PEOPLE_LINK)
+#: A second password the rules accept, for the door that changes one.
+NEW_PASSWORD = "another horse battery staple"
 DOCUMENTS = ((LEDGER, "ledger", 16 * 1024 * 1024), (PLAN, "plan", 4 * 1024 * 1024))
 VENDOR = ("/money/vendor/pdf.min.js", "/money/vendor/pdf.worker.min.js", "/money/vendor/xlsx.full.min.js")
 OLD_LINKS = ("/tracker/board", "/dashboard", "/money/", "/money/index.html")
@@ -523,7 +531,35 @@ class EveryRouteTests(Case):
                 elif path == ME:
                     self.assertEqual(self.json_answer(stand.get(path, cookie=cookie)),
                                      {"id": "mika", "name": "Mika", "firstName": "Mika", "isFounderTier": True,
+                                      "role": "owner", "canWrite": True, "canManage": True,
                                       "stand": "dev", "version": "dev"})
+                elif (method, path) == ("POST", PASSWORD_DOOR):
+                    answer = stand.post(path, {"current": PASSWORD, "password": NEW_PASSWORD}, cookie=cookie)
+                    self.assertEqual(self.json_answer(answer), {"ok": True})
+                    fresh = answer.cookie("money-dev")
+                    self.assertEqual(answer.all("Set-Cookie"),
+                                     ["%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" % fresh])
+                    self.assertRefused(stand.get(ME, cookie=cookie), 401, "unauthenticated")   # every sign-in before it is closed
+                    self.assertEqual(stand.get(ME, cookie=fresh).status, 200)
+                    self.assertRefused(stand.post(LOGIN, {"login": "mika", "password": PASSWORD}), 401, "invalid_credentials")
+                    self.assertEqual(stand.post(LOGIN, {"login": "mika", "password": NEW_PASSWORD}).status, 200)
+                    stand.set_password("mika")          # the rows after this one sign in with the password of the tests
+                elif (method, path) == ("GET", PEOPLE):
+                    listed = self.json_answer(stand.get(path, cookie=cookie))
+                    self.assertEqual(sorted(listed), ["max", "people"])
+                    self.assertEqual([(p["login"], p["role"], p["me"]) for p in listed["people"]][:3],
+                                     [("mika", "owner", True), ("misha", "reader", False), ("vanya", "reader", False)])
+                elif (method, path) == ("POST", PEOPLE):
+                    listed = self.json_answer(stand.post(path, {"login": "anna", "name": "Anna"}, cookie=cookie))
+                    self.assertEqual({p["login"]: (p["name"], p["role"], p["hasPassword"], p["added"]) for p in listed["people"]}["anna"],
+                                     ("Anna", "reader", False, True))
+                elif (method, path) == ("POST", PEOPLE_UPDATE):
+                    listed = self.json_answer(stand.post(path, {"login": "vanya", "role": "editor"}, cookie=cookie))
+                    self.assertEqual({p["login"]: p["role"] for p in listed["people"]}["vanya"], "editor")
+                elif (method, path) == ("POST", PEOPLE_LINK):
+                    answer = self.json_answer(stand.post(path, {"login": "vanya", "password": PASSWORD}, cookie=cookie))
+                    self.assertEqual(sorted(answer), ["expires", "link", "login"])
+                    self.assertRegex(answer["link"], r"^http://finance\.localhost:\d+/set-password#t=[A-Za-z0-9_-]{43}$")
                 elif (method, path) in (("GET", LEDGER), ("GET", PLAN)):
                     answer = stand.get(path, cookie=cookie)
                     self.assertEqual(self.json_answer(answer), EMPTY)
@@ -1005,9 +1041,13 @@ class CrossSiteTests(Case):
             ("POST", LOGOUT): {},
             ("PUT", LEDGER): {"base": 0, "doc": ledger()},
             ("PUT", PLAN): {"base": 0, "doc": plan()},
+            ("POST", PASSWORD_DOOR): {"current": PASSWORD, "password": NEW_PASSWORD},
+            ("POST", PEOPLE): {"login": "anna", "name": "Anna"},
+            ("POST", PEOPLE_UPDATE): {"login": "vanya", "role": "editor"},
+            ("POST", PEOPLE_LINK): {"login": "vanya", "password": PASSWORD},
         }
         self.api = [(method, path) for method, path, _session in documented_routes() if path.startswith("/api/")]
-        self.assertEqual(len(self.api), 8, "the eight doors under /api/ of docs/api.md")
+        self.assertEqual(len(self.api), 13, "the thirteen doors under /api/ of docs/api.md")
         self.sessions = len(stand.auth.sessions.list())
 
     def ask(self, method: str, path: str, **options: Any) -> Any:
@@ -1020,6 +1060,9 @@ class CrossSiteTests(Case):
         self.assertEqual(len(stand.auth.sessions.list()), self.sessions, "a session was opened")
         for path in (LEDGER, PLAN):
             self.assertEqual(stand.get(path, cookie=self.cookie).json(), EMPTY)
+        self.assertEqual([(user.login, user.role, user.invite_expires is not None) for user in stand.auth.users.list()],
+                         [("mika", "owner", False), ("misha", "reader", True), ("vanya", "reader", False)],
+                         "somebody was added, given another role or issued a link")
         self.assertEqual(stand.post(SETUP, self.bodies[("POST", SETUP)]).status, 200, "the link was spent")
 
     def test_sec_fetch_site_of_another_site_or_of_the_same_site_is_403_on_every_api_door(self):
@@ -1108,7 +1151,12 @@ class CrossSiteTests(Case):
         self.assertEqual(self.ask("PUT", LEDGER, headers=browser).json(), {"rev": 1})
         self.assertEqual(self.ask("PUT", PLAN, headers=browser).json(), {"rev": 1})
         self.assertEqual(self.ask("GET", LEDGER, headers=browser).json()["rev"], 1)
-        self.assertEqual(stand.post(LOGOUT, {}, cookie=self.cookie, headers=browser).status, 200)
+        self.assertEqual(self.ask("GET", PEOPLE, headers=browser).status, 200)
+        for door in (PEOPLE, PEOPLE_UPDATE, PEOPLE_LINK):
+            self.assertEqual(self.ask("POST", door, headers=browser).status, 200, door)
+        changed = self.ask("POST", PASSWORD_DOOR, headers=browser)        # last: it closes the session that asked
+        self.assertEqual(changed.status, 200)
+        self.assertEqual(stand.post(LOGOUT, {}, cookie=changed.cookie("money-dev"), headers=browser).status, 200)
 
     def test_the_cross_site_rules_are_judged_before_the_body_is_read(self):
         stand = self.stand
@@ -1180,6 +1228,7 @@ class BodyGateTests(Case):
         self.cookie = self.stand.session("mika")
         #: Every door that takes a body: (method, path, cookie, limit in bytes).
         self.doors = [("POST", door, None, 4096) for door in AUTH_DOORS] + \
+                     [("POST", door, self.cookie, 4096) for door in SESSION_DOORS] + \
                      [("PUT", path, self.cookie, limit) for path, _kind, limit in DOCUMENTS]
 
     def sent(self, method: str, path: str, cookie: Optional[str], *lines: str, body: bytes = b"{}",
@@ -1192,7 +1241,7 @@ class BodyGateTests(Case):
             more.append("Content-Length: %s" % length)
         return exchange(self.stand, self.head(method, path, *more, cookie=cookie) + body)
 
-    def test_the_doors_with_a_body_are_the_five_of_the_document(self):
+    def test_the_doors_with_a_body_are_the_nine_of_the_document(self):
         documented = sorted((method, path) for method, path, _session in documented_routes() if method != "GET")
         self.assertEqual(sorted((method, path) for method, path, _cookie, _limit in self.doors), documented)
 
@@ -1408,7 +1457,7 @@ class DeadlineTests(Case):
         # uplink: 10 000 bytes a second is what a phone has on a train. (It was 50 000 until a reviewer
         # showed that a slow link could then never save today's ledger.)
         settings = self.new_stand(start=False).settings
-        self.assertEqual(settings.auth_body_deadline, 5.0, "5 seconds for the three /api/auth/ doors")
+        self.assertEqual(settings.auth_body_deadline, 5.0, "5 seconds for the doors with a 4 KiB body")
         self.assertEqual(settings.put_deadline(0), 20.0)
         self.assertEqual(settings.put_deadline(50000), 25.0, "20 s + 1 s per 10 000 bytes of Content-Length")
         self.assertEqual(settings.put_deadline(2000000), 220.0, "about four minutes for a ledger of 2 MB")

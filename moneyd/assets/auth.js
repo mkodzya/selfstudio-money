@@ -478,6 +478,11 @@
     'link-refused': 'Попытка с неработающей ссылкой',
     'link-blocked': 'Установка пароля остановлена: слишком много попыток',
     'password-set': 'Задан новый пароль, прежние входы закрыты',
+    'password-changed': 'Пароль сменён на странице, прежние входы закрыты',
+    'password-check-failed': 'Пароль спросили ещё раз — назван не тот',
+    'user-added': 'Добавлен человек',
+    'role-changed': 'Изменено, что человек может',
+    'user-renamed': 'Изменено имя',
     'session-created': 'Вход создан с сервера',
     'sessions-closed': 'Входы закрыты с сервера',
     'user-disabled': 'Логин отключён',
@@ -490,15 +495,15 @@
     'storage-unsynced': 'Диск не подтвердил запись: сохранённое на месте, но может не пережить сбой питания',
     'snapshots-purged': 'Старые копии удалены',
   };
-  const ALARMS = ['sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
+  const ALARMS = ['sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'password-check-failed', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
   const FIELDS = {
     doc: 'документ', rev: 'ревизия', fromRev: 'из ревизии', rows: 'строк', fromRows: 'было строк',
     snapshot: 'копия', kept: 'прежнее отложено в', count: 'сколько', days: 'старше, дней', n: 'попытка',
     retryAfter: 'ждать, с', reason: 'из-за', expires: 'до', purpose: 'зачем', stand: 'стенд',
     version: 'версия', csp: 'политика', detail: 'что', by: 'кем', floor: 'следующие ревизии выше', was: 'было',
-    file: 'что записано',
+    file: 'что записано', role: 'может', what: 'перед чем',
   };
-  const VALUES = { ledger: 'выписки', plan: 'план кассы', address: 'адреса', login: 'логина', setup: 'адреса', ctl: 'с сервера', all: 'все' };
+  const VALUES = { ledger: 'выписки', plan: 'план кассы', address: 'адреса', login: 'логина', setup: 'адреса', ctl: 'с сервера', all: 'все', reader: 'только смотреть', editor: 'смотреть и править', link: 'выдачей ссылки', password: 'сменой пароля' };
 
   function journal() {
     const table = $('journal');

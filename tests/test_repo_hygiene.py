@@ -550,6 +550,8 @@ class StandFilesTests(unittest.TestCase):
                 environ = {key: value for key, value in environ.items() if key.startswith("MONEY_")}
                 settings = config.Settings.from_env(environ, scrypt_available=True)
                 self.assertEqual((settings.stand, settings.public_url), (name, STANDS[name]["MONEY_PUBLIC_URL"]))
+                # The first login the list names is the stand's owner: the one who saves and who lets people in.
+                self.assertEqual(settings.owner, "mika")
                 self.assertEqual(settings.csp_mode, "enforce")
                 self.assertEqual(settings.kdf, "scrypt")
                 self.assertEqual(settings.cookie_name, "__Host-money")

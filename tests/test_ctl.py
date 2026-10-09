@@ -347,9 +347,9 @@ class UserTests(CtlCase):
         self.assertEqual((done.status, done.err), (0, ""))
         rows = {line.split()[0]: line for line in done.out.splitlines()[1:]}
         self.assertEqual(sorted(rows), ["mika", "misha", "vanya"])
-        self.assertRegex(rows["mika"], r"^mika +Mika +yes +set \d{4}-\d\d-\d\dT")
-        self.assertRegex(rows["misha"], r"^misha +Misha +yes +not set +valid until \d{4}-\d\d-\d\dT")
-        self.assertRegex(rows["vanya"], r"^vanya +Vanya +no: disabled +not set")
+        self.assertRegex(rows["mika"], r"^mika +Mika +owner +yes +set \d{4}-\d\d-\d\dT")
+        self.assertRegex(rows["misha"], r"^misha +Misha +reader +yes +not set +valid until \d{4}-\d\d-\d\dT")
+        self.assertRegex(rows["vanya"], r"^vanya +Vanya +reader +no: disabled +not set")
         stored = self.users()["mika"]["hash"]
         for secret in [stored, "pbkdf2$", token, sha256(token)] + stored.split("$")[2:]:
             self.assertNotIn(secret, done.said)

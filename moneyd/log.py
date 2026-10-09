@@ -80,6 +80,13 @@ EVENTS = {
     "link-refused": "a set-password attempt with a link that does not work (addr, n)",
     "link-blocked": "the limiter refused the set-password door; once per address and window (addr, retryAfter)",
     "password-set": "a password was set through a link; the login's other sessions were closed (login, addr, count)",
+    "password-changed": "a signed-in person chose a new password; the login's other sessions were closed "
+                        "(login, addr, count)",
+    "password-check-failed": "a signed-in person was asked for their own password again and gave another - before "
+                             "a link was issued (what: link) or a password changed (what: password) (login, addr, what, n)",
+    "user-added": "the owner added a person from the page: a login that only looks, without a password (login, by)",
+    "role-changed": "the owner said what a person may do: reader or editor (login, by, role)",
+    "user-renamed": "the owner gave a person another name (login, by)",
     "session-created": "a session was created from the server, not by signing in (login, by, purpose, expires)",
     "sessions-closed": "sessions were closed from the server (login or 'all', by, count)",
     "user-disabled": "a login was disabled (login, by)",
