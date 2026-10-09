@@ -1660,7 +1660,9 @@ function fxAskCard(){
 function fxRecount(){
  const rows=fxOld();if(!rows.length)return;snap();
  rows.forEach(r=>{const was=Math.abs(r.a),now=fxNew(r);if(r.v)r.v=round2(r.v*now/was);r.a=(r.a<0?-1:1)*now;r.o.r=rowRate(r.o.cur,r.d);});
- saveMonths(rows.map(r=>r.d.slice(0,7)));renderAll();toast(`Пересчитано: ${rows.length} ${plural(rows.length,"строка","строки","строк")} по курсу своего дня`,true);
+ // The rows still waiting in «Разбор» were read by the typed rate too: they go into the table at the rate of their day.
+ S.inbox.forEach(r=>{if(real(r)&&r.o&&r.o.cur&&r.o.cur!=="GBP"&&r.d>=FX_FROM&&!(r.o.r>0))reprice(r);});
+ saveMonths(rows.map(r=>r.d.slice(0,7)));saveInbox();renderAll();toast(`Пересчитано: ${rows.length} ${plural(rows.length,"строка","строки","строк")} по курсу своего дня`,true);
 }
 function renderSettings(){
  const hs=Object.entries(S.holders);
