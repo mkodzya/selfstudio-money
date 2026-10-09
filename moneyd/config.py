@@ -99,6 +99,14 @@ ENV_NAMES = (
     "MONEY_KDF",                 # dev only: scrypt | pbkdf2
 )
 
+#: Where a stand asks for a day's exchange rates (``moneyd/rates.py``): one open source, without a key,
+#: at the two addresses it publishes under. A day is a file of its own there, so a day in the past
+#: can be asked for as well.
+RATES_URLS = (
+    "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{day}/v1/currencies/gbp.min.json",
+    "https://{day}.currency-api.pages.dev/v1/currencies/gbp.min.json",
+)
+
 #: Keys of a stand file that only compose reads; harmless if they reach the process.
 COMPOSE_ONLY_ENV = ("MONEY_PORT", "MONEY_DATA_HOST_DIR")
 
@@ -281,6 +289,20 @@ class Settings:
     session_seen_every: int = 300
     invite_ttl: int = 48 * 3600
 
+    # -- exchange rates (moneyd/rates.py) -----------------------------------
+    #: Where a day's rates are asked, ``{day}`` filled in; the first that answers. Empty: nothing is
+    #: ever asked of anybody, and the page counts by the rates typed into it - the dev stand, the tests.
+    rates_urls: Tuple[str, ...] = ()
+    #: The first day the table is kept for: before it the studio's history is the founders' sheet.
+    rates_first_day: datetime.date = datetime.date(2026, 10, 1)
+    #: Seconds between two attempts; days asked for in one; tries a past day gets; seconds one answer has.
+    rates_wait: float = 1800.0
+    rates_days_per_ask: int = 10
+    rates_tries_per_day: int = 5
+    rates_timeout: float = 4.0
+    #: How long ``GET /api/rates`` waits for a refresh it has just begun before it answers with what there is.
+    rates_door_wait: float = 2.5
+
     # -- storage and logs (BUILD-SPEC 2.8, 2.9) ------------------------------
     keep_day_snapshots: int = 90
     keep_shrink_snapshots: int = 50
@@ -451,6 +473,8 @@ class Settings:
             data_dir=data_dir, web_dir=web_dir, bind_host=bind_host, bind_port=bind_port,
             trusted_proxies=proxies, csp_mode=csp_mode, csp_override_until=csp_until,
             kdf=kdf, version=version, warnings=tuple(warnings),
+            # A stand asks for the day's rates; a dev stand - a test, CI's browser smoke - asks nobody.
+            rates_urls=() if stand == "dev" else RATES_URLS,
         )
 
 

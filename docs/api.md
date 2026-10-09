@@ -86,6 +86,7 @@ login.
 | PUT | /api/founder/money | yes | JSON, 16 MiB | 200 JSON, the new revision |
 | GET | /api/founder/money/cash | yes | | 200 JSON, the cash plan |
 | PUT | /api/founder/money/cash | yes | JSON, 4 MiB | 200 JSON, the new revision |
+| GET | /api/rates | yes | | 200 JSON, the exchange rates by day |
 | GET | /api/people | yes | | 200 JSON, who can sign in |
 | POST | /api/people | yes | JSON, 4 KiB | 200 JSON, who can sign in |
 | POST | /api/people/update | yes | JSON, 4 KiB | 200 JSON, who can sign in |
@@ -475,6 +476,31 @@ page can still send a founder to.
   the doors under `/api/people` answer them. The page draws nothing that
   changes anything for a person who cannot write.
 - `401 unauthenticated`.
+
+## The exchange rates
+
+### GET /api/rates
+
+- `200` `{"base": "GBP", "days": {"<YYYY-MM-DD>": {"USD", "EUR", "RUB", "AMD"}}, "asked"}`,
+  `Cache-Control: no-store`. `days` is what one pound cost on each day the
+  table holds, from 1 October 2026 on; a day that is in it never changes.
+  `asked` is the moment the source was last asked, in UTC, or `null`. For
+  anybody who is signed in: a reader counts by the same rates.
+- `401 unauthenticated`.
+
+The table is filled by the server, from one open source that takes no key
+(`moneyd/rates.py`): a day's rates are asked once, checked - the day named,
+four numbers, each within the bounds a rate could have and near the day beside
+it - and kept. Nothing asks on a timer. This door is what begins a refresh,
+when the table lacks a day and the source was last asked more than half an
+hour ago; it waits for today's rate a moment (2.5 seconds at most) and answers
+with what it has. So a source that is slow, away or wrong never holds a page:
+the page then counts by the latest day it was given, or - where the table is
+empty, as on a dev stand, which asks nobody - by the rates typed into it.
+
+The page asks once, when it opens. It counts what has already happened - a
+payment in a statement, a row marked paid - at the rate of that day, and only
+what is still ahead, and what the accounts hold today, at the latest.
 
 ## Who may do what
 

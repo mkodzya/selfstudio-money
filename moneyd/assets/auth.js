@@ -494,14 +494,16 @@
     'floor-raised': 'Нумерация ревизий поднята: открытые раньше страницы попросят обновить',
     'storage-unsynced': 'Диск не подтвердил запись: сохранённое на месте, но может не пережить сбой питания',
     'snapshots-purged': 'Старые копии удалены',
+    'rates-refused': 'Курс валют от источника не принят: он неправдоподобен',
+    'rates-damaged': 'Таблица курсов не читалась и начата заново',
   };
-  const ALARMS = ['sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'password-check-failed', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
+  const ALARMS = ['rates-refused', 'sign-in-failed', 'sign-in-blocked', 'login-flood', 'link-refused', 'link-blocked', 'password-check-failed', 'sessions-damaged', 'doc-shrunk', 'storage-unsynced'];
   const FIELDS = {
     doc: 'документ', rev: 'ревизия', fromRev: 'из ревизии', rows: 'строк', fromRows: 'было строк',
     snapshot: 'копия', kept: 'прежнее отложено в', count: 'сколько', days: 'старше, дней', n: 'попытка',
     retryAfter: 'ждать, с', reason: 'из-за', expires: 'до', purpose: 'зачем', stand: 'стенд',
     version: 'версия', csp: 'политика', detail: 'что', by: 'кем', floor: 'следующие ревизии выше', was: 'было',
-    file: 'что записано', role: 'может', what: 'перед чем',
+    file: 'что записано', role: 'может', what: 'перед чем', day: 'день',
   };
   const VALUES = { ledger: 'выписки', plan: 'план кассы', address: 'адреса', login: 'логина', setup: 'адреса', recheck: 'логина', ctl: 'с сервера', all: 'все', reader: 'только смотреть', editor: 'смотреть и править', link: 'выдачей ссылки', password: 'сменой пароля' };
 

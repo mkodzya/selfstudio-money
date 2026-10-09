@@ -746,6 +746,7 @@ and a request id; the detail is in the log.
 | The record of who saved lost with a container | the request log is kept before a container is replaced or removed |
 | The real ledger on the wrong stand, in git or in an image | the table in "Keeping the stands and the laptop apart" |
 | A session with root ssh reading prod | a rule only: `ctl` prints counts, never contents, and writes to the security log. Residual |
+| A source of exchange rates that is wrong, or made to be | one day's file, asked by day over https, no redirect followed, 512 KiB at most, four numbers read out of it; bounds per currency and 12% a day from the day beside it; a refused answer is in the security log; a rate the owner types stands over the source's. Residual 12 |
 | Supply chain | no runtime dependency beyond the official Python image; Playwright exists only in CI. Residual: the vendored readers, see "Next" |
 
 ## Residual risks, stated plainly
@@ -801,7 +802,18 @@ and a request id; the detail is in the log.
 11. **The vendored SheetJS is 0.18.5**, which has a published prototype-pollution
     advisory. Until it is replaced the enforced policy is the compensating
     control.
-12. **The container can reach the internet**, although it needs nothing from it.
+12. **The container reaches the internet, and since 9 October 2026 it asks
+    one thing of it**: a day's exchange rates, from one open source at two
+    addresses (`moneyd/rates.py`; the owner's decision - the rates are no
+    longer typed by hand). Nothing of the studio's is sent: the request names
+    a day. What comes back is read strictly - four numbers, each within the
+    bounds a rate could have and within 12% a day of the day beside it - never
+    followed to another address, and thrown away whole when it fails, with a
+    line in the security log. What remains: a source that is wrong within
+    those bounds is believed, and a day once in the table is not asked for
+    again; the owner sees the rates in «Настройки» and can type one of their
+    own over any of them. Outbound traffic is not restricted to those two
+    names.
 13. **Python fixes arrive only with a deploy.** Each deploy builds on the newest
     3.13 patch image; nothing rebuilds by itself. `ctl selfcheck` prints the
     image's age.
@@ -882,7 +894,8 @@ Not in the first version; none of these is built.
 - A longer reach for the request log within one container's life.
 - A stand mark in the page, and its closed-door words. (The sign-out control
   is there since 9 October 2026: «Настройки → Люди», one's own card.)
-- Blocking outbound network for the container.
+- Restricting the container's outbound network to the two addresses the
+  exchange rates are asked at.
 - A scheduled rebuild for Python patch releases (today `selfcheck` only prints
   the image's age).
 - Replacing the vendored SheetJS 0.18.5.

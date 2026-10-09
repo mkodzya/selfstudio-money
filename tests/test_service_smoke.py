@@ -85,7 +85,7 @@ class StandCase(unittest.TestCase):
 class RouteTableTests(unittest.TestCase):
     def test_the_table_is_whole_and_exact(self):
         rows = [(route.method, route.path) for route in httpd.ROUTES]
-        self.assertEqual(len(rows), 31)
+        self.assertEqual(len(rows), 32)
         self.assertEqual(len(set(rows)), len(rows), "a method and a path are one row")
         for route in httpd.ROUTES:
             self.assertIn(route.method, ("GET", "POST", "PUT"))
