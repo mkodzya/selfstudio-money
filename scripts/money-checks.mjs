@@ -5966,6 +5966,8 @@ await run('rv-whatif', '«Что если» answers with the engine\'s own figur
   const sel = (f) => pg.$eval(K('row') + `[data-wi-f="${f}"]`, (e) => (e.tagName === 'SELECT' ? e.selectedOptions[0].textContent.replace(/ /g, ' ') : e.value));
   same([await pg.$$eval(K('row') + '[data-ed-save], ' + K('row') + '[data-ed-f], ' + K('row') + '[data-ed-do]', (l) => l.length), await sel('row'), /^только /.test(await sel('item')), await sel('days'), await texts(pg, K('row') + '.wi-kinds .chip.active')],
     [0, 'Meridian Labs', true, '30', ['платёж придёт позже']], 'turned over, the card holds no field or button of the row; the client and the payment of the row stand ready, thirty days');
+  // (second reading: a chip in a row's card could ask about another row - the withdrawal, from a client's card)
+  same(await texts(pg, K('row') + '.wi-kinds .chip'), ['платёж придёт позже', 'клиент уйдёт', 'наймём человека'], 'in a client\'s card the questions are about that client, and a hire: «выводим другую сумму» is not offered there');
   await pg.selectOption(K('row') + '[data-wi-f="item"]', '');
   await pg.click(K('row') + '[data-wi-go]');
   await pg.waitForSelector(K('row') + '[data-wi-k="say"]');
@@ -6048,7 +6050,7 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   const F = '#view-today .td-wi ';
   const unfold = async (pg) => { await pg.click('#view-today .td-wi > summary'); await pg.waitForSelector(F + '[data-wi-panel]'); };
   const kind = (pg, k) => pg.click(F + `[data-wi-kind="${k}"]`);
-  const opts = (pg, f) => pg.$$eval(F + `[data-wi-f="${f}"] option`, (l) => l.map((e) => e.textContent.replace(/ /g, ' ')));
+  const opts = async (pg, f) => (await pg.$$eval(F + `[data-wi-f="${f}"] option`, (l) => l.map((e) => e.textContent))).map(plain);
   const val = (pg, f) => pg.$eval(F + `[data-wi-f="${f}"]`, (e) => e.value);
   const worked = (pg) => text(pg, F + '[data-wi-worked]');
   const say = (pg) => text(pg, F + '[data-wi-k="say"]');
@@ -6062,6 +6064,9 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   const led = demoLedger(T), P = demoPlan(T);
   split(P, 'inflows', 'c-kestrel-bank', '2026-12', 4000, 'c-kestrel-2');
   split(P, 'div', 'd-draw', '2026-11', 12000, 'd-draw-2');
+  // … and Meridian Labs has paid November ahead: its month of 6 November is marked «Получено» today.
+  const now1 = Date.parse(T + 'T09:00:00Z'), mrd = row(P, 'inflows', 'c-meridian-labs');
+  mrd.rec = { ...mrd.rec, x: { ...(mrd.rec.x || {}), '2026-11': { ...((mrd.rec.x || {})['2026-11'] || {}), paid: { on: T, at: now1, by: 'Mika' } } } };
   led.tx.push({ id: 'x-halden-part', d: '2026-10-04', a: 3900, c: 'rev', b: 'Wise', l: 'Halden & Co', v: 0, s: 'file', o: { a: 3900, cur: 'GBP', t: 'Payment from HALDEN & CO' }, key: 'demo|Wise|2026-10-04|3900|GBP|x-halden-part', at: 1791190800000 });
   const pg = await scene('what if, the rules', led, P, { H: 60 });
   const base = await holds(pg, 'the plan, with a client and a withdrawal that were split and a payment paid in part');
@@ -6079,6 +6084,14 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   same([part.part && part.part.got, Math.round(Math.abs(part.cash))], [3900, 5850], 'Halden & Co has paid £3,900 of October\'s £9,750: £5,850 is still to come');
   const p7 = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: part.id, days: 7 }]), p30 = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: part.id, days: 30 }]);
   same([p7.trial.IN, p7.trial.low, p30.trial.IN, p30.trial.low < p30.plan.low], [p7.plan.IN, p7.plan.low, p30.plan.IN, true], 'the rest of it a week or a month later: nothing more comes than the plan waits for, and the part that came is not counted again');
+  // (second reading: «клиент уйдёт» from a month that had already come took that money back out of the bank - the month went with its mark, and the low point, «Можно вывести» and «Под налоги» fell with it)
+  const paidNov = M0.items.find((it) => it.id === 'c-meridian-labs@2026-11');
+  const left = await ask(pg, [{ k: 'stop', row: 'c-meridian-labs', from: '2026-11' }]);
+  same([paidNov.state, of(left), left.trial.now, left.trial.res], ['done', await byHand((P2) => { row(P2, 'inflows', 'c-meridian-labs').rec.to = '2026-11'; }), left.plan.now, left.plan.res],
+    'a client who «уходит с ноября» after November has come: the month that came stays - the figures of a plan whose repeat ends WITH November, and the money in the bank is what it was');
+  // (second reading: through the script two changes of one payment were both made, the later winning in silence; and a sum that is no number was counted as nothing)
+  const twice = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 30 }, { k: 'late', row: 'c-halden-co', item: '', days: 60 }, { k: 'draw', row: 'd-draw', amt: null, from: '2026-11' }]);
+  same([of(twice), twice.skipped.map((x) => x.i)], [of(await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 60 }])), [0, 2]], 'asked through the script: of two changes of one payment the later is made and the earlier is named as replaced; a withdrawal with no sum is not made');
   // (first reading: a cost in a currency no account keeps was counted as the same number of pounds)
   const eur = await ask(pg, [{ k: 'cost', amt: 3000, cur: 'EUR', day: 25, from: '2026-11', name: '' }, { k: 'late', row: 'no-such-row', item: '', days: 30 }]);
   same([of(eur), eur.skipped.map((x) => x.i), /EUR/.test(eur.skipped[0].why)], [[M0.LOW, M0.LOWDAY, M0.IN, M0.OUT], [0, 1], true], 'a cost in euros, where no account with a balance keeps euros, is not made - and whoever asked is told which changes were not made, and why');
@@ -6093,10 +6106,15 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await pg.selectOption(F + '[data-wi-f="row"]', 'c-meridian-labs');
   await pg.selectOption(F + '[data-wi-f="from"]', '2027-01');
   ok(/Meridian Labs уйдёт с января · его платежи с января в эти 60 дней не попадают/.test(await worked(pg)), 'a client who leaves after the sixty days: his payments of these days stay, and the line says that', await worked(pg));
+  await pg.selectOption(F + '[data-wi-f="from"]', '2026-11');
+  ok(/Meridian Labs уйдёт с ноября · .* · ноябрь уже получен — этот месяц остаётся/.test(await worked(pg)), '… and when the month he leaves from has already come, the line says that month stays', await worked(pg));
   await kind(pg, 'draw');
   ok(/10 октября — вместо £9,000 и 10 ноября — вместо £12,000/.test(await worked(pg)), '«выводим другую сумму» says, month by month, what the plan holds now', await worked(pg));
   // (first reading: the payment a change held could lie beyond the days the page looks at, where «Какой платёж» did not offer it - the field showed «все платежи», and the press counted them all)
   await kind(pg, 'late');
+  // (second reading: a payment that is awaited is counted today, and was named by today's date - a date the plan holds no payment on)
+  await pg.selectOption(F + '[data-wi-f="row"]', 'c-fable-foods');
+  ok((await opts(pg, 'item')).some((n) => /^только платёж от 26 сентября \(ждём\) · £/.test(n)) && /ждали 26 сен → /.test(await worked(pg)), 'a payment that is awaited is named by its own date, «ждём»', [await opts(pg, 'item'), await worked(pg)]);
   await pg.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
   await pg.selectOption(F + '[data-wi-f="item"]', 'c-halden-co@2026-11');
   await pg.click('#view-today [data-td-h="30"]');
@@ -6127,6 +6145,10 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await pg.selectOption(F + '[data-wi-f="from"]', '2026-10');
   await pg.fill(F + '[data-wi-f="day"]', '3');
   same([await val(pg, 'from'), (await opts(pg, 'from'))[0], /с ноября · платить 3-го числа/.test(await worked(pg))], ['2026-11', 'с ноября 2026', true], 'the 3rd of October has passed: with that day typed, the first month offered is November, and the line says November');
+  // (second reading: one keystroke on the way to «26» moved the chosen month on, and it never came back)
+  await pg.fill(F + '[data-wi-f="day"]', '26');
+  same([await val(pg, 'from'), /с октября · платить 26-го числа/.test(await worked(pg))], ['2026-10', true], 'the month that was chosen comes back as soon as the day typed allows it');
+  await pg.fill(F + '[data-wi-f="day"]', '3');
   await pg.click(F + '[data-wi-go]');
   same([(await changes(pg)).length, (await changes(pg))[1], await pg.inputValue(K('row') + '[data-ed-f="amt"]')], [2, { k: 'cost', name: '', amt: 3000, cur: 'GBP', day: 3, from: '2026-11' }, '7777'],
     'one press on «Посчитать» straight from the field counts; and what was typed in the card beside the trial is still there');
@@ -6134,6 +6156,14 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await pg.waitForFunction(() => !document.querySelector('[data-ed-card="row"]'));
   await holds(pg, 'after all of that «Сегодня» is the plan');
   same([store.cash.puts, store.led.puts, canon(await pg.evaluate(() => JSON.parse(JSON.stringify(window.__cash.state()))))], [0, 0, plan0], 'nothing was saved and the plan is what it was');
+  // (second reading: when the day - or the plan - moved under the fields, «Посчитать» stored another change than the fields and the line showed, and said nothing)
+  await pg.click(F + '[data-wi-more]');
+  await kind(pg, 'stop');
+  await pg.selectOption(F + '[data-wi-f="row"]', 'c-brightwater');
+  await pg.evaluate(() => { const S = window.__cash.state(); S.inflows = S.inflows.filter((r) => r.id !== 'c-brightwater'); });
+  await pg.click(F + '[data-wi-go]');
+  same([(await changes(pg)).length, await toastText(pg)], [2, 'План или день изменились — проверьте поля и нажмите ещё раз'], 'the row the fields name is gone from the plan at the press: nothing is counted, the page is drawn afresh and says so');
+  await pg.click(F + '[data-wi-cancel]');
   // (first reading: with a balance missing the trial showed neither its list nor «Закончить пробу», and went on being «идёт проба» until a reload)
   await pg.evaluate(() => { const S = window.__cash.state(); S.banks = S.banks.filter((b) => b.id !== 'b2'); });
   await goCash(pg);
@@ -6156,6 +6186,9 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   // (first reading: the trial named «Можно вывести» - the plan's and its own - on a page that shows a dash there, and said «денег хватает» of a plan the page will not say it of)
   const a2 = await ask(thin, [{ k: 'draw', row: 'd-draw-b', amt: 1000, from: '2026-10' }]);
   same([a2.plan.free, a2.plan.freeWhy, a2.trial.free], [null, 'thin', null], 'the trial names no «Можно вывести» either: asked through the script, it gives the reason and no sum');
+  // (second reading: through the script the same trial was «v1» with a sum, while the screen said the plan was not written out)
+  const a3 = await ask(thin, [{ k: 'cost', amt: 16000, cur: 'GBP', day: 25, from: '2026-10', name: '' }]);
+  same([a3.trial.id, a3.trial.free, a3.trial.freeWhy], ['vT', null, 'thin'], 'a hire tried on a thin plan, asked through the script: still thin, and no sum - what the screen says');
   await unfold(thin);
   await kind(thin, 'draw');
   same([(await opts(thin, 'row')).length, /по \$12,000 в месяц.*вместо \$12,000/.test(await worked(thin))], [2, true], 'two monthly withdrawals: the page asks which; a withdrawal in dollars is said in dollars');
@@ -6186,12 +6219,94 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await red.selectOption(F + '[data-wi-f="from"]', '2027-01');
   await red.click(F + '[data-wi-go]');
   same([await say(red), await red.$(F + '.wi-t')], ['В ближайшие 60 дней это ничего не меняет: все цифры те же, что по плану.', null], 'a cost that begins after the sixty days changes nothing, and the answer says so: no table of two equal columns');
+  // (second reading: «ничего не меняет» was said while the first minus more than doubled on the same day)
+  await red.click(F + '[data-wi-more]');
+  await kind(red, 'late');
+  await red.selectOption(F + '[data-wi-f="row"]', 'c-orchard-lane');
+  await red.selectOption(F + '[data-wi-f="item"]', 'c-orchard-lane@2026-10');
+  await red.fill(F + '[data-wi-f="days"]', '4');
+  await red.click(F + '[data-wi-go]');
+  ok(/^−£[\d,]+ · 10 окт$/.test(await text(red, F + '[data-wi-k="minus"]')) && /не хватит £[\d,]+ — это первый минус.*По плану денег тоже не хватает\./.test(await say(red)), 'a payment four days later deepens the first minus on the same day: the row «Первый минус» carries the sum, and the answer is the minus, «по плану тоже»', [await text(red, F + '.wi-t'), await say(red)]);
   await red.click(F + '[data-wi-more]');
   await kind(red, 'draw');
   await red.fill(F + '[data-wi-f="amt"]', '6000');
   await red.click(F + '[data-wi-go]');
   ok(/По плану денег тоже не хватает\./.test(await say(red)) && !/Уберите изменения по одному/.test(await text(red, F + '.wi-ans')), 'a smaller withdrawal helps and the plan is still short: the answer says the plan is short too, and blames no change', [await say(red), await text(red, F + '.wi-ans')]);
   await red.context().close();
+
+  // ---- 4. Withdrawals: October's is taken in full, and from December the row is in dollars. A large cost on 20 November.
+  const led4 = demoLedger(T), P4 = demoPlan(T), taken = led4.tx.find((t) => t.id === 'demo960');
+  led4.tx.push({ ...taken, id: 'x-take', d: '2026-10-05', a: 7192.27, o: { ...taken.o, a: -7192.27 }, key: 'demo|Wise|2026-10-05|-7192.27|GBP|x-take' });
+  split(P4, 'div', 'd-draw', '2026-12', 12000, 'd-usd');
+  row(P4, 'div', 'd-usd').cur = 'USD';
+  P4.other.push({ id: 'o-move', name: 'Переезд офиса', amt: 16000, cur: 'GBP', bank: 'Wise', on: true, tag: '', info: false, date: '2026-11-20', c0: now, m: { t: now, by: 'Mika' }, blk: 'other' });
+  const wd = await scene('what if, withdrawals', led4, P4, { H: 60 });
+  const b4 = await holds(wd, 'a plan whose October withdrawal is taken and whose withdrawal is in dollars from December');
+  same(b4.M.items.find((it) => it.id === 'd-draw@2026-10').state, 'done', 'October\'s £9,000 is taken in full');
+  await unfold(wd);
+  await kind(wd, 'draw');
+  // (second reading: «с октября» was offered and said, and October stayed as it was - the sentence promised a month the change did not reach)
+  same([(await opts(wd, 'from'))[0], await val(wd, 'amt'), /начиная с ноября · в 60 дней попадает 1 вывод: 10 ноября — вместо £9,000/.test(await worked(wd))], ['с ноября 2026', '9000', true], 'a month taken in full is not offered: another sum begins with the first month still to be taken');
+  // (second reading: one number was put into the months in pounds and the months in dollars, and every month was printed in the last part\'s currency)
+  await wd.fill(F + '[data-wi-f="amt"]', '');
+  await wd.click(F + '[data-wi-go]');
+  same([(await changes(wd)).length, await toastText(wd)], [0, 'Впишите сумму в месяц'], 'an emptied sum is not a sum of nothing: the page asks for it');
+  await wd.fill(F + '[data-wi-f="amt"]', '5000');
+  await wd.click(F + '[data-wi-go]');
+  const five = await ask(wd, await changes(wd)), usd = (await wd.evaluate(() => window.__money.trial.plan)).div.find((r) => r.id === 'd-usd');
+  same([Math.round((five.trial.OUT - five.plan.OUT) * 100), usd.rec.x || null, /по £5,000 в месяц, начиная с ноября/.test(await text(wd, F + '.wi-ch b')), /С декабря этот вывод в плане в другой валюте \(USD\): те месяцы проба не меняет/.test(await text(wd, F + '.wi-notes'))],
+    [-400000, null, true, true], '£5,000 from November: November alone changes - the months in dollars are left as they are, and the page says so');
+  // (second reading: «Можно вывести» was set side by side over two different sets of withdrawals, with nothing to say so)
+  await wd.click(F + '[data-wi-more]');
+  await kind(wd, 'draw');
+  await wd.fill(F + '[data-wi-f="amt"]', '20000');
+  await wd.click(F + '[data-wi-go]');
+  const big = await ask(wd, await changes(wd)), fr = await text(wd, F + '.wi-t tr:has([data-wi-k="free"]) td:first-child');
+  ok((await changes(wd)).length === 1 && big.trial.free < big.plan.free && /^Можно вывести сверх выводов в плане/.test(fr) && /выводы в плане за 60 дней: £9,000 → £20,000/.test(fr), '£20,000 instead (it takes the place of the £5,000): «Можно вывести» is what can be taken over the withdrawals written - the row says so, and names both sums of them', [fr, big.plan.free, big.trial.free]);
+  await wd.click(F + '[data-wi-more]');
+  await kind(wd, 'draw');
+  await wd.selectOption(F + '[data-wi-f="from"]', '2026-12');
+  same([await val(wd, 'amt'), /Сколько выводить в месяц, USD/.test(await text(wd, F + '.wi-fields')), /по \$12,000 в месяц, начиная с декабря/.test(await worked(wd))], ['12000', true, true], 'from December the sum asked for is in dollars, and the field starts from that month\'s own');
+  await wd.click(F + '[data-wi-cancel]');
+  await wd.click(F + '[data-wi-end]');
+  // (second reading: at thirty days the line of a change denied the row beside it - «на цифры ниже не влияет» over a «Можно вывести» that moved)
+  await kind(wd, 'late');
+  await wd.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  await wd.selectOption(F + '[data-wi-f="item"]', 'c-halden-co@2026-11');
+  await wd.click('#view-today [data-td-h="30"]');
+  await wd.click(F + '[data-wi-go]');
+  const far = await ask(wd, await changes(wd)), lineOf = await text(wd, F + '.wi-ch');
+  ok(far.trial.free !== far.plan.free && far.trial.IN === far.plan.IN && !/не влияет/.test(lineOf) && /он дальше 30 дней: изменить может только «Можно вывести» — она смотрит на 60/.test(lineOf) && /считается на 60 дней вперёд/.test(await text(wd, F + '.wi-t')),
+    'thirty days pressed, a payment of day 39 moved: «Придёт» is the plan\'s, «Можно вывести» is not - and the line says that figure may change, not that nothing does', [lineOf, far.plan.free, far.trial.free]);
+  await wd.context().close();
+
+  // ---- 5. The same studio three weeks on: Halden & Co has not paid October, and the statements have gone past it.
+  const led5 = demoLedger(T), P5 = demoPlan(T);
+  ['Wise', 'Barclays', 'Tochka', 'Mosta'].forEach((b, i) => led5.tx.push({ id: 'x-cov' + i, d: '2026-10-27', a: 1, c: 'fixed', b, l: 'bank fee', v: 0, s: 'file', o: { a: -1, cur: P5.banks.find((x) => x.bank === b).cur, t: 'fee' }, key: 'demo|cov|' + i, at: Date.parse('2026-10-27T18:00:00Z') }));
+  P5.banks.forEach((b) => { b.asOf = '2026-10-28'; b.at = Date.parse('2026-10-28T08:00:00Z'); });
+  const lt = await scene('what if, a late client', led5, P5, { H: 60, at: '2026-10-28T12:00:00+00:00' });
+  const M5 = (await holds(lt, 'a plan with a client whose payment is overdue')).M;
+  same(M5.items.find((it) => it.id === 'c-halden-co@2026-10').state, 'late', 'Halden & Co\'s October is late');
+  // (second reading: of the client who is not paying the page said «его платежей и так нет», while his overdue payment was counted today)
+  await unfold(lt);
+  await kind(lt, 'stop');
+  await lt.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  ok(/его просроченный платёж \(£[\d,]+\) остаётся в расчёте — о нём спрашивает «Нужно решить»/.test(await worked(lt)) && !/и так нет/.test(await worked(lt)), 'a client with an overdue payment «уходит»: the line says the overdue payment is still counted, and who asks about it', await worked(lt));
+  await lt.context().close();
+
+  // ---- 6. A plan that is «впритык» by itself.
+  const P6 = demoPlan(T);
+  P6.banks.find((b) => b.bank === 'Wise' && b.cur === 'GBP').amt -= 50000;
+  const tight = await scene('what if, a plan under its cushion', demoLedger(T), P6, { H: 60 });
+  same((await holds(tight, 'a plan whose low point is under the cushion')).M.verdict.id, 'v3', 'the plan itself is «впритык»');
+  await unfold(tight);
+  await kind(tight, 'cost');
+  await tight.fill(F + '[data-wi-f="day"]', '1');
+  await tight.selectOption(F + '[data-wi-f="from"]', '2026-12');
+  await tight.click(F + '[data-wi-go]');
+  // (second reading: «в этом случае впритык» with no word that the plan is exactly as tight without the change)
+  ok(/^В этом случае хватает, но впритык: .* По плану тоже впритык\.$/.test(await say(tight)), 'a cost that begins after the low point: the answer says the plan is «впритык» too', await say(tight));
+  await tight.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
