@@ -279,6 +279,14 @@ a deploy:
   document is added to `ACT` in `index.html`**: that list is what a reader's
   page hides, shuts and ignores, and the check `rv-reader` walks every tab for
   a control that is in neither.
+- **«Что если» saves nothing** (the owner's decision of 11 October 2026). A
+  trial is a list of changes made to a copy of the plan and computed by the
+  same engine; it sends no request, changes neither document, and a reload
+  forgets it. Its controls (`data-wi-*`) are deliberately not in `ACT`, so a
+  reader may ask too; its figures carry `data-wi-k`, never `data-live` - every
+  other figure on the page stays the plan's while a trial is on. A change
+  that lets a trial write, or lets its figures stand in for the plan's, breaks
+  rule 1 of the page; the check `rv-whatif` holds both.
 - **The exchange rates come from the stand, by day** (the owner's decision of
   9 October 2026). The page asks `GET /api/rates` once when it opens, and
   again only by somebody's own act - before it reads a statement whose days

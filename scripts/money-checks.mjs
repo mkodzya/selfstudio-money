@@ -2503,7 +2503,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   const was = [S.fig('in'), S.fig('end')];
   await openRow(pg, occ);
   same([await text(pg, K('row') + '.ed-why'), await texts(pg, K('row') + '.ed-foot button'), await pg.$eval(K('row') + '[data-ed-f="monthly"]', (e) => e.checked), await pg.$eval('#ed-name', (e) => e.disabled)],
-    ['В плане: вписал Mika 6 окт · каждый месяц, 28-го · в таблице это Client A.', ['Получено', 'Частично…', 'Перенести на…', 'Не придёт', 'Убрать', 'Закрыть', 'Только октябрь', 'Октябрь и дальше'], true, false], 'the card of October\'s month of Client A: whose row, that it repeats, what can be done with this month — and two ways to save: this month only, or from now on');
+    ['В плане: вписал Mika 6 окт · каждый месяц, 28-го · в таблице это Client A.', ['Получено', 'Частично…', 'Перенести на…', 'Не придёт', 'Убрать', 'Что если…', 'Закрыть', 'Только октябрь', 'Октябрь и дальше'], true, false], 'the card of October\'s month of Client A: whose row, that it repeats, what can be done with this month — and two ways to save: this month only, or from now on');
   same(await text(pg, K('row') + '[data-ed-n="monthly"]'), '28-го числа, с октября', '… the tick «каждый месяц» says on which day and since when');
   await fill(pg, 'row', { amt: 8500 });
   await pg.click(K('row') + '[data-ed-save]');
@@ -2526,7 +2526,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   const vat = 't|vat|2026Q3';
   await openRow(pg, vat);
   same([await text(pg, K('row') + '.ed-why'), await pg.$eval('#ed-name', (e) => [e.disabled, e.value]), await text(pg, K('row') + 'label[for="ed-amt"] span'), await texts(pg, K('row') + '.ed-foot button'), (await drawn(pg, vat)).split(' | ').slice(0, 5).join(' | ')],
-    ['Посчитано: 20% сверху счетов клиентов с VAT за III кв. 2026 — начислено £200. Сумму по декларации и дату можно поправить.', [true, 'UK VAT за III кв. 2026'], 'Сумма по декларации', ['Оплачено', 'Перенести на…', 'Не платим', 'Закрыть', 'Сохранить'], 'td-row td-hist | none | UK VAT за III кв. 2026 | Wise · посчитано по правилу | −£200'],
+    ['Посчитано: 20% сверху счетов клиентов с VAT за III кв. 2026 — начислено £200. Сумму по декларации и дату можно поправить.', [true, 'UK VAT за III кв. 2026'], 'Сумма по декларации', ['Оплачено', 'Перенести на…', 'Не платим', 'Что если…', 'Закрыть', 'Сохранить'], 'td-row td-hist | none | UK VAT за III кв. 2026 | Wise · посчитано по правилу | −£200'],
     'the computed tax: muted, «посчитано по правилу», no «≈»; its card says where the figure comes from, and its name is not to be typed');
   await fill(pg, 'row', { amt: 180, date: '2026-11-05' });
   await pg.click(K('row') + '[data-ed-save]');
@@ -3410,7 +3410,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   await pg.click('#view-today [data-td-flip="past"]');
   same([item(S.M, oct).state, (await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), S.M.cards.filter((c) => c.item === oct).length], ['done', 'line-through | Person B | Wise · заплатили £5,400, в плане £6,000 | −£5,400', 0], 'the month is closed by its payment at what came — «заплатили £5,400, в плане £6,000» — and nobody is asked about the difference');
   await pg.click(inDays(oct));
-  same(await texts(pg, K('row') + '.ed-foot button'), ['И дальше так же', 'Частично…', 'Закрыть'], 'its card offers the two things that can follow: «И дальше так же», and «Частично…» for a debt that really remains');
+  same(await texts(pg, K('row') + '.ed-foot button'), ['И дальше так же', 'Частично…', 'Что если…', 'Закрыть'], 'its card offers the two things that can follow: «И дальше так же», and «Частично…» for a debt that really remains');
   await pg.click(K('row') + '[data-ed-do="part"]');
   // The question asks two things in one box.
   same([await pg.inputValue(PART), await text(pg, K('row') + 'label[for="ed-part"] span'), await text(pg, K('row') + '[data-ed-partnote]'), await pg.$eval(REST, (e) => [e.type, e.value, e.min, e.max, e.id, 'edF' in e.dataset]), await text(pg, K('row') + 'label[for="ed-partdate"] span'), await texts(pg, ASK + ' button'), await pg.evaluate(() => document.activeElement.id)],
@@ -3453,7 +3453,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   same([(await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), (await drawn(pg, debt.id)).split(' | ').slice(2).join(' | '), (await drawn(pg, 'rB@2026-11')).split(' | ').slice(2).join(' | ')], ['line-through | Person B | Wise · оплачено £5,400 из £6,000 | −£5,400', 'Person B — остаток с октября | Wise | −£600 | чт 12 ноя', 'Person B | Wise · каждый месяц | −£6,000 | пт 20 ноя'],
     'on «Сегодня» October reads «оплачено £5,400 из £6,000», the rest stands under the day the founder named — 12 Nov, saying nothing but its name — and November\'s own payment under the 20th');
   await pg.click(inDays(debt.id));
-  same([await text(pg, K('row') + '.ed-why'), await texts(pg, K('row') + '.ed-foot button'), await pg.inputValue(K('row') + '#ed-date')], ['В плане: вписал Mika 22 окт · остаток с октября · в таблице это Person B.', ['Оплачено', 'Частично…', 'Перенести на…', 'Удалить', 'Закрыть', 'Сохранить'], '2026-11-12'],
+  same([await text(pg, K('row') + '.ed-why'), await texts(pg, K('row') + '.ed-foot button'), await pg.inputValue(K('row') + '#ed-date')], ['В плане: вписал Mika 22 окт · остаток с октября · в таблице это Person B.', ['Оплачено', 'Частично…', 'Перенести на…', 'Удалить', 'Что если…', 'Закрыть', 'Сохранить'], '2026-11-12'],
     'its card says where it came from and offers what any written payout has: «Оплачено», «Частично…» again, «Перенести на…» with its date, «Удалить»');
   await pg.click(K('row') + '[data-ed-x]');
   // The constructor: the month it left is closed at what was paid; the rest is a row of the month of its day.
@@ -3516,7 +3516,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   same([item(S.M, 'g').state, item(S.M, 'g').done.by, S.M.cards.length, (await drawn(mk, 'g')).split(' | ').slice(1, 5).join(' | '), S.fig('marks'), (await kpi(mk, 0))[1]], ['done', 'ok', 0, 'line-through | Person G | Wise · отмечено вручную | −£1,000', undefined, '£10,000'],
     'a row marked paid stays closed when the statements go past its day without showing it: struck through, «отмечено вручную», no card, nothing owed again — and no longer inside «сейчас»');
   await mk.click(inDays('g'));
-  same([await text(mk, K('row') + '.ed-why'), await texts(mk, K('row') + '.ed-foot button')], ['В плане: вписал Mika 6 окт · такого названия в таблице нет — закрою по сумме. Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.', ['Вернуть в план', 'Повторять каждый месяц', 'Закрыть']], 'its card says so; what is left to do is «Вернуть в план» — or to make the paid row repeat');
+  same([await text(mk, K('row') + '.ed-why'), await texts(mk, K('row') + '.ed-foot button')], ['В плане: вписал Mika 6 окт · такого названия в таблице нет — закрою по сумме. Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.', ['Вернуть в план', 'Повторять каждый месяц', 'Что если…', 'Закрыть']], 'its card says so; what is left to do is «Вернуть в план» — or to make the paid row repeat');
   await finish(mk);
 });
 
@@ -3618,7 +3618,7 @@ await run('partly, other days', '«Частично» with the rest in the same 
   same([states(S.M, ['pb', r2.id]), item(S.M, r2.id).day, item(S.M, 'pb').twins], [['done', 'due'], '2026-11-12', []], 'a one-off row «Person B» of 20 Oct, 4,000 of it paid and the rest on 12 Nov: the model names no later month that already holds a row of his');
   await pg.click('#view-today [data-td-flip="past"]');
   await pg.click(inDays('pb'));
-  same(await texts(pg, K('row') + '.ed-foot button'), ['Вернуть в план', 'Повторять каждый месяц', 'Закрыть'], 'the card of the row that was paid in part offers «Повторять каждый месяц»');
+  same(await texts(pg, K('row') + '.ed-foot button'), ['Вернуть в план', 'Повторять каждый месяц', 'Что если…', 'Закрыть'], 'the card of the row that was paid in part offers «Повторять каждый месяц»');
   await pg.click(K('row') + '[data-ed-do="tick"]');
   S = await holds(pg, '«Повторять каждый месяц» beside a rest');
   same([await toastText(pg), Object.keys(S.P.team[0].rec.x), S.P.team[0].rec.day, states(S.M, ['pb@2026-10', 'pb@2026-11', r2.id]), item(S.M, 'pb@2026-11').cash, S.M.months.by['2026-11'].team],
@@ -3664,7 +3664,7 @@ await run('partly, from before', 'a plan that still holds a rest carried WITHOUT
   same([(await drawn(pg, 'debt')).split(' | ').slice(2).join(' | '), await text(pg, '#view-today .td-need .op[data-td-card="9"] .op-name')], ['Person B — остаток с октября | Wise · без даты · в расчёте с 1 ноября | −£600 | вс 1 ноя', 'Без даты и не в расчёте: 1 строка на £1,200'],
     'on «Сегодня» the debt stands under 1 November — «без даты · в расчёте с 1 ноября» — and the card counts only what is owed TO the studio');
   await pg.click(inDays('debt'));
-  same([await text(pg, K('row') + '.ed-why'), await texts(pg, K('row') + '.ed-foot button'), await pg.inputValue(K('row') + '#ed-date')], ['В плане: вписал Mika 22 окт · остаток с октября · в таблице это Person B. Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.', ['Оплачено', 'Частично…', 'Удалить', 'Закрыть', 'Сохранить'], ''],
+  same([await text(pg, K('row') + '.ed-why'), await texts(pg, K('row') + '.ed-foot button'), await pg.inputValue(K('row') + '#ed-date')], ['В плане: вписал Mika 22 окт · остаток с октября · в таблице это Person B. Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.', ['Оплачено', 'Частично…', 'Удалить', 'Что если…', 'Закрыть', 'Сохранить'], ''],
     'its card says it has no date and is counted all the same, and offers «Оплачено», «Частично…» and «Удалить»');
   await pg.click(K('row') + '[data-ed-x]');
   await goCash(pg);
@@ -4212,7 +4212,7 @@ await run('typing', 'a row\'s sum is typed where it stands — the box stays und
   await pg.click(cs('inflows', 'k') + ' .cs-dd');
   same([await pg.$('[data-ed-card]'), await pg.getAttribute(more('inflows', 'k'), 'aria-expanded')], [null, 'false'], '… and a second press on the row shuts it');
   await pg.click(cs('inflows', 'k') + ' .cs-mo [data-ed-open]');
-  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await texts(pg, K('row') + '.ed-foot button')], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Удалить', 'Закрыть', 'Сохранить']], 'the arrow at the end of the row opens the same card right under it: where it came from, «+ VAT», «каждый месяц», «Частично…», «Удалить»');
+  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await texts(pg, K('row') + '.ed-foot button')], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Удалить', 'Что если…', 'Закрыть', 'Сохранить']], 'the arrow at the end of the row opens the same card right under it: where it came from, «+ VAT», «каждый месяц», «Частично…», «Удалить»');
   await calm(pg, 'with a row\'s card open', 'cash');
   await pg.setChecked(K('row') + '[data-ed-f="vat"]', true);
   await pg.click(K('row') + '[data-ed-save]');
@@ -4941,7 +4941,7 @@ await run('rv-small', 'the rest of the review: a save the server did not take, t
   // A paid one-off row can be made to repeat from its card; a name the table knows brings its bank.
   pg = await scene('a paid row', ledP(), planP({ team: [row('g', 'Person G', 1000, '2026-10-07', { paid: paid(T) })] }), { H: 60 });
   await pg.click(inDays('g'));
-  same(await texts(pg, K('row') + '.ed-foot button'), ['Вернуть в план', 'Повторять каждый месяц', 'Закрыть'], 'a row marked paid offers «Повторять каждый месяц» on its card');
+  same(await texts(pg, K('row') + '.ed-foot button'), ['Вернуть в план', 'Повторять каждый месяц', 'Что если…', 'Закрыть'], 'a row marked paid offers «Повторять каждый месяц» on its card');
   await pg.click(K('row') + '[data-ed-do="tick"]');
   let S = await holds(pg, 'the paid row made to repeat');
   same([S.P.team[0].rec, await toastText(pg), item(S.M, 'g@2026-10').state, item(S.M, 'g@2026-11').cash], [{ day: 7, from: '2026-10', x: { '2026-10': { paid: paid(T) } } }, 'Person G: каждый месяц, с октября', 'done', -1000], 'pressed: the row repeats on the 7th from October, its mark stays with October, November is in the plan');
@@ -5343,7 +5343,7 @@ await run('rv-reader', 'a reader is shown everything and offered nothing that ch
   await pg.click('#cs-sec-team tr.cs-r:not(.cs-done)');
   await pg.waitForSelector('#view-cash [data-ed-card="row"]');
   same([await texts(pg, '#view-cash [data-ed-card="row"] button'), /Счёт: \S+ [A-Z]{3}/.test(await text(pg, '#view-cash [data-ed-card="row"] .ed-why')), await pg.$$eval('#view-cash [data-ed-card="row"] input, #view-cash [data-ed-card="row"] select', (l) => l.length)],
-    [['Закрыть'], true, 0], 'its card says what the row is - whose it is, the account, the day - and has «Закрыть» and nothing else');
+    [['Что если…', 'Закрыть'], true, 0], 'its card says what the row is - whose it is, the account, the day - and has «Что если…», which changes nothing, and «Закрыть»');
   await shot(pg, 'rv-reader-cash');
   await pg.click('#view-cash [data-ed-card="row"] [data-ed-x]');
   await pg.click('#view-cash [data-cs-view="days"]');
@@ -5921,6 +5921,121 @@ await run('rv-stmt-bal', 'an account stands on the balance its statement prints 
     [['ID,Date,Amount,Currency,Description,Balance', '2,06-10-2026,-12.00,GBP,Shop,478.00', '1,05-10-2026,-10.00,GBP,Shop,490.00'].join('\n'), made]);
   same(fed, [478, made, true], 'a file made at 7:30 and read at noon says what the account stood at at 7:30');
   await pg.context().close();
+});
+
+// =====================================================================================================================
+// «ЧТО ЕСЛИ» (the owner's decision of 11 October 2026: «давай делать Что если», and of the two places to ask it -
+// «оба, делай»). A trial on a copy of the plan: the same engine, nothing saved, nothing else on the page moved.
+// =====================================================================================================================
+await run('rv-whatif', '«Что если» answers with the engine\'s own figures for a copy of the plan, moves nothing else on the page, and saves nothing - for a reader too', async () => {
+  // The made-up studio with less on its accounts, so that a trial has consequences.
+  const led = demoLedger(T), P = demoPlan(T);
+  P.banks.find((b) => b.bank === 'Wise' && b.cur === 'GBP').amt = 5000;
+  P.banks.find((b) => b.bank === 'Barclays').amt = 13000;
+  const pg = await scene('what if', led, P, { H: 60 });
+  const base = await holds(pg, 'the plan, before any trial');
+  const plan0 = canon(base.P), M0 = base.M, mer = 'c-meridian-labs';
+  const ask = (list) => pg.evaluate((list) => window.__money.whatIf(list), list);
+  const peek = () => pg.evaluate(() => { const t = window.__money.trial; return { changes: t.changes, plan: t.plan, n: t.changes.length }; });
+  const quiet = async (msg) => same([store.cash.puts, store.led.puts, canon(await pg.evaluate(() => JSON.parse(JSON.stringify(window.__cash.state()))))], [0, 0, plan0], msg);
+
+  // The engine's side. No change: the second run is the first, to the penny.
+  const none = await ask([]);
+  same([canon(none.plan) === canon(none.trial), none.plan.low, none.plan.lowDay, none.plan.free], [true, M0.LOW, M0.LOWDAY, Math.floor(M0.free.now / 100) * 100], 'with nothing changed the copy is the plan: every figure of the trial is the plan\'s own');
+  // Each kind, held against a copy made by hand here and computed by the harness (which also holds §5 on it).
+  const ahead = M0.items.filter((it) => it.row === mer && it.open && it.day && it.state !== 'late').sort((a, b) => (a.day < b.day ? -1 : 1));
+  ok(ahead.length >= 3, 'Meridian Labs has payments ahead to try with', ahead.map((it) => it.id + ' ' + it.day));
+  const byHand = async (edit) => { const P2 = JSON.parse(JSON.stringify(P)); edit(P2); const M = await C(led, P2, T, { H: 60 }, 'a trial copy made by hand'); return [M.LOW, M.LOWDAY, M.IN, M.OUT, M.minusDay || '']; };
+  const of = (r) => [r.trial.low, r.trial.lowDay, r.trial.IN, r.trial.OUT, r.trial.minusDay];
+  const row = (P2, k, id) => P2[k].find((r) => r.id === id);
+  same(of(await ask([{ k: 'late', row: mer, item: '', days: 30 }])), await byHand((P2) => { const r = row(P2, 'inflows', mer); r.rec.x = r.rec.x || {}; ahead.forEach((it) => { r.rec.x[it.occ.ym] = { ...(r.rec.x[it.occ.ym] || {}), date: addD(it.day, 30) }; }); }),
+    '«платёж придёт позже»: every payment of the row that is still ahead, thirty days on - the figures of a plan written so');
+  same(of(await ask([{ k: 'stop', row: 'c-halden-co', from: '2026-11' }])), await byHand((P2) => { row(P2, 'inflows', 'c-halden-co').rec.to = '2026-10'; }), '«клиент уйдёт»: the row repeats for the last time in the month before');
+  const draw = await ask([{ k: 'draw', row: 'd-draw', amt: 12000, from: '2026-11' }]);
+  same([draw.trial.OUT - draw.plan.OUT, draw.trial.IN - draw.plan.IN], [3000, 0], '«выводим другую сумму»: £12,000 instead of £9,000 from November - one withdrawal of the sixty days is £3,000 larger');
+  const hire = await ask([{ k: 'cost', amt: 3000, cur: 'GBP', day: 25, from: '2026-11', name: '' }]);
+  same([hire.trial.OUT - hire.plan.OUT, hire.trial.IN - hire.plan.IN, hire.trial.low <= hire.plan.low], [3000, 0, true], '«наймём человека»: £3,000 on 25 November is inside the sixty days, 25 December is not');
+  await quiet('asking the engine saved nothing and left the plan as it was');
+
+  // From the row. Its card has «Что если…»; pressed, the card is turned over: the trial, and nothing that writes.
+  const oct = ahead[0].id;
+  await openRow(pg, oct);
+  ok((await texts(pg, K('row') + '.ed-foot button')).includes('Что если…'), 'the card of a row offers «Что если…» beside «Закрыть»', await texts(pg, K('row') + '.ed-foot button'));
+  await pg.click(K('row') + '[data-wi-open]');
+  await pg.waitForSelector(K('row') + '[data-wi-panel]');
+  const sel = (f) => pg.$eval(K('row') + `[data-wi-f="${f}"]`, (e) => (e.tagName === 'SELECT' ? e.selectedOptions[0].textContent.replace(/ /g, ' ') : e.value));
+  same([await pg.$$eval(K('row') + '[data-ed-save], ' + K('row') + '[data-ed-f], ' + K('row') + '[data-ed-do]', (l) => l.length), await sel('row'), /^только /.test(await sel('item')), await sel('days'), await texts(pg, K('row') + '.wi-kinds .chip.active')],
+    [0, 'Meridian Labs', true, '30', ['платёж придёт позже']], 'turned over, the card holds no field or button of the row; the client and the payment of the row stand ready, thirty days');
+  await pg.selectOption(K('row') + '[data-wi-f="item"]', '');
+  await pg.click(K('row') + '[data-wi-go]');
+  await pg.waitForSelector(K('row') + '[data-wi-k="say"]');
+  const want1 = await ask([{ k: 'late', row: mer, item: '', days: 30 }]);
+  const shown = async (root) => pg.$$eval(root + '[data-wi-k]', (l) => Object.fromEntries(l.map((e) => [e.dataset.wiK, e.textContent.replace(/ /g, ' ')])));
+  const money = (v) => (v < 0 ? '−' : '') + '£' + Math.abs(Math.round(v)).toLocaleString('en-GB');
+  let seen = await shown(K('row'));
+  ok(seen.low.startsWith(money(want1.trial.low) + ' · ') && seen.in === money(want1.trial.IN) && /^В этом случае /.test(seen.say), 'the answer under the row is the engine\'s: the lowest point and what comes in sixty days, «в этом случае»', seen);
+  same(await texts(pg, K('row') + '.wi-ch b'), ['Meridian Labs заплатит на 30 дней позже'], 'the change stands as a sentence');
+  const mid = await holds(pg, 'with a trial on, every figure of «Сегодня» is still the plan\'s');
+  same([mid.M.LOW, mid.M.IN], [M0.LOW, M0.IN], '… the same to the penny as before the trial');
+  await calm(pg, 'the turned card');
+  await shot(pg, 'rv-whatif-row');
+  // a second change, and the answer is for both
+  await pg.click(K('row') + '[data-wi-more]');
+  same(await texts(pg, K('row') + '.wi-kinds .chip.active'), ['наймём человека'], '«+ и ещё…» offers what has not been asked yet');
+  await pg.fill(K('row') + '[data-wi-f="amt"]', '3000');
+  await pg.press(K('row') + '[data-wi-f="amt"]', 'Enter');
+  await pg.waitForFunction(() => window.__money.trial.changes.length === 2);
+  const two = await peek(), want2 = await ask(two.changes);
+  seen = await shown(K('row'));
+  ok(seen.low.startsWith(money(want2.trial.low) + ' · ') && seen.out === money(want2.trial.OUT), 'Enter in a field counts, and saves no row: the answer is for the two changes together', seen);
+  same((await texts(pg, K('row') + '.wi-ch b'))[1].slice(0, 22), 'и мы наймём человека з', 'the second change reads on from the first: «и …»');
+  // the copy the page made is a plan the engine takes with every rule it holds a plan to
+  const MT = await C(led, two.plan, T, { H: 60 }, 'the page\'s own trial copy');
+  same([MT.LOW, MT.IN, MT.OUT], [want2.trial.low, want2.trial.IN, want2.trial.OUT], 'the copy the page made, computed by the harness: the figures the page printed');
+  await quiet('two changes asked from a row: nothing saved, the plan as it was');
+
+  // The same trial at the foot of «Сегодня»: one folded line, and inside it the same list and the same answer.
+  await pg.click(K('row') + '[data-ed-x]');
+  await pg.waitForFunction(() => !document.querySelector('[data-ed-card="row"]'));
+  same(plain(await pg.$eval('#view-today .td-wi > summary', (e) => e.textContent)), 'Что еслиидёт проба: 2 изменения · в план ничего не записано', 'the card shut, the trial goes on, and the folded line says so');
+  await pg.click('#view-today .td-wi > summary');
+  await pg.waitForSelector('#view-today .td-wi[open] [data-wi-more]');
+  const F = '#view-today .td-wi ';
+  same([(await texts(pg, F + '.wi-ch b')).length, (await shown(F)).low], [2, seen.low], 'unfolded: the two changes and the answer that stood in the card');
+  await pg.click(F + '[data-wi-more]');
+  await pg.click(F + '[data-wi-kind="stop"]');
+  await pg.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  await pg.click(F + '[data-wi-go]');
+  await pg.waitForFunction(() => window.__money.trial.changes.length === 3);
+  ok(/Клиент уходит, а расходы на его команду остались в расчёте/.test(await text(pg, F + '.wi-notes')), 'a client who leaves: the page says his team\'s costs are still counted', await text(pg, F + '.wi-notes'));
+  await holds(pg, 'three changes on, the fold open: «Сегодня» is the plan');
+  await calm(pg, 'the unfolded trial');
+  await shot(pg, 'rv-whatif-fold');
+  // another tab and back: it is still on
+  await goCash(pg);
+  await pg.click('.nav [data-tab="today"]');
+  await pg.waitForSelector('#view-today [data-live="verdict"]');
+  same((await peek()).n, 3, 'the trial outlives a walk to «Касса» and back');
+  // «Закончить пробу»
+  await pg.click(F + '[data-wi-end]');
+  same([await toastText(pg), (await peek()).n, plain(await pg.$eval('#view-today .td-wi > summary .td-meta', (e) => e.textContent))], ['Проба закончена. В плане ничего не изменилось.', 0, 'платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму'], '«Закончить пробу»: it is over, and the page says the plan was never touched');
+  await sleep(700);
+  await quiet('a whole trial, from a row and from the fold: no save was sent, the plan is what it was');
+  await pg.context().close();
+
+  // Somebody who only looks asks too: the trial changes no document, so nothing of it is shut for a reader.
+  serve(led, P);
+  asReader();
+  const rd = await open('what if, a reader', undefined, { who: 'Misha' });
+  await rd.waitForSelector('#view-today [data-live="verdict"]');
+  await rd.click('#view-today .td-wi > summary');
+  await rd.waitForSelector('#view-today .td-wi[open] [data-wi-go]');
+  same(await rd.$$eval('#view-today .td-wi [data-wi-f], #view-today .td-wi button', (l) => l.filter((e) => e.disabled || getComputedStyle(e).display === 'none').length), 0, 'on a reader\'s page nothing of the trial is shut or hidden');
+  await rd.click('#view-today .td-wi [data-wi-go]');
+  await rd.waitForSelector('#view-today .td-wi [data-wi-k="say"]');
+  await sleep(900);
+  same([await rd.evaluate(() => window.__money.trial.changes.length), await offered(rd), store.cash.puts, store.led.puts], [1, [], 0, 0], 'a reader asked and was answered: still nothing offered that changes a document, and no save sent');
+  await rd.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

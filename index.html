@@ -549,12 +549,43 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .td-wkd{padding:0 0 10px 20px}
 @media (max-width:620px){.td-wkd{padding-left:0}}
 /* «Аналитика»: the chart and the taxes, folded into one line under everything a founder acts on. */
-.td-anl{border-top:1px solid var(--text-primary);margin-top:8px}
-.td-anl>summary{display:flex;gap:6px 14px;align-items:baseline;flex-wrap:wrap;padding:16px 2px;font-size:17px;list-style:none}
-.td-anl>summary::-webkit-details-marker{display:none}
-.td-anl>summary::before{content:"+";font-family:var(--mono);font-weight:400;width:14px;flex:none;color:var(--text-muted)}
-.td-anl[open]>summary::before{content:"−"}
-.td-anl>summary .td-meta{font-weight:400}
+.td-anl,.td-wi{border-top:1px solid var(--text-primary);margin-top:8px}
+.td-anl>summary,.td-wi>summary{display:flex;gap:6px 14px;align-items:baseline;flex-wrap:wrap;padding:16px 2px;font-size:17px;list-style:none}
+.td-anl>summary::-webkit-details-marker,.td-wi>summary::-webkit-details-marker{display:none}
+.td-anl>summary::before,.td-wi>summary::before{content:"+";font-family:var(--mono);font-weight:400;width:14px;flex:none;color:var(--text-muted)}
+.td-anl[open]>summary::before,.td-wi[open]>summary::before{content:"−"}
+.td-anl>summary .td-meta,.td-wi>summary .td-meta{font-weight:400}
+/* «Что если» stands right above «Аналитика»: two folded lines, one rule between them. */
+.td-wi+.td-anl{margin-top:-18px}
+/* The trial («Что если»): what is asked on the left, the answer beside it; in a row's card, one under the other.
+   Its words are plain text and small grey text - no boxed word anywhere; the only capsules are its buttons. */
+.wi-box{display:flex;gap:18px 32px;flex-wrap:wrap}
+.wi-col{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.wi-q{font-size:15px;font-weight:600}
+.wi-list{display:flex;flex-direction:column;gap:8px}
+.wi-ch{display:flex;justify-content:space-between;gap:12px;align-items:baseline;border-bottom:1px solid var(--border);padding-bottom:8px}
+.wi-ch b{font-weight:600;font-size:13.5px}
+/* (A client's name in a sentence of the trial is `.td-nm`, like every name a founder typed - here without the gap
+   that sets a name apart from its remark in a row.) */
+.wi-col .td-nm{margin:0;font:inherit;display:inline}
+.wi-meta{display:block;color:var(--text-muted);font-size:12px;line-height:1.5;font-weight:400}
+.wi-x{font:inherit;font-size:12px;color:var(--text-muted);background:none;border:0;border-bottom:1px solid var(--border-strong);padding:0;height:auto;cursor:pointer;border-radius:0;letter-spacing:0;text-transform:none;white-space:nowrap}
+.wi-x:hover{color:var(--text-primary)}
+.wi-comp{display:flex;flex-direction:column;gap:12px}
+.wi-kinds{display:flex;gap:6px;flex-wrap:wrap}
+.wi-fields{display:flex;gap:10px 12px;flex-wrap:wrap}
+.wi-fields .fld{flex:1 1 150px}
+.wi-fields .fld.ed-wide{flex-basis:100%}
+.wi-ans{display:flex;flex-direction:column;gap:12px}
+.wi-say{font-size:16px;font-weight:600;line-height:1.4;letter-spacing:-.01em;margin:0;max-width:48ch;text-wrap:balance}
+.wi-plan{font-weight:400;color:var(--text-muted);font-size:13px}
+.wi-neg{color:var(--mark-crit);white-space:nowrap}
+.wi-t{width:100%;border-collapse:collapse;font-size:13px}
+.wi-t th{text-align:right;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary);font-weight:400;padding:0 0 6px 14px}
+.wi-t td{padding:8px 0;border-top:1px solid var(--border);vertical-align:top}
+.wi-t td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:14px}
+.wi-t td.was{color:var(--text-muted)}
+.wi-notes{display:flex;flex-direction:column;gap:6px;color:var(--text-muted);font-size:12px;line-height:1.5}
 @media (min-width:1101px){.kpis.td-k5{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .td-meta{color:var(--text-muted);font-size:12px}
 .td-two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
@@ -4574,6 +4605,8 @@ const Live=(()=>{
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
 window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+ // (whatIf: what a list of trial changes does to the plan's figures - nothing on the screen moves; trial: the one on it.)
+ whatIf(list){return Trial.ask(list);},get trial(){return Trial.peek();},
  model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
 // LIVE — the forecast engine (end)
 // =====================================================================================================================
@@ -4604,6 +4637,204 @@ const Plan=(()=>{
 })();
 Plan.watch(()=>Cash.draw());
 
+// ---------- «Что если»: a trial on the plan that saves nothing ----------
+// The owner's decision of 11 October 2026 («давай делать Что если», of the two places to ask it: «оба, делай»).
+// A founder asks what the money would do if a client paid later, or left, if somebody were hired, if the founders
+// took out another sum. The page answers with the same engine: the changes are made to a COPY of the plan, the copy
+// is computed for the same day and the same sixty (or thirty) days, and a few figures are set side by side, «по
+// плану» and «в этом случае». Nothing else on the page moves, nothing is saved, and a reload forgets it: a trial is
+// an answer to a question somebody asked, never a second forecast standing on the page (the page states no guess -
+// rule 1 of docs/handoff.md).
+//
+// What is kept is the list of changes, not a changed document: the plan can change under an open trial, and the
+// changes are made again, to a fresh copy, at every draw; one whose row is gone is simply not made. The four kinds:
+//   {k:"late", row, item, days}             a payment (`item`: one line of the plan; "": every dated payment of
+//                                           the row that is still ahead) comes `days` later
+//   {k:"stop", row, from}                   a row that repeats comes for the last time in the month before `from`
+//   {k:"cost", amt, cur, day, from, name}   a new cost every month (somebody is hired); `name` is for the sentence
+//   {k:"draw", row, amt, from}              the founders' monthly withdrawal is another sum from `from` on
+// They are made by the engine's own verbs (Live.write.set, .add) and by the one field that ends a repeat (rec.to):
+// a copy that the engine reads exactly as it would read a plan a founder had written so.
+//
+// It stands in two places and is one trial: turned over in the card of a row («Что если…» in the card's foot — Ed
+// draws that), and as one folded line at the foot of «Сегодня». Its controls carry data-wi-* and are in no list of
+// the reader's page (ACT): they change no document, so somebody who only looks may ask too. Its figures carry
+// data-wi-k, never data-live: the screen's own figures are the plan's and stay so while a trial is on.
+const Trial=(()=>{
+ let changes=[],draft=null,origin=null;
+ const KINDS=[["late","платёж придёт позже"],["stop","клиент уйдёт"],["cost","наймём человека"],["draw","выводим другую сумму"]];
+ const ymAdd=(ym,k)=>{const n=+ym.slice(0,4)*12+ +ym.slice(5,7)-1+k;return Math.floor(n/12)+"-"+String(n%12+1).padStart(2,"0");};
+ const monG=ym=>MONGF[+ym.slice(5,7)-1],pad=n=>String(n).padStart(2,"0"),money=(v,cur)=>fmt(Math.round(v),0,cur&&cur!=="GBP"?SYM[cur]||"":"£");
+ const rows=k=>{const P=Plan.doc();return P&&Array.isArray(P[k])?P[k]:[];},rowOf=id=>{for(const k of Live.LISTS){const r=rows(k).find(x=>String(x.id)===String(id));if(r)return{r,k};}return null;};
+ // The payments of a row that are still ahead: written, dated, not yet come, and not already late - a late one is
+ // asked about in «Нужно решить», and its date is a founder's answer, not something to try.
+ const pays=(M,row)=>M.items.filter(it=>it.list==="inflows"&&(it.row||it.id)===row&&it.open&&it.day&&it.state!=="late"&&it.src!=="tax").sort((a,b)=>a.day<b.day?-1:1);
+ const clients=M=>rows("inflows").filter(r=>pays(M,r.id).length),ymT=M=>M.T.slice(0,7);
+ const repeats=M=>rows("inflows").filter(r=>r.rec&&r.on!==false&&(!r.rec.to||r.rec.to>=ymT(M)));
+ const drawRow=M=>rows("div").find(r=>r.rec&&!r.ptax&&r.on!==false&&(!r.rec.to||r.rec.to>=ymT(M)))||null;
+ const drawOpen=(M,row)=>M.items.filter(it=>it.src==="occ"&&it.row===row&&it.open&&it.day).sort((a,b)=>a.day<b.day?-1:1);
+ // A new cost is paid from an account the plan holds a balance for: a row on an account without one would leave
+ // «Денег сейчас» without an answer, in the trial as in the plan.
+ const accts=M=>M.accounts.filter(a=>a.inPlan&&a.anchor),curs=M=>[...new Set(accts(M).map(a=>a.cur))];
+ const months=M=>{const out=[];for(let m=ymT(M);m<=ymAdd(ymT(M),6);m=ymAdd(m,1))out.push(m);return out;};
+ // The first month a new monthly cost can begin in: its day of that month has not passed.
+ const firstMonth=(M,day)=>M.T<=ymT(M)+"-"+pad(day)?ymT(M):ymAdd(ymT(M),1);
+
+ // ---- the copy ----
+ function apply(P,M,c,now,by){
+  const h=c.row?(()=>{for(const k of Live.LISTS){const r=(P[k]||[]).find(x=>String(x.id)===String(c.row));if(r)return{r,k};}return null;})():null;
+  if(c.k==="late"){if(!h)return;
+   pays(M,c.row).filter(it=>!c.item||it.id===c.item).forEach(it=>{
+    if(it.src==="occ"){if(h.r.rec)Live.write.set(P,{src:"occ",row:it.row,occ:{ym:it.occ.ym}},{date:dAdd(it.day,c.days)},now,by);}
+    else Live.write.set(P,{src:"row",id:it.id},{date:dAdd(it.day,c.days)},now,by);});}
+  // (rec.to and nothing more: the row keeps its id and its earlier months, which «Больше не повторять» may not.)
+  else if(c.k==="stop"){if(h&&h.r.rec&&(!h.r.rec.to||h.r.rec.to>=c.from))h.r.rec.to=ymAdd(c.from,-1);}
+  else if(c.k==="cost"){const a=accts(M).find(x=>x.cur===c.cur)||accts(M)[0];if(!a||!(c.amt>0))return;
+   // (No name in the copy: the engine ties a row to the table by its name, and a trial must tie itself to nothing.)
+   Live.write.add(P,"team",{id:"wi"+uid(),name:"",amt:+c.amt,cur:a.cur,bank:a.bank,on:true,tag:"",info:false,date:c.from+"-"+pad(c.day),c0:now,m:{t:now,by},rec:{day:+c.day,from:c.from}});}
+  else if(c.k==="draw"){if(!h||!h.r.rec||!(c.amt>=0))return;
+   drawOpen(M,c.row).filter(it=>it.occ.ym>=c.from).forEach(it=>Live.write.set(P,{src:"occ",row:it.row,occ:{ym:it.occ.ym}},{amt:+c.amt},now,by));}
+ }
+ function planOf(M,list){
+  const P=JSON.parse(JSON.stringify(Plan.doc())),now=Date.now(),by=Plan.by();
+  (list||changes).forEach(c=>{try{apply(P,M,c,now,by);}catch(e){}});
+  return P;
+ }
+ const modelOf=(M,list)=>Live.compute(ledIn(),planOf(M,list),M.T,{H:M.H});
+ const read=M=>({id:M.verdict.id,low:M.LOW,lowDay:M.LOWDAY,minusDay:M.minusDay||"",minus:M.minus||0,IN:M.IN,OUT:M.OUT,res:M.taxes.reserve,free:M.free&&M.free.now>0?Math.floor(M.free.now/100)*100:0,tight:M.free&&M.free.tight||null});
+ const gone=c=>!!c.row&&!rowOf(c.row);
+
+ // ---- a change, in words ----
+ // (A name a founder typed stands in `.td-nm`, like every such name on the page.)
+ function words(M,c){
+  const h=c.row&&rowOf(c.row),nm=h?`<span class="td-nm">${esc(h.r.name||"")}</span>`:"",H=M.H,end=M.end;
+  if(gone(c))return{say:"строки больше нет в плане",meta:"это изменение не считается"};
+  if(c.k==="late"){
+   const its=pays(M,c.row).filter(it=>!c.item||it.id===c.item),inH=its.filter(it=>it.day<=end);
+   if(!its.length)return{say:`${nm} заплатит на ${c.days} ${plural(c.days,"день","дня","дней")} позже`,meta:"платежа, который можно сдвинуть, в плане сейчас нет"};
+   const moved=(c.item?its:inH.length?inH:its.slice(0,1)).map(it=>{const to=dAdd(it.day,c.days);return `${dRu(it.day)} → ${dRu(to)}${to>end&&it.day<=end?`, это уже дальше ${H} дней`:""}`;});
+   return{say:`${nm} заплатит на ${c.days} ${plural(c.days,"день","дня","дней")} позже`,
+    meta:(c.item?`только платёж ${dRuF(its[0].day)}: ${fmt(Math.round(Math.abs(its[0].cash)))}`:`${inH.length} ${plural(inH.length,"платёж","платежа","платежей")} в ближайшие ${H} дней`)+" · "+moved.join(" · ")};}
+  if(c.k==="stop"){
+   const lost=pays(M,c.row).filter(it=>it.src==="occ"&&it.occ.ym>=c.from&&it.day<=end),sum=lost.reduce((a,it)=>a+Math.abs(it.cash),0);
+   return{say:`${nm} уйдёт с ${monG(c.from)}`,meta:lost.length?`не ${plural(lost.length,"придёт","придут","придут")} ${lost.length} ${plural(lost.length,"платёж","платежа","платежей")} · ${fmt(Math.round(sum))} за ${H} дней`:`в ближайшие ${H} дней его платежей и так нет`,
+    note:"Клиент уходит, а расходы на его команду остались в расчёте: страница не знает, кто на нём работает. Его разовые счета тоже остались."};}
+  if(c.k==="cost"){
+   const ds=[];for(let m=c.from;m<=end.slice(0,7);m=ymAdd(m,1)){const d=m+"-"+pad(c.day);if(d>=M.T&&d<=end)ds.push(d);}
+   return{say:(c.name?`появится расход «<span class="td-nm">${esc(c.name)}</span>» — `:"мы наймём человека за ")+`${money(c.amt,c.cur)} в месяц с ${monG(c.from)}`,
+    meta:`платить ${c.day}-го числа · в ${H} дней `+(ds.length?`${plural(ds.length,"попадает","попадают","попадают")} ${ds.length} ${plural(ds.length,"выплата","выплаты","выплат")}: ${ds.map(dRuF).join(" и ")}`:"не попадает ни одной выплаты"),
+    note:`Новый расход проба проверяет только на ${H} дней: за это время его платят ${ds.length} ${plural(ds.length,"раз","раза","раз")}. Дальше он идёт каждый месяц.`};}
+  if(c.k==="draw"){
+   const ds=drawOpen(M,c.row).filter(it=>it.occ.ym>=c.from&&it.day<=end).map(it=>it.day);
+   return{say:`мы будем выводить по ${fmt(Math.round(c.amt))} в месяц вместо ${fmt(Math.round(+h.r.amt||0))}, начиная с ${monG(c.from)}`,
+    meta:`в ${H} дней `+(ds.length?`${plural(ds.length,"попадает","попадают","попадают")} ${ds.length} ${plural(ds.length,"вывод","вывода","выводов")}: ${ds.map(dRuF).join(" и ")}`:"не попадает ни одного вывода")};}
+  return{say:"",meta:""};
+ }
+
+ // ---- the answer ----
+ function answer(M){
+  if(!changes.length)return `<p class="note" style="margin:0">Ответ появится здесь, когда нажмёте «Посчитать».</p>`;
+  const A=read(M),B=read(modelOf(M)),H=M.H,out=[],neg=v=>v<0?`<span class="wi-neg">${fmt(Math.round(v))}</span>`:fmt(Math.round(v));
+  const row=(k,name,a,b,sub)=>{if(a!==b)out.push(`<tr><td>${name}${sub?`<span class="wi-meta">${sub}</span>`:""}</td><td class="n was">${a}</td><td class="n" data-wi-k="${k}">${b}</td></tr>`);};
+  const diff=(a,b)=>Math.round(a)!==Math.round(b)?`на ${fmt(Math.abs(Math.round(b)-Math.round(a)))} ${b<a?"меньше":"больше"}`:"";
+  row("low","Нижняя точка",`${fmt(Math.round(A.low))} · ${dRu(A.lowDay)}`,`${neg(B.low)} · ${dRu(B.lowDay)}`);
+  if(B.id==="v4"&&B.minusDay)out.push(`<tr><td>Первый минус</td><td class="n was">${A.minusDay?dRu(A.minusDay):"нет"}</td><td class="n" data-wi-k="minus"><span class="wi-neg">${dRu(B.minusDay)}</span></td></tr>`);
+  row("free","Можно вывести",A.free?fmt(A.free):"ничего",B.free?fmt(B.free):"ничего",B.tight&&B.free!==A.free&&B.tight.e>0?`самый тесный день в этом случае — ${dRuF(B.tight.d)}: на счетах ${fmt(Math.round(B.tight.e))}, из них ${fmt(Math.round(B.tight.res))} под налоги и ${fmt(Math.round(M.cushion))} запас`:"");
+  row("in",`Придёт за ${H} дней`,fmt(Math.round(A.IN)),fmt(Math.round(B.IN)),diff(A.IN,B.IN));
+  row("out",`Уйдёт за ${H} дней`,fmt(Math.round(A.OUT)),fmt(Math.round(B.OUT)),diff(A.OUT,B.OUT));
+  row("res","Под налоги",fmt(Math.round(A.res)),fmt(Math.round(B.res)));
+  const same=A.id===B.id,ok=v=>v==="v1"||v==="vi";
+  const say=B.id==="v4"?`В этом случае <span class="wi-neg">${dRuF(B.minusDay||B.lowDay)} не хватит ${fmt(Math.round(Math.abs(B.minusDay?B.minus:B.low)))}</span> — это первый минус. Нижняя точка — ${neg(B.low)}, ${dRuF(B.lowDay)}.`
+   :B.id==="v3"?`В этом случае денег хватает, но в нижней точке остаётся меньше запаса: ${fmt(Math.round(B.low))}, ${dRuF(B.lowDay)}.`
+   :`В этом случае денег ${ok(A.id)?"тоже ":""}хватает на ${H} дней. Нижняя точка — ${fmt(Math.round(B.low))}, ${dRuF(B.lowDay)}.`;
+  let h=out.length?`<p class="wi-say" data-wi-k="say">${say}${!same&&ok(A.id)&&!ok(B.id)?' <span class="wi-plan">По плану денег хватает.</span>':""}</p><table class="wi-t"><thead><tr><th></th><th>по плану</th><th>в этом случае</th></tr></thead><tbody>${out.join("")}</tbody></table>`
+   :`<p class="wi-say" data-wi-k="say">В ближайшие ${H} дней это ничего не меняет: все цифры те же, что по плану.</p>`;
+  if(B.id==="v4")h+=`<p class="wi-meta" style="margin:0">Уберите изменения по одному — будет видно, какое уводит в минус.</p>`;
+  const notes=[...new Set(changes.map(c=>gone(c)?"":words(M,c).note).filter(Boolean))];
+  notes.push("Это проба, а не план: в плане ничего не изменилось. Нажмите «Закончить пробу» или обновите страницу — проба исчезнет.");
+  return h+`<div class="wi-notes">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>`;
+ }
+
+ // ---- asking ----
+ // A change being written, with what its row suggests already in it.
+ function fresh(M,kind){
+  const from=origin&&rowOf(origin.row)?origin:null,next=ymAdd(ymT(M),1),cl=clients(M),rp=repeats(M),dr=drawRow(M);
+  if(kind==="late"&&cl.length){const row=from&&cl.some(r=>r.id===from.row)?from.row:cl[0].id;return{k:"late",row,item:from&&from.row===row&&pays(M,row).some(it=>it.id===from.item)?from.item:"",days:30};}
+  if(kind==="stop"&&rp.length)return{k:"stop",row:from&&rp.some(r=>r.id===from.row)?from.row:rp[0].id,from:next};
+  if(kind==="draw"&&dr){const first=drawOpen(M,dr.id)[0];return{k:"draw",row:dr.id,amt:+dr.amt||0,from:first?first.occ.ym:next};}
+  const cs=curs(M);return{k:"cost",name:"",amt:3000,cur:cs.includes("GBP")?"GBP":cs[0]||"GBP",day:25,from:firstMonth(M,25)>next?firstMonth(M,25):next};
+ }
+ const kinds=M=>KINDS.filter(([k])=>k==="late"?clients(M).length:k==="stop"?repeats(M).length:k==="draw"?!!drawRow(M):curs(M).length);
+ function kindFor(M){
+  const h=origin&&rowOf(origin.row),ks=kinds(M).map(k=>k[0]),want=!h?"late":h.k==="inflows"?(pays(M,origin.row).length?"late":"stop"):h.k==="div"&&drawRow(M)&&drawRow(M).id===origin.row?"draw":"cost";
+  return ks.includes(want)?want:ks[0]||"cost";
+ }
+ const opt=(list,val)=>list.map(o=>`<option value="${esc(o[0])}"${String(o[0])===String(val)?" selected":""}>${esc(o[1])}</option>`).join("");
+ const fld=(label,inner,wide)=>`<label class="fld${wide?" ed-wide":""}"><span>${label}</span>${inner}</label>`;
+ function composer(M){
+  const d=draft||(draft=fresh(M,kindFor(M))),ms=months(M).map(m=>[m,`с ${monG(m)} ${m.slice(0,4)}`]);let f="";
+  if(d.k==="late")f=fld("Клиент",`<select data-wi-f="row">${opt(clients(M).map(r=>[r.id,r.name]),d.row)}</select>`)
+   +fld("Какой платёж",`<select data-wi-f="item">${opt([["","все платежи"]].concat(pays(M,d.row).filter(it=>it.day<=M.end).map(it=>[it.id,`только ${dRuF(it.day)} · ${fmt(Math.round(Math.abs(it.cash)))}`])),d.item)}</select>`)
+   +fld("На сколько дней позже",`<input data-wi-f="days" type="number" min="1" max="365" inputmode="numeric" value="${esc(d.days)}" placeholder="30">`);
+  if(d.k==="stop")f=fld("Клиент",`<select data-wi-f="row">${opt(repeats(M).map(r=>[r.id,r.name]),d.row)}</select>`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms.slice(1),d.from)}</select>`);
+  if(d.k==="cost")f=fld("Сколько в месяц",`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.amt)}">`)
+   +fld("Валюта",`<select data-wi-f="cur">${opt(curs(M).map(c=>[c,c]),d.cur)}</select>`)
+   +fld("День месяца",`<input data-wi-f="day" type="number" min="1" max="28" inputmode="numeric" value="${esc(d.day)}">`)
+   +fld("С какого месяца",`<select data-wi-f="from">${opt(ms.filter(m=>m[0]>=firstMonth(M,d.day)),d.from)}</select>`)
+   +fld("Название",`<input data-wi-f="name" value="${esc(d.name)}" placeholder="например, дизайнер" autocomplete="off">`,true);
+  if(d.k==="draw")f=fld("Сколько выводить в месяц",`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.amt)}">`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms,d.from)}</select>`);
+  const w=words(M,d);
+  return `<div class="wi-comp"><div class="wi-kinds" role="group" aria-label="Что проверить">${kinds(M).map(k=>`<button type="button" class="chip${d.k===k[0]?" active":""}" data-wi-kind="${k[0]}" aria-pressed="${d.k===k[0]}">${k[1]}</button>`).join("")}</div>
+   <div class="wi-fields">${f}</div><span class="wi-meta" data-wi-worked>${(changes.length?"и ":"Что если ")+w.say} · ${w.meta}</span>
+   <div class="row"><button type="button" class="sm primary" data-wi-go>Посчитать</button>${changes.length?'<button type="button" class="sm ghost" data-wi-cancel>Отмена</button>':""}</div></div>`;
+ }
+ const listed=M=>changes.length?`<div class="wi-list">${changes.map((c,i)=>{const w=words(M,c);return `<div class="wi-ch"><span><b>${i?"и ":""}${w.say}</b><span class="wi-meta">${w.meta}</span></span><button type="button" class="wi-x" data-wi-drop="${i}">убрать из пробы</button></div>`;}).join("")}</div>`:"";
+ // The trial as it stands in either place: what is asked, and the answer - side by side where there is room (`two`).
+ function panel(M,o){
+  if(!M||M.v0||M.empty||!M.free||!Plan.doc())return `<p class="note" style="margin:0">Проба считает от остатков на счетах и от плана. Пока вписано не всё, сравнивать не с чем.</p>`;
+  if(!kinds(M).length)return `<p class="note" style="margin:0">Пробовать пока нечего: в плане нет ни клиентов с платежами впереди, ни счёта с остатком.</p>`;
+  const ask=`<div class="wi-q">Что если…</div>${listed(M)}`+(draft||!changes.length?composer(M):`<div class="row"><button type="button" class="sm" data-wi-more>+ и ещё…</button><button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`);
+  const ans=`<div class="wi-ans">${answer(M)}</div>`;
+  return `<div class="${o&&o.two?"wi-box":"wi-col"}" data-wi-panel>${o&&o.two?`<div class="wi-col">${ask}</div><div class="wi-col">${ans}</div>`:ask+ans}</div>`;
+ }
+
+ // ---- pressing and typing ----
+ const sync=p=>{if(!draft||!p)return;p.querySelectorAll("[data-wi-f]").forEach(e=>{const k=e.dataset.wiF,v=e.value;
+  draft[k]=k==="days"?Math.min(365,Math.max(0,Math.round(+v||0))):k==="day"?Math.min(28,Math.max(1,Math.round(+v||1))):k==="amt"?Math.max(0,+v||0):v;});};
+ const worked=()=>{const M=Plan.model();if(!draft)return;const w=words(M,draft);document.querySelectorAll("[data-wi-worked]").forEach(e=>{e.innerHTML=(changes.length?"и ":"Что если ")+w.say+" · "+w.meta;});};
+ document.addEventListener("click",ev=>{
+  const t=ev.target,c=s=>t.closest&&t.closest(s),p=c("[data-wi-panel]");let x;if(!p)return;
+  const M=Plan.model();
+  if((x=c("[data-wi-kind]"))){draft=fresh(M,x.dataset.wiKind);return Plan.redraw();}
+  if(c("[data-wi-go]")){sync(p);if(!draft)return;
+   if(draft.k==="late"&&!(draft.days>0))return toast("Впишите, на сколько дней позже: от 1 до 365");
+   if(draft.k==="cost"&&!(draft.amt>0))return toast("Впишите сумму в месяц");
+   if(draft.k==="cost"&&draft.from<firstMonth(M,draft.day))draft.from=firstMonth(M,draft.day);
+   changes.push(draft);draft=null;return Plan.redraw();}
+  if(c("[data-wi-cancel]")){draft=null;return Plan.redraw();}
+  if(c("[data-wi-more]")){const have=k=>changes.some(q=>q.k===k),ks=kinds(M).map(k=>k[0]),next=["late","cost","stop","draw"].find(k=>ks.includes(k)&&!have(k))||ks[0];origin=null;draft=fresh(M,next);return Plan.redraw();}
+  if((x=c("[data-wi-drop]"))){changes.splice(+x.dataset.wiDrop,1);return Plan.redraw();}
+  if(c("[data-wi-end]"))return end(true);
+ });
+ document.addEventListener("input",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]"))return;sync(t.closest("[data-wi-panel]"));if(t.tagName==="INPUT")worked();});
+ document.addEventListener("change",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]"))return;sync(t.closest("[data-wi-panel]"));
+  if(draft&&draft.k==="late"&&t.dataset.wiF==="row")draft.item="";
+  if(t.tagName==="SELECT"||t.dataset.wiF==="day")Plan.redraw();});
+ document.addEventListener("keydown",ev=>{const t=ev.target;if(ev.key!=="Enter"||!t.matches||!t.matches("input[data-wi-f]"))return;ev.preventDefault();const b=t.closest("[data-wi-panel]").querySelector("[data-wi-go]");if(b)b.click();});
+ function end(say){
+  const had=changes.length;changes=[];draft=null;origin=null;
+  const c=Ed.open();if(c&&c.wi)Ed.close();else Plan.redraw();
+  if(say)toast(had?"Проба закончена. В плане ничего не изменилось.":"Проба закрыта.");
+ }
+ return{panel,n:()=>changes.length,end,
+  // «Что если…» pressed in a row's card: what is asked next starts from that row.
+  from(it){origin=it?{row:it.row||it.id,item:it.id}:null;draft=null;},
+  // For the checks, and for an assistant that reads the page: what a list of changes does to the plan's figures,
+  // without touching the trial on the screen; and the trial that is on the screen.
+  ask(list){const M=Plan.model();if(!M||M.v0||!M.free)return null;return{plan:read(M),trial:read(modelOf(M,list||[]))};},
+  peek(){const M=Plan.model();return{changes:JSON.parse(JSON.stringify(changes)),plan:planOf(M),model:changes.length?modelOf(M):null};}};
+})();
+
 // ---------- editing the plan: one row, a new row, the balances, the settings ----------
 // Three cards and two blocks of settings. They are drawn wherever a tab asks for them and answered here, so «Сегодня»
 // and «Касса» change the plan through the same hands — and those hands are the engine's own (Live.write, «WHAT A TAP
@@ -4628,6 +4859,8 @@ Plan.watch(()=>Cash.draw());
 //  · for a tab whose rows are typed into where they stand (the monthly constructor): Ed.apply(plan, item, row as it
 //    should read, which fields changed, now, who) writes what the card's «Сохранить» would; Ed.does(verb, item id)
 //    is a data-ed-do pressed from the script (a tick is not a button); Ed.names(list) the names the table offers.
+// A row's card has one button that is not the plan's: «Что если…» (data-wi-open) turns the card over into the trial
+// (Trial, above; `wi` on the open card). It is drawn for a reader too, and is in no list of things that write.
 const Ed=(()=>{
  const BLOCKS={inflows:["rev"],team:["cogs"],taxes:["tax"],other:["fixed","other","behalf"],div:[]},BLK0={inflows:"rev",team:"cogs",taxes:"tax",other:"other",div:"div"};
  const WHAT=[["inflows","Поступление"],["team","Команда"],["subs","Подписка"],["other","Прочий расход"],["taxes","Налог студии"],["div","Дивиденды"]],NEW={inflows:"От кого",team:"Кому",taxes:"Какой налог",div:"Что",other:"На что",subs:"Сервис"};
@@ -4902,7 +5135,12 @@ const Ed=(()=>{
   ${boxes?`<div class="ed-chks">${boxes}</div>`:""}${o.note?`<span class="note">${o.note}</span>`:""}`;
  }
  function rowCard(it){
-  if(RO)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it,true)}<div class="ed-foot"><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
+  // «Что если…» turns the card over: where the row's fields stood, the trial stands (Trial, above) - with nothing
+  // of the row beside it that writes, and no «Сохранить» for Enter to press. The same for a reader and a writer:
+  // a trial changes no document. `cur.wi` is the face; the trial itself is Trial's and outlives the card.
+  if(cur.wi)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}"><div class="ed-why">Проба: в план ничего не записывается.</div><div data-ed-askbox="wi">${Trial.panel(M,{})}</div><div class="ed-foot"><span></span><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
+  const wi='<button class="sm ghost" data-wi-open>Что если…</button>';
+  if(RO)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it,true)}<div class="ed-foot"><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
   const done=it.state==="done",tax=it.src==="tax",occ=it.src==="occ";
   let body="";
   if(!done){
@@ -4920,7 +5158,7 @@ const Ed=(()=>{
   if(ofOnly)body=`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
   const save=ofOnly?'<button class="sm primary" data-ed-save>Сохранить</button>':done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
   return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it)}${body}${askBox(it)}
-   <div class="ed-foot"><div class="row">${actions(it)}</div><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button>${save}</div></div></article>`;
+   <div class="ed-foot"><div class="row">${actions(it)}</div><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button>${save}</div></div></article>`;
  }
  const miss=(card,k,msg)=>{const f=q(card,`[data-ed-f="${k}"]`);if(f)f.focus();toast(msg);};
  function rowSave(card,mode){
@@ -5270,6 +5508,7 @@ const Ed=(()=>{
   if(card&&cur){
    const kind=card.dataset.edCard;
    if(c("[data-ed-x]"))return shut(card);
+   if(c("[data-wi-open]")&&kind==="row"){cur.wi=true;cur.ask="";Trial.from(item(cur.id));return show(cur);}
    // A subscription is charged every month: the tick starts on, until the founder has set it himself.
    if((x=c("[data-ed-what]"))&&kind==="add"){cur.what=x.dataset.edWhat;if(!cur.monSet)cur.draft.monthly=cur.what==="subs";return show(cur);}
    // An account taken out of the plan: asked twice, as it was beside «Остатки» in «Касса», where this button stood
@@ -5403,7 +5642,7 @@ const Today=(()=>{
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  // `wk` holds the weeks a founder opened or shut by hand (the week's Monday → open); `anl` is «Аналитика», and is
  // remembered in this browser like the choice of 30 or 60 days: whoever reads the chart every morning opens it once.
- const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false};
+ const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false,wi:false};
  try{st.anl=localStorage.getItem(ANL)==="1";}catch(e){}
  let M=null,by={},chartW=0;
  const num=v=>typeof v==="number"?v.toFixed(2):esc(v==null?"":v);
@@ -5627,6 +5866,12 @@ const Today=(()=>{
    ${none?"":`<div class="td-foot"><span></span><button class="sm ghost" data-td-flip="all" aria-expanded="${st.all}">${st.all?"Свернуть недели":"Раскрыть все недели"}</button></div>`}</section>`;
  }
  // «Аналитика»: what a founder reads rather than acts on — the balance by day and the taxes.
+ // «Что если»: one folded line, shut whenever the page opens. Folded, it says only that a trial is on; its figures
+ // are inside, under the words «в этом случае», and carry no data-live - the screen's figures are the plan's.
+ function whatIf(){
+  const n=Trial.n();
+  return `<details class="td-wi"${st.wi?" open":""}><summary><span>Что если</span><span class="td-meta">${n?`идёт проба: ${n} ${plural(n,"изменение","изменения","изменений")} · в план ничего не записано`:"платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму"}</span></summary><div class="stack"><section class="card" aria-label="Что если">${Trial.panel(M,{two:true})}</section></div></details>`;
+ }
  function analytics(){
   return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${chartCard()}${taxCard()}</div></details>`;
  }
@@ -5755,7 +6000,8 @@ const Today=(()=>{
    // From the top: the verdict and the five figures; where the money is; the month and what may be taken out; the
    // plan by weeks beside what has to be decided; and, folded, what is only read (Mika's choice of 8 October 2026
    // among three lay-outs — the five figures went under the fold with the rest and came back up the same evening).
-   :head+Ed.sheet("add")+verdict()+kpis(M)+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+analytics();
+   // Between them and «Аналитика», folded too: «Что если» (11 October 2026).
+   :head+Ed.sheet("add")+verdict()+kpis(M)+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+whatIf()+analytics();
   chart();Ed.after(root);
  }
  // Only the chart depends on the width; redrawing the whole tab on a resize would take the keyboard away on a
@@ -5788,7 +6034,8 @@ const Today=(()=>{
   if((x=c('[data-ed-do="paid"]'))){const it=by[x.dataset.edId];if(it&&it.date&&it.date<M.T)st.past=true;}
  });
  // «Аналитика» opened: the chart was drawn while it had no width, so it is drawn again.
- root.addEventListener("toggle",e=>{if(!e.target.matches||!e.target.matches(".td-anl"))return;st.anl=e.target.open;try{localStorage.setItem(ANL,st.anl?"1":"0");}catch(x){}if(st.anl)chart();},true);
+ // («Что если» is remembered only while the page is open: a reload shuts it, as it ends the trial.)
+ root.addEventListener("toggle",e=>{if(e.target.matches&&e.target.matches(".td-wi")){st.wi=e.target.open;return;}if(!e.target.matches||!e.target.matches(".td-anl"))return;st.anl=e.target.open;try{localStorage.setItem(ANL,st.anl?"1":"0");}catch(x){}if(st.anl)chart();},true);
  Plan.watch(render);
  return{render,resize,freeParts};
 })();
@@ -5801,6 +6048,7 @@ Plan.watch(()=>Ed.settingsDraw());
 // them does anything - whatever a screen draws. This is courtesy and tidiness: what keeps a reader from saving is
 // that the page sends no save (put, push, write, Plan.lost) and that the server takes none from a reader.
 // KEEP are the buttons that also say something - which block a row is in, whether a client pays VAT: they stay.
+// «Что если» (data-wi-*) is in neither list on purpose: a trial changes no document, and a reader may ask too.
 const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]",'button[data-ed-at="need"]',
  "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
  "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","input.lab","input.vat","[data-accept]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
