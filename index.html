@@ -4647,191 +4647,341 @@ Plan.watch(()=>Cash.draw());
 // rule 1 of docs/handoff.md).
 //
 // What is kept is the list of changes, not a changed document: the plan can change under an open trial, and the
-// changes are made again, to a fresh copy, at every draw; one whose row is gone is simply not made. The four kinds:
+// changes are made again, to a fresh copy, at every draw; one that can no longer be made (its row is gone, its
+// payment has come, the account of its currency has lost its balance) is not made, and its line says so. The four
+// kinds:
 //   {k:"late", row, item, days}             a payment (`item`: one line of the plan; "": every dated payment of
 //                                           the row that is still ahead) comes `days` later
 //   {k:"stop", row, from}                   a row that repeats comes for the last time in the month before `from`
 //   {k:"cost", amt, cur, day, from, name}   a new cost every month (somebody is hired); `name` is for the sentence
-//   {k:"draw", row, amt, from}              the founders' monthly withdrawal is another sum from `from` on
-// They are made by the engine's own verbs (Live.write.set, .add) and by the one field that ends a repeat (rec.to):
-// a copy that the engine reads exactly as it would read a plan a founder had written so.
+//   {k:"draw", row, amt, from}              a monthly withdrawal of the founders is another sum from `from` on
+// `row` names a CHAIN (rec.chain, or the row's own id): a row that «{месяц} и дальше» or «И дальше так же» split is
+// several rows of one chain - one payment through time - and the part a card was opened on may be the part that
+// has ended. A client is listed once, and leaving or another sum reaches every part of the chain.
+// The changes are made by the engine's own verbs (Live.write.set, .tx, .add) and by the one field that ends a
+// repeat (rec.to): a copy that the engine reads exactly as it would read a plan a founder had written so. There is
+// one change of a kind for one payment or row - a second takes the first one's place.
+//
+// What it says is what the page would say of a plan written so, and no more: where the page names no «Можно
+// вывести» (old balances, a plan without its costs) the trial names none, and where the page will not say «денег
+// хватает» (a thin plan, receipts waiting in «Разбор») the trial does not say it either.
 //
 // It stands in two places and is one trial: turned over in the card of a row («Что если…» in the card's foot — Ed
-// draws that), and as one folded line at the foot of «Сегодня». Its controls carry data-wi-* and are in no list of
-// the reader's page (ACT): they change no document, so somebody who only looks may ask too. Its figures carry
-// data-wi-k, never data-live: the screen's own figures are the plan's and stay so while a trial is on.
+// draws that, for a row there is something to ask about: fits), and as one folded line at the foot of «Сегодня».
+// Its controls carry data-wi-* and are in no list of the reader's page (ACT): they change no document, so somebody
+// who only looks may ask too. Its figures carry data-wi-k, never data-live: the screen's own figures are the plan's
+// and stay so while a trial is on. And it draws ITSELF (redraw): a press in the trial rebuilds the trial's panels
+// and nothing else - a tab drawn afresh would drop what somebody is typing in a card beside it.
 const Trial=(()=>{
  let changes=[],draft=null,origin=null;
  const KINDS=[["late","платёж придёт позже"],["stop","клиент уйдёт"],["cost","наймём человека"],["draw","выводим другую сумму"]];
  const ymAdd=(ym,k)=>{const n=+ym.slice(0,4)*12+ +ym.slice(5,7)-1+k;return Math.floor(n/12)+"-"+String(n%12+1).padStart(2,"0");};
- const monG=ym=>MONGF[+ym.slice(5,7)-1],pad=n=>String(n).padStart(2,"0"),money=(v,cur)=>fmt(Math.round(v),0,cur&&cur!=="GBP"?SYM[cur]||"":"£");
- const rows=k=>{const P=Plan.doc();return P&&Array.isArray(P[k])?P[k]:[];},rowOf=id=>{for(const k of Live.LISTS){const r=rows(k).find(x=>String(x.id)===String(id));if(r)return{r,k};}return null;};
- // The payments of a row that are still ahead: written, dated, not yet come, and not already late - a late one is
- // asked about in «Нужно решить», and its date is a founder's answer, not something to try.
- const pays=(M,row)=>M.items.filter(it=>it.list==="inflows"&&(it.row||it.id)===row&&it.open&&it.day&&it.state!=="late"&&it.src!=="tax").sort((a,b)=>a.day<b.day?-1:1);
- const clients=M=>rows("inflows").filter(r=>pays(M,r.id).length),ymT=M=>M.T.slice(0,7);
- const repeats=M=>rows("inflows").filter(r=>r.rec&&r.on!==false&&(!r.rec.to||r.rec.to>=ymT(M)));
- const drawRow=M=>rows("div").find(r=>r.rec&&!r.ptax&&r.on!==false&&(!r.rec.to||r.rec.to>=ymT(M)))||null;
- const drawOpen=(M,row)=>M.items.filter(it=>it.src==="occ"&&it.row===row&&it.open&&it.day).sort((a,b)=>a.day<b.day?-1:1);
+ const isYm=v=>typeof v==="string"&&/^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+ // (fmt rounds as the figures at the top of «Сегодня» do; a sum in another currency carries its own sign.)
+ const monG=ym=>MONGF[+ym.slice(5,7)-1],pad=n=>String(n).padStart(2,"0"),money=(v,cur)=>fmt(v,0,cur&&cur!=="GBP"?SYM[cur]||cur+" ":"£");
+ const down=v=>Math.floor((v+1e-6)/100)*100,and=a=>a.length>1?a.slice(0,-1).join(", ")+" и "+a[a.length-1]:a.join("");
+ const nDays=n=>`${n} ${plural(n,"день","дня","дней")}`,byDay=(a,b)=>a.day<b.day?-1:a.day>b.day?1:0;
+ const nmOf=r=>String(r&&r.name||"").trim()||"(без названия)",nm=r=>`<span class="td-nm">${esc(nmOf(r))}</span>`;
+ const ymT=M=>M.T.slice(0,7);
+ // A day, with its year where that is not this year's.
+ const dY=(M,d)=>dRu(d)+(d.slice(0,4)!==M.T.slice(0,4)?" "+d.slice(0,4):""),dYF=(M,d)=>dRuF(d)+(d.slice(0,4)!==M.T.slice(0,4)?" "+d.slice(0,4):"");
+
+ // ---- rows, and the chains they are parts of ----
+ const ck=r=>String(r&&r.rec&&r.rec.chain||r&&r.id||""),ik=it=>String(it.occ?it.occ.chain:it.row||it.id);
+ const segs=(P,k,chain)=>(P&&Array.isArray(P[k])?P[k]:[]).filter(r=>r&&ck(r)===chain).sort((a,b)=>{const x=String(a.rec&&a.rec.from||""),y=String(b.rec&&b.rec.from||"");return x<y?-1:x>y?1:0;});
+ // What a change's `row` names - the id of any part, or the chain: its list, its chain, and the part that goes on.
+ const hold=id=>{const P=Plan.doc();if(!P||id==null||id==="")return null;
+  for(const k of Live.LISTS){const l=Array.isArray(P[k])?P[k]:[],r=l.find(x=>x&&String(x.id)===String(id))||l.find(x=>x&&ck(x)===String(id));
+   if(r){const s=segs(P,k,ck(r));return{k,chain:ck(r),r:s[s.length-1]};}}
+  return null;};
+ const key=id=>{const h=hold(id);return h?h.chain:String(id==null?"":id);};
+ // The chains of a list, each once.
+ const heads=k=>{const P=Plan.doc(),seen={},out=[];(P&&Array.isArray(P[k])?P[k]:[]).forEach(r=>{if(!r)return;const c=ck(r);if(seen[c])return;seen[c]=1;const s=segs(P,k,c);out.push({k,chain:c,r:s[s.length-1]});});return out;};
+ // The payments of a client that are still ahead: written, dated, not yet come, and not already late - a late one
+ // is asked about in «Нужно решить», and its date is a founder's answer, not something to try.
+ const pays=(M,chain)=>M.items.filter(it=>it.list==="inflows"&&it.src!=="tax"&&ik(it)===chain&&it.open&&it.day&&it.state!=="late").sort(byDay);
+ const clients=M=>heads("inflows").filter(h=>pays(M,h.chain).length);
+ // A client that can leave: its repeat has a month after this one.
+ const repeats=M=>heads("inflows").filter(h=>h.r.rec&&h.r.on!==false&&(!h.r.rec.to||h.r.rec.to>ymT(M)));
+ // The monthly withdrawals: the months of a repeating row of «Дивиденды» that are still to be taken.
+ const drawOpen=(M,chain)=>M.items.filter(it=>it.list==="div"&&it.src==="occ"&&ik(it)===chain&&it.open&&it.day).sort(byDay);
+ const draws=M=>heads("div").filter(h=>h.r.rec&&!h.r.ptax&&h.r.on!==false&&drawOpen(M,h.chain).length);
  // A new cost is paid from an account the plan holds a balance for: a row on an account without one would leave
- // «Денег сейчас» without an answer, in the trial as in the plan.
- const accts=M=>M.accounts.filter(a=>a.inPlan&&a.anchor),curs=M=>[...new Set(accts(M).map(a=>a.cur))];
+ // «Денег сейчас» without an answer, in the trial as in the plan. In a currency no such account keeps it is not
+ // made at all - the same number in another currency would be another sum.
+ const accts=M=>M.accounts.filter(a=>a.inPlan&&a.anchor),curs=M=>[...new Set(accts(M).map(a=>a.cur))],acctFor=(M,cur)=>accts(M).find(a=>a.cur===cur)||null;
  const months=M=>{const out=[];for(let m=ymT(M);m<=ymAdd(ymT(M),6);m=ymAdd(m,1))out.push(m);return out;};
  // The first month a new monthly cost can begin in: its day of that month has not passed.
  const firstMonth=(M,day)=>M.T<=ymT(M)+"-"+pad(day)?ymT(M):ymAdd(ymT(M),1);
+ const costFrom=(M,c)=>c.from<firstMonth(M,c.day)?firstMonth(M,c.day):c.from;
+ // The payments a «придёт позже» moves. One that a later change names alone is that change's, not this one's.
+ const moves=(M,c,L)=>{const h=hold(c.row);if(!h||h.k!=="inflows")return[];
+  const own=(L||[]).filter(q=>q&&q!==c&&q.k==="late"&&q.item&&key(q.row)===h.chain).map(q=>q.item);
+  return pays(M,h.chain).filter(it=>c.item?it.id===c.item:!own.includes(it.id));};
+ // Why a change is not made ("" - it is). Said in its line, and to whoever asked through window.__money.whatIf.
+ function dead(M,c,L){
+  if(!c||typeof c!=="object")return "это не изменение";
+  if(!KINDS.some(k=>k[0]===c.k))return "такого изменения проба не знает";
+  if(c.k==="cost")return !(c.amt>0)?"сумма не вписана":!(c.day>=1&&c.day<=28)?"день месяца — от 1 до 28":!isYm(c.from)?"месяц не назван":!acctFor(M,c.cur)?`в плане нет счёта с остатком в ${CURS.includes(c.cur)?c.cur:"этой валюте"}`:"";
+  const h=hold(c.row);
+  if(!h)return "строки больше нет в плане";
+  if(c.k==="late")return h.k!=="inflows"?"это не поступление":!(c.days>0)?"не сказано, на сколько дней":!moves(M,c,L).length?"платежа, который можно сдвинуть, в плане сейчас нет":"";
+  if(c.k==="stop")return h.k!=="inflows"||!h.r.rec?"эта строка не повторяется":!isYm(c.from)?"месяц не назван":"";
+  if(c.k==="draw")return h.k!=="div"||!h.r.rec||h.r.ptax?"эта строка — не ежемесячный вывод":!(c.amt>=0)?"сумма не вписана":!isYm(c.from)?"месяц не назван":"";
+  return "";
+ }
 
  // ---- the copy ----
- function apply(P,M,c,now,by){
-  const h=c.row?(()=>{for(const k of Live.LISTS){const r=(P[k]||[]).find(x=>String(x.id)===String(c.row));if(r)return{r,k};}return null;})():null;
-  if(c.k==="late"){if(!h)return;
-   pays(M,c.row).filter(it=>!c.item||it.id===c.item).forEach(it=>{
-    if(it.src==="occ"){if(h.r.rec)Live.write.set(P,{src:"occ",row:it.row,occ:{ym:it.occ.ym}},{date:dAdd(it.day,c.days)},now,by);}
-    else Live.write.set(P,{src:"row",id:it.id},{date:dAdd(it.day,c.days)},now,by);});}
-  // (rec.to and nothing more: the row keeps its id and its earlier months, which «Больше не повторять» may not.)
-  else if(c.k==="stop"){if(h&&h.r.rec&&(!h.r.rec.to||h.r.rec.to>=c.from))h.r.rec.to=ymAdd(c.from,-1);}
-  else if(c.k==="cost"){const a=accts(M).find(x=>x.cur===c.cur)||accts(M)[0];if(!a||!(c.amt>0))return;
-   // (No name in the copy: the engine ties a row to the table by its name, and a trial must tie itself to nothing.)
-   Live.write.add(P,"team",{id:"wi"+uid(),name:"",amt:+c.amt,cur:a.cur,bank:a.bank,on:true,tag:"",info:false,date:c.from+"-"+pad(c.day),c0:now,m:{t:now,by},rec:{day:+c.day,from:c.from}});}
-  else if(c.k==="draw"){if(!h||!h.r.rec||!(c.amt>=0))return;
-   drawOpen(M,c.row).filter(it=>it.occ.ym>=c.from).forEach(it=>Live.write.set(P,{src:"occ",row:it.row,occ:{ym:it.occ.ym}},{amt:+c.amt},now,by));}
+ function apply(P,M,c,L,now,by){
+  const h=c.k==="cost"?null:hold(c.row);
+  if(c.k==="late")moves(M,c,L).forEach(it=>{const ref=it.src==="occ"?{src:"occ",row:it.row,occ:{ym:it.occ.ym}}:{src:"row",id:it.id,row:it.row};
+   Live.write.set(P,ref,{date:dAdd(it.day,c.days)},now,by);
+   // What has already come towards it stays its own. Dated more than ten days on, the line would no longer be
+   // given the statement row that paid a part of it, and that part would be counted twice: in the balance, and in
+   // a line that again waited for its whole sum.
+   if(it.part)(it.rows||[]).forEach(id=>Live.write.tx(P,ref,id));});
+  // (rec.to and nothing more: a part keeps its id and its earlier months, which «Больше не повторять» may not. A
+  // part that would only begin in that month never begins.)
+  else if(c.k==="stop")segs(P,h.k,h.chain).forEach(r=>{if(!r.rec)return;
+   if(String(r.rec.from||"")>=c.from)P[h.k].splice(P[h.k].indexOf(r),1);else if(!r.rec.to||r.rec.to>=c.from)r.rec.to=ymAdd(c.from,-1);});
+  // (No name in the copy: the engine ties a row to the table by its name, and a trial must tie itself to nothing.)
+  else if(c.k==="cost"){const a=acctFor(M,c.cur),from=costFrom(M,c);
+   Live.write.add(P,"team",{id:"wi"+uid(),name:"",amt:+c.amt,cur:a.cur,bank:a.bank,on:true,tag:"",info:false,date:from+"-"+pad(c.day),c0:now,m:{t:now,by},rec:{day:+c.day,from}});}
+  else if(c.k==="draw")drawOpen(M,h.chain).filter(it=>it.occ.ym>=c.from).forEach(it=>Live.write.set(P,{src:"occ",row:it.row,occ:{ym:it.occ.ym}},{amt:+c.amt},now,by));
  }
- function planOf(M,list){
-  const P=JSON.parse(JSON.stringify(Plan.doc())),now=Date.now(),by=Plan.by();
-  (list||changes).forEach(c=>{try{apply(P,M,c,now,by);}catch(e){}});
+ // The plan with a list of changes made to a copy of it. `skip` collects the ones that were not made, and why.
+ function planOf(M,list,skip){
+  const P=JSON.parse(JSON.stringify(Plan.doc())),now=Date.now(),by=Plan.by(),L=list||changes;
+  L.forEach((c,i)=>{let why="";try{why=dead(M,c,L);if(!why)apply(P,M,c,L,now,by);}catch(e){why="не получилось применить";}if(why&&skip)skip.push({i,why});});
   return P;
  }
- const modelOf=(M,list)=>Live.compute(ledIn(),planOf(M,list),M.T,{H:M.H});
- const read=M=>({id:M.verdict.id,low:M.LOW,lowDay:M.LOWDAY,minusDay:M.minusDay||"",minus:M.minus||0,IN:M.IN,OUT:M.OUT,res:M.taxes.reserve,free:M.free&&M.free.now>0?Math.floor(M.free.now/100)*100:0,tight:M.free&&M.free.tight||null});
- const gone=c=>!!c.row&&!rowOf(c.row);
+ const modelOf=(M,list,skip)=>Live.compute(ledIn(),planOf(M,list,skip),M.T,{H:M.H});
+ // What is set side by side. «Можно вывести» is a sum only where the page itself names one (free.why): down to a
+ // hundred, and nothing under a hundred, as «Сегодня» shows it.
+ const NOSUM={stale:"остатки на счетах старые",noout:"в плане впереди не вписаны расходы",thin:"план расходов не дописан"};
+ const read=M=>{const F=M.free,no=!F||!!NOSUM[F.why],v=F?down(F.now):0;
+  return{id:M.verdict.id,low:M.LOW,lowDay:M.LOWDAY,minusDay:M.minusDay||"",minus:M.minus||0,IN:M.IN,OUT:M.OUT,res:M.taxes.reserve,free:no?null:v>=100?v:0,freeWhy:no&&F?F.why:"",tight:F&&F.tight||null};};
+ const can=M=>!!(M&&!M.v0&&!M.empty&&M.free&&Plan.doc());
 
  // ---- a change, in words ----
- // (A name a founder typed stands in `.td-nm`, like every such name on the page.)
- function words(M,c){
-  const h=c.row&&rowOf(c.row),nm=h?`<span class="td-nm">${esc(h.r.name||"")}</span>`:"",H=M.H,end=M.end;
-  if(gone(c))return{say:"строки больше нет в плане",meta:"это изменение не считается"};
+ // (A name a founder typed stands in `.td-nm`, like every such name on the page.) {say, meta, note, off}: `off` -
+ // the change is not made now.
+ function words(M,c,L){
+  const why=dead(M,c,L),h=c.k==="cost"?null:hold(c.row),H=M.H,end=M.end,off=why?{meta:why+" — это изменение сейчас не считается",off:true}:null;
+  if(c.k!=="cost"&&!h)return{say:"строки больше нет в плане",meta:"это изменение не считается",off:true};
   if(c.k==="late"){
-   const its=pays(M,c.row).filter(it=>!c.item||it.id===c.item),inH=its.filter(it=>it.day<=end);
-   if(!its.length)return{say:`${nm} заплатит на ${c.days} ${plural(c.days,"день","дня","дней")} позже`,meta:"платежа, который можно сдвинуть, в плане сейчас нет"};
-   const moved=(c.item?its:inH.length?inH:its.slice(0,1)).map(it=>{const to=dAdd(it.day,c.days);return `${dRu(it.day)} → ${dRu(to)}${to>end&&it.day<=end?`, это уже дальше ${H} дней`:""}`;});
-   return{say:`${nm} заплатит на ${c.days} ${plural(c.days,"день","дня","дней")} позже`,
-    meta:(c.item?`только платёж ${dRuF(its[0].day)}: ${fmt(Math.round(Math.abs(its[0].cash)))}`:`${inH.length} ${plural(inH.length,"платёж","платежа","платежей")} в ближайшие ${H} дней`)+" · "+moved.join(" · ")};}
+   const say=`${nm(h.r)} заплатит на ${nDays(c.days)} позже`;if(off)return Object.assign({say},off);
+   const its=moves(M,c,L),inH=its.filter(it=>it.day<=end),one=c.item?its[0]:null;
+   const moved=(one?its:inH).map(it=>{const to=dAdd(it.day,c.days);return `${dY(M,it.day)} → ${dY(M,to)}${to>end&&it.day<=end?`, это уже дальше ${H} дней`:""}`;});
+   return{say,meta:(one?`только платёж ${dYF(M,one.day)}: ${fmt(Math.abs(one.cash))}${one.day>end?` · он дальше ${H} дней: на цифры ниже не влияет`:""}`
+     :inH.length?`${inH.length} ${plural(inH.length,"платёж","платежа","платежей")} в ближайшие ${H} дней`:`в ближайшие ${H} дней его платежей нет`)+(moved.length?" · "+moved.join(" · "):"")};}
   if(c.k==="stop"){
-   const lost=pays(M,c.row).filter(it=>it.src==="occ"&&it.occ.ym>=c.from&&it.day<=end),sum=lost.reduce((a,it)=>a+Math.abs(it.cash),0);
-   return{say:`${nm} уйдёт с ${monG(c.from)}`,meta:lost.length?`не ${plural(lost.length,"придёт","придут","придут")} ${lost.length} ${plural(lost.length,"платёж","платежа","платежей")} · ${fmt(Math.round(sum))} за ${H} дней`:`в ближайшие ${H} дней его платежей и так нет`,
-    note:"Клиент уходит, а расходы на его команду остались в расчёте: страница не знает, кто на нём работает. Его разовые счета тоже остались."};}
+   const say=`${nm(h.r)} уйдёт с ${monG(c.from)}`;if(off)return Object.assign({say},off);
+   const all=pays(M,h.chain).filter(it=>it.day<=end),lost=all.filter(it=>it.src==="occ"&&it.occ.ym>=c.from),sum=lost.reduce((a,it)=>a+Math.abs(it.cash),0);
+   const more=heads("inflows").filter(q=>q.chain!==h.chain&&nmOf(q.r).toLowerCase()===nmOf(h.r).toLowerCase()&&q.r.on!==false).length;
+   return{say,meta:lost.length?`не ${plural(lost.length,"придёт","придут","придут")} ${lost.length} ${plural(lost.length,"платёж","платежа","платежей")} · ${fmt(sum)} за ${H} дней`:all.length?`его платежи с ${monG(c.from)} в эти ${H} дней не попадают`:`в ближайшие ${H} дней его платежей и так нет`,
+    note:"Клиент уходит, а расходы на его команду остались в расчёте: страница не знает, кто на нём работает. Его разовые счета тоже остались."+(more?" В плане есть и другие строки с этим названием — проба убирает одну, они остаются.":"")};}
   if(c.k==="cost"){
-   const ds=[];for(let m=c.from;m<=end.slice(0,7);m=ymAdd(m,1)){const d=m+"-"+pad(c.day);if(d>=M.T&&d<=end)ds.push(d);}
-   return{say:(c.name?`появится расход «<span class="td-nm">${esc(c.name)}</span>» — `:"мы наймём человека за ")+`${money(c.amt,c.cur)} в месяц с ${monG(c.from)}`,
-    meta:`платить ${c.day}-го числа · в ${H} дней `+(ds.length?`${plural(ds.length,"попадает","попадают","попадают")} ${ds.length} ${plural(ds.length,"выплата","выплаты","выплат")}: ${ds.map(dRuF).join(" и ")}`:"не попадает ни одной выплаты"),
-    note:`Новый расход проба проверяет только на ${H} дней: за это время его платят ${ds.length} ${plural(ds.length,"раз","раза","раз")}. Дальше он идёт каждый месяц.`};}
+   const say=(c.name?`появится расход «<span class="td-nm">${esc(c.name)}</span>» — `:"мы наймём человека за ")+`${money(+c.amt||0,c.cur)} в месяц с ${isYm(c.from)?monG(off?c.from:costFrom(M,c)):"…"}`;if(off)return Object.assign({say},off);
+   const ds=[];for(let m=costFrom(M,c);m<=end.slice(0,7);m=ymAdd(m,1)){const d=m+"-"+pad(c.day);if(d>=M.T&&d<=end)ds.push(d);}
+   return{say,meta:`платить ${+c.day}-го числа · в ${H} дней `+(ds.length?`${plural(ds.length,"попадает","попадают","попадают")} ${ds.length} ${plural(ds.length,"выплата","выплаты","выплат")}: ${and(ds.map(d=>dYF(M,d)))}`:"не попадает ни одной выплаты"),
+    note:`За ${H} дней новый расход платят ${ds.length} ${plural(ds.length,"раз","раза","раз")}. Дальше он идёт каждый месяц — этого проба уже не видит.`};}
   if(c.k==="draw"){
-   const ds=drawOpen(M,c.row).filter(it=>it.occ.ym>=c.from&&it.day<=end).map(it=>it.day);
-   return{say:`мы будем выводить по ${fmt(Math.round(c.amt))} в месяц вместо ${fmt(Math.round(+h.r.amt||0))}, начиная с ${monG(c.from)}`,
-    meta:`в ${H} дней `+(ds.length?`${plural(ds.length,"попадает","попадают","попадают")} ${ds.length} ${plural(ds.length,"вывод","вывода","выводов")}: ${ds.map(dRuF).join(" и ")}`:"не попадает ни одного вывода")};}
-  return{say:"",meta:""};
+   const cur=h.r.cur,many=draws(M).length>1,say=`мы будем выводить по ${money(+c.amt||0,cur)} в месяц, начиная с ${isYm(c.from)?monG(c.from):"…"}${many?` — строка «${nm(h.r)}»`:""}`;if(off)return Object.assign({say},off);
+   const its=drawOpen(M,h.chain).filter(it=>it.occ.ym>=c.from&&it.day<=end);
+   return{say,meta:`в ${H} дней `+(its.length?`${plural(its.length,"попадает","попадают","попадают")} ${its.length} ${plural(its.length,"вывод","вывода","выводов")}: ${and(its.map(it=>`${dYF(M,it.day)} — вместо ${money(it.amt,cur)}`))}`:"не попадает ни одного вывода"),
+    note:many?"В плане несколько ежемесячных выводов: проба меняет один, остальные остаются как есть.":""};}
+  return Object.assign({say:"неизвестное изменение"},off||{meta:""});
  }
 
  // ---- the answer ----
  function answer(M){
   if(!changes.length)return `<p class="note" style="margin:0">Ответ появится здесь, когда нажмёте «Посчитать».</p>`;
-  const A=read(M),B=read(modelOf(M)),H=M.H,out=[],neg=v=>v<0?`<span class="wi-neg">${fmt(Math.round(v))}</span>`:fmt(Math.round(v));
+  const skip=[],A=read(M),B=read(modelOf(M,null,skip)),H=M.H,out=[],neg=v=>v<0?`<span class="wi-neg">${fmt(v)}</span>`:fmt(v);
   const row=(k,name,a,b,sub)=>{if(a!==b)out.push(`<tr><td>${name}${sub?`<span class="wi-meta">${sub}</span>`:""}</td><td class="n was">${a}</td><td class="n" data-wi-k="${k}">${b}</td></tr>`);};
   const diff=(a,b)=>Math.round(a)!==Math.round(b)?`на ${fmt(Math.abs(Math.round(b)-Math.round(a)))} ${b<a?"меньше":"больше"}`:"";
-  row("low","Нижняя точка",`${fmt(Math.round(A.low))} · ${dRu(A.lowDay)}`,`${neg(B.low)} · ${dRu(B.lowDay)}`);
-  if(B.id==="v4"&&B.minusDay)out.push(`<tr><td>Первый минус</td><td class="n was">${A.minusDay?dRu(A.minusDay):"нет"}</td><td class="n" data-wi-k="minus"><span class="wi-neg">${dRu(B.minusDay)}</span></td></tr>`);
-  row("free","Можно вывести",A.free?fmt(A.free):"ничего",B.free?fmt(B.free):"ничего",B.tight&&B.free!==A.free&&B.tight.e>0?`самый тесный день в этом случае — ${dRuF(B.tight.d)}: на счетах ${fmt(Math.round(B.tight.e))}, из них ${fmt(Math.round(B.tight.res))} под налоги и ${fmt(Math.round(M.cushion))} запас`:"");
-  row("in",`Придёт за ${H} дней`,fmt(Math.round(A.IN)),fmt(Math.round(B.IN)),diff(A.IN,B.IN));
-  row("out",`Уйдёт за ${H} дней`,fmt(Math.round(A.OUT)),fmt(Math.round(B.OUT)),diff(A.OUT,B.OUT));
-  row("res","Под налоги",fmt(Math.round(A.res)),fmt(Math.round(B.res)));
-  const same=A.id===B.id,ok=v=>v==="v1"||v==="vi";
-  const say=B.id==="v4"?`В этом случае <span class="wi-neg">${dRuF(B.minusDay||B.lowDay)} не хватит ${fmt(Math.round(Math.abs(B.minusDay?B.minus:B.low)))}</span> — это первый минус. Нижняя точка — ${neg(B.low)}, ${dRuF(B.lowDay)}.`
-   :B.id==="v3"?`В этом случае денег хватает, но в нижней точке остаётся меньше запаса: ${fmt(Math.round(B.low))}, ${dRuF(B.lowDay)}.`
-   :`В этом случае денег ${ok(A.id)?"тоже ":""}хватает на ${H} дней. Нижняя точка — ${fmt(Math.round(B.low))}, ${dRuF(B.lowDay)}.`;
-  let h=out.length?`<p class="wi-say" data-wi-k="say">${say}${!same&&ok(A.id)&&!ok(B.id)?' <span class="wi-plan">По плану денег хватает.</span>':""}</p><table class="wi-t"><thead><tr><th></th><th>по плану</th><th>в этом случае</th></tr></thead><tbody>${out.join("")}</tbody></table>`
-   :`<p class="wi-say" data-wi-k="say">В ближайшие ${H} дней это ничего не меняет: все цифры те же, что по плану.</p>`;
-  if(B.id==="v4")h+=`<p class="wi-meta" style="margin:0">Уберите изменения по одному — будет видно, какое уводит в минус.</p>`;
-  const notes=[...new Set(changes.map(c=>gone(c)?"":words(M,c).note).filter(Boolean))];
+  const low=X=>`${neg(X.low)} · ${dY(M,X.lowDay)}`,minus=X=>X.minusDay?`<span class="wi-neg">${dY(M,X.minusDay)}</span>`:"нет";
+  row("low","Нижняя точка",low(A),low(B));
+  row("minus","Первый минус",minus(A),minus(B));
+  // «Можно вывести»: a sum beside a sum, and the day that decides it with everything held back on that day - the
+  // parts the page's own card names, so that the sum can be worked out from the screen. It looks sixty days ahead
+  // whichever chip is pressed.
+  const noSum=A.free===null||B.free===null,T=B.tight,sum=v=>v?fmt(v):"ничего";
+  if(!noSum){const parts=T?`${fmt(T.res)} — налоги, ${fmt(M.cushion)} — запас${T.inbox>0.5?`, ${fmt(T.inbox)} — в разборе`:""}`:"";
+   row("free","Можно вывести",sum(A.free),sum(B.free),(H<60?"считается на 60 дней вперёд · ":"")+(!T?"":B.free?`самый тесный день в этом случае — ${dYF(M,T.d)}: на счетах ${fmt(T.e)}; ${parts}`
+    :T.e<0?`в этом случае ${dYF(M,T.d)} на счетах не хватит ${fmt(-T.e)}`:`в этом случае ${dYF(M,T.d)} на счетах будет ${fmt(T.e)}; ${parts} — свободного не остаётся`));}
+  row("in",`Придёт за ${H} дней`,fmt(A.IN),fmt(B.IN),diff(A.IN,B.IN));
+  row("out",`Уйдёт за ${H} дней`,fmt(A.OUT),fmt(B.OUT),diff(A.OUT,B.OUT));
+  row("res","Под налоги",fmt(A.res),fmt(B.res));
+  // The sentence is the page's own verdict of the copy. A plan that is thin is thin with a trial on top of it too:
+  // a cost that is only tried does not write the plan out.
+  const id=A.id==="vT"&&B.id!=="v4"?"vT":B.id,lowAt=`${fmt(B.low)}, ${dYF(M,B.lowDay)}`;
+  const say=id==="v4"?`В этом случае <span class="wi-neg">${dYF(M,B.minusDay||B.lowDay)} не хватит ${fmt(-(B.minusDay?B.minus:B.low))}</span>${B.minusDay&&B.minusDay!==B.lowDay?` — это первый минус. Глубже всего ${dYF(M,B.lowDay)}: не хватит ${fmt(-B.low)}.`:"."}`
+   :id==="v3"?`В этом случае хватает, но впритык: ${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`
+   :id==="vT"?`План расходов не дописан, поэтому «денег хватает» не скажу и про этот случай. Нижняя точка по вписанному — ${lowAt}.`
+   :id==="vi"?`Сначала разберите поступления в «Разборе»: пока они там, «денег хватает» не скажу и про этот случай. Нижняя точка — ${lowAt}.`
+   :id==="v1"?`В этом случае денег ${A.id==="v1"?"тоже ":""}хватает на ${H} дней. Нижняя точка — ${lowAt}.`
+   :`Нижняя точка в этом случае — ${lowAt}.`;
+  const plan=A.id===id?(id==="v4"?"По плану денег тоже не хватает.":"")
+   :A.id==="v1"?"По плану денег хватает.":A.id==="v3"?"По плану хватает впритык.":A.id==="v4"?`По плану ${dYF(M,A.minusDay||A.lowDay)} не хватает ${fmt(-(A.minusDay?A.minus:A.low))}.`
+   :A.id==="vi"?"По плану сначала нужно разобрать поступления.":"";
+  const none=skip.length>=changes.length;
+  let h=out.length?`<p class="wi-say" data-wi-k="say">${say}${plan?` <span class="wi-plan">${plan}</span>`:""}</p><table class="wi-t"><thead><tr><th></th><th>по плану</th><th>в этом случае</th></tr></thead><tbody>${out.join("")}</tbody></table>`
+   :`<p class="wi-say" data-wi-k="say">${none?"Ни одно изменение сейчас не считается: цифры те же, что по плану.":`В ближайшие ${H} дней это ничего не меняет: все цифры те же, что по плану.`}</p>`;
+  if(out.length&&B.id==="v4"&&A.id!=="v4"&&changes.length-skip.length>1)h+=`<p class="wi-meta" style="margin:0">Уберите изменения по одному — будет видно, какое уводит в минус.</p>`;
+  const notes=[...new Set(changes.map(c=>{const w=words(M,c,changes);return w.off?"":w.note||"";}).filter(Boolean))];
+  if(noSum&&!none)notes.unshift(`«Можно вывести» проба не называет${A.free===null?", как и сама страница сейчас":""}: ${NOSUM[A.freeWhy||B.freeWhy]||"эту сумму сейчас не посчитать"}.`);
   notes.push("Это проба, а не план: в плане ничего не изменилось. Нажмите «Закончить пробу» или обновите страницу — проба исчезнет.");
   return h+`<div class="wi-notes">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>`;
  }
 
  // ---- asking ----
+ // What «Что если…» in a row's card can ask about that row: its payment coming later, its client leaving, its
+ // withdrawal being another sum - or nothing ("": the card has no such button, and no question about another row).
+ function fits(M,it){
+  if(!it||!can(M))return "";const c=ik(it);
+  if(it.list==="inflows"&&it.src!=="tax")return pays(M,c).some(p=>p.id===it.id)?"late":repeats(M).some(h=>h.chain===c)?"stop":pays(M,c).length?"late":"";
+  return it.list==="div"&&draws(M).some(h=>h.chain===c)?"draw":"";
+ }
  // A change being written, with what its row suggests already in it.
  function fresh(M,kind){
-  const from=origin&&rowOf(origin.row)?origin:null,next=ymAdd(ymT(M),1),cl=clients(M),rp=repeats(M),dr=drawRow(M);
-  if(kind==="late"&&cl.length){const row=from&&cl.some(r=>r.id===from.row)?from.row:cl[0].id;return{k:"late",row,item:from&&from.row===row&&pays(M,row).some(it=>it.id===from.item)?from.item:"",days:30};}
-  if(kind==="stop"&&rp.length)return{k:"stop",row:from&&rp.some(r=>r.id===from.row)?from.row:rp[0].id,from:next};
-  if(kind==="draw"&&dr){const first=drawOpen(M,dr.id)[0];return{k:"draw",row:dr.id,amt:+dr.amt||0,from:first?first.occ.ym:next};}
+  const o=origin&&hold(origin.row)?origin:null,oc=o?key(o.row):"",next=ymAdd(ymT(M),1),cl=clients(M),rp=repeats(M),dr=draws(M);
+  if(kind==="late"&&cl.length){const row=cl.some(h=>h.chain===oc)?oc:cl[0].chain;return{k:"late",row,item:row===oc&&pays(M,row).some(it=>it.id===o.item)?o.item:"",days:30};}
+  if(kind==="stop"&&rp.length)return{k:"stop",row:rp.some(h=>h.chain===oc)?oc:rp[0].chain,from:next};
+  if(kind==="draw"&&dr.length){const h=dr.find(q=>q.chain===oc)||dr[0],open=drawOpen(M,h.chain),at=(h.chain===oc&&open.find(it=>it.id===o.item))||open.find(it=>it.occ.ym>=ymT(M))||open[0];
+   return{k:"draw",row:h.chain,amt:+at.amt||0,from:at.occ.ym<ymT(M)?ymT(M):at.occ.ym};}
   const cs=curs(M);return{k:"cost",name:"",amt:3000,cur:cs.includes("GBP")?"GBP":cs[0]||"GBP",day:25,from:firstMonth(M,25)>next?firstMonth(M,25):next};
  }
- const kinds=M=>KINDS.filter(([k])=>k==="late"?clients(M).length:k==="stop"?repeats(M).length:k==="draw"?!!drawRow(M):curs(M).length);
- function kindFor(M){
-  const h=origin&&rowOf(origin.row),ks=kinds(M).map(k=>k[0]),want=!h?"late":h.k==="inflows"?(pays(M,origin.row).length?"late":"stop"):h.k==="div"&&drawRow(M)&&drawRow(M).id===origin.row?"draw":"cost";
-  return ks.includes(want)?want:ks[0]||"cost";
+ const kinds=M=>KINDS.filter(([k])=>k==="late"?clients(M).length:k==="stop"?repeats(M).length:k==="draw"?draws(M).length:curs(M).length);
+ const kind0=M=>{const ks=kinds(M).map(k=>k[0]);return ks.includes("late")?"late":ks[0]||"";};
+ // The plan can change under a change that is being written: one whose row or payment is no longer among what its
+ // fields offer is written afresh, so that the sentence under the fields and the fields say the same.
+ function heal(M){
+  const d=draft,ks=kinds(M).map(k=>k[0]);if(!d)return;
+  if(!ks.includes(d.k)){draft=ks.length?fresh(M,kind0(M)):null;return;}
+  const k=d.k==="cost"?"":key(d.row),among=l=>l.some(h=>h.chain===k);
+  if(d.k==="late"){if(!among(clients(M)))draft=fresh(M,"late");else{d.row=k;if(d.item&&!pays(M,k).some(it=>it.id===d.item))d.item="";}}
+  else if(d.k==="stop"){if(!among(repeats(M)))draft=fresh(M,"stop");else{d.row=k;if(d.from<=ymT(M))d.from=ymAdd(ymT(M),1);}}
+  else if(d.k==="draw"){if(!among(draws(M)))draft=fresh(M,"draw");else{d.row=k;if(d.from<ymT(M))d.from=ymT(M);}}
+  else{if(!curs(M).includes(d.cur))d.cur=curs(M).includes("GBP")?"GBP":curs(M)[0];if(d.from<firstMonth(M,d.day))d.from=firstMonth(M,d.day);}
  }
  const opt=(list,val)=>list.map(o=>`<option value="${esc(o[0])}"${String(o[0])===String(val)?" selected":""}>${esc(o[1])}</option>`).join("");
  const fld=(label,inner,wide)=>`<label class="fld${wide?" ed-wide":""}"><span>${label}</span>${inner}</label>`;
+ // The rows a select offers. Two of one name are told apart by their day and their sum.
+ const tell=r=>r.rec?`${+r.rec.day}-го, ${money(+r.amt||0,r.cur)}`:`${r.date?dRu(r.date)+", ":""}${money(+r.amt||0,r.cur)}`;
+ const named=hs=>{const n={};hs.forEach(h=>{const k=nmOf(h.r).toLowerCase();n[k]=(n[k]||0)+1;});return hs.map(h=>[h.chain,nmOf(h.r)+(n[nmOf(h.r).toLowerCase()]>1?" · "+tell(h.r):"")]);};
+ const monthOpts=M=>months(M).map(m=>[m,`с ${monG(m)} ${m.slice(0,4)}`]);
+ const lead=()=>changes.length?"и ":"Что если ",line=(M,d)=>{const w=words(M,d,[]);return lead()+w.say+(w.meta?" · "+w.meta:"");};
  function composer(M){
-  const d=draft||(draft=fresh(M,kindFor(M))),ms=months(M).map(m=>[m,`с ${monG(m)} ${m.slice(0,4)}`]);let f="";
-  if(d.k==="late")f=fld("Клиент",`<select data-wi-f="row">${opt(clients(M).map(r=>[r.id,r.name]),d.row)}</select>`)
-   +fld("Какой платёж",`<select data-wi-f="item">${opt([["","все платежи"]].concat(pays(M,d.row).filter(it=>it.day<=M.end).map(it=>[it.id,`только ${dRuF(it.day)} · ${fmt(Math.round(Math.abs(it.cash)))}`])),d.item)}</select>`)
+  if(!draft)draft=fresh(M,kind0(M));heal(M);
+  const d=draft,ms=monthOpts(M);let f="";
+  if(d.k==="late")f=fld("Клиент",`<select data-wi-f="row">${opt(named(clients(M)),d.row)}</select>`)
+   // (The payment a card was opened on is offered also when it lies beyond the days the page looks at: the fields
+   // must be able to show what the change holds.)
+   +fld("Какой платёж",`<select data-wi-f="item">${opt([["","все платежи"]].concat(pays(M,d.row).filter(it=>it.day<=M.end||it.id===d.item).map(it=>[it.id,`только ${dYF(M,it.day)} · ${fmt(Math.abs(it.cash))}`])),d.item)}</select>`)
    +fld("На сколько дней позже",`<input data-wi-f="days" type="number" min="1" max="365" inputmode="numeric" value="${esc(d.days)}" placeholder="30">`);
-  if(d.k==="stop")f=fld("Клиент",`<select data-wi-f="row">${opt(repeats(M).map(r=>[r.id,r.name]),d.row)}</select>`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms.slice(1),d.from)}</select>`);
+  if(d.k==="stop")f=fld("Клиент",`<select data-wi-f="row">${opt(named(repeats(M)),d.row)}</select>`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms.slice(1),d.from)}</select>`);
   if(d.k==="cost")f=fld("Сколько в месяц",`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.amt)}">`)
    +fld("Валюта",`<select data-wi-f="cur">${opt(curs(M).map(c=>[c,c]),d.cur)}</select>`)
    +fld("День месяца",`<input data-wi-f="day" type="number" min="1" max="28" inputmode="numeric" value="${esc(d.day)}">`)
    +fld("С какого месяца",`<select data-wi-f="from">${opt(ms.filter(m=>m[0]>=firstMonth(M,d.day)),d.from)}</select>`)
    +fld("Название",`<input data-wi-f="name" value="${esc(d.name)}" placeholder="например, дизайнер" autocomplete="off">`,true);
-  if(d.k==="draw")f=fld("Сколько выводить в месяц",`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.amt)}">`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms,d.from)}</select>`);
-  const w=words(M,d);
+  if(d.k==="draw"){const dr=draws(M),h=hold(d.row),cur=h&&h.r.cur||"GBP";
+   f=(dr.length>1?fld("Какой вывод",`<select data-wi-f="row">${opt(named(dr),d.row)}</select>`):"")
+    +fld("Сколько выводить в месяц"+(cur!=="GBP"?", "+cur:""),`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${esc(d.amt)}">`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms,d.from)}</select>`);}
   return `<div class="wi-comp"><div class="wi-kinds" role="group" aria-label="Что проверить">${kinds(M).map(k=>`<button type="button" class="chip${d.k===k[0]?" active":""}" data-wi-kind="${k[0]}" aria-pressed="${d.k===k[0]}">${k[1]}</button>`).join("")}</div>
-   <div class="wi-fields">${f}</div><span class="wi-meta" data-wi-worked>${(changes.length?"и ":"Что если ")+w.say} · ${w.meta}</span>
+   <div class="wi-fields">${f}</div><span class="wi-meta" data-wi-worked>${line(M,d)}</span>
    <div class="row"><button type="button" class="sm primary" data-wi-go>Посчитать</button>${changes.length?'<button type="button" class="sm ghost" data-wi-cancel>Отмена</button>':""}</div></div>`;
  }
- const listed=M=>changes.length?`<div class="wi-list">${changes.map((c,i)=>{const w=words(M,c);return `<div class="wi-ch"><span><b>${i?"и ":""}${w.say}</b><span class="wi-meta">${w.meta}</span></span><button type="button" class="wi-x" data-wi-drop="${i}">убрать из пробы</button></div>`;}).join("")}</div>`:"";
+ const listed=M=>changes.length?`<div class="wi-list">${changes.map((c,i)=>{const w=words(M,c,changes);return `<div class="wi-ch"><span><b>${i?"и ":""}${w.say}</b><span class="wi-meta">${w.meta||""}</span></span><button type="button" class="wi-x" data-wi-drop="${i}">убрать из пробы</button></div>`;}).join("")}</div>`:"";
+ // The folded line of «Сегодня»: what can be asked, or that a trial is on.
+ function summary(M){
+  const n=changes.length;if(!n)return "платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму";
+  const off=can(M)?changes.filter(c=>dead(M,c,changes)).length:0;
+  return `идёт проба: ${n} ${plural(n,"изменение","изменения","изменений")}${off===n?" · ни одно сейчас не считается":off?` · ${off} сейчас не ${plural(off,"считается","считаются","считаются")}`:""} · в план ничего не записано`;
+ }
  // The trial as it stands in either place: what is asked, and the answer - side by side where there is room (`two`).
+ // A trial that is on stays in sight and can be ended also while the page cannot count it.
  function panel(M,o){
-  if(!M||M.v0||M.empty||!M.free||!Plan.doc())return `<p class="note" style="margin:0">Проба считает от остатков на счетах и от плана. Пока вписано не всё, сравнивать не с чем.</p>`;
-  if(!kinds(M).length)return `<p class="note" style="margin:0">Пробовать пока нечего: в плане нет ни клиентов с платежами впереди, ни счёта с остатком.</p>`;
-  const ask=`<div class="wi-q">Что если…</div>${listed(M)}`+(draft||!changes.length?composer(M):`<div class="row"><button type="button" class="sm" data-wi-more>+ и ещё…</button><button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`);
+  const two=!!(o&&o.two),wrap=(inner,wide)=>`<div class="${two&&wide?"wi-box":"wi-col"}" data-wi-panel="${two?"two":"one"}">${inner}</div>`,n=changes.length;
+  const endB=`<div class="row"><button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`;
+  if(!can(M))return wrap(`<p class="note" style="margin:0">Проба считает от остатков на счетах и от плана. Пока вписано не всё, сравнивать не с чем.</p>${n?`<span class="wi-meta">В пробе ${n} ${plural(n,"изменение","изменения","изменений")}: ${plural(n,"оно посчитается","они посчитаются","они посчитаются")}, когда будет от чего считать.</span>${endB}`:""}`);
+  if(!kinds(M).length&&!n)return wrap(`<p class="note" style="margin:0">Пробовать пока нечего: в плане нет ни клиентов с платежами впереди, ни счёта с остатком.</p>`);
+  const more=kinds(M).length?`<button type="button" class="sm" data-wi-more>+ и ещё…</button>`:"";
+  const ask=`<div class="wi-q">Что если…</div>${listed(M)}`+((draft||!n)&&kinds(M).length?composer(M):`<div class="row">${more}<button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`);
   const ans=`<div class="wi-ans">${answer(M)}</div>`;
-  return `<div class="${o&&o.two?"wi-box":"wi-col"}" data-wi-panel>${o&&o.two?`<div class="wi-col">${ask}</div><div class="wi-col">${ans}</div>`:ask+ans}</div>`;
+  return wrap(two?`<div class="wi-col">${ask}</div><div class="wi-col">${ans}</div>`:ask+ans,true);
+ }
+ // Every panel of the trial that is on the page, and the folded line, drawn afresh - and the cursor put back where
+ // it was. Nothing else is touched.
+ function redraw(){
+  const M=Plan.model(),all=()=>[...document.querySelectorAll("[data-wi-panel]")],a=document.activeElement,at=a&&a.closest?a.closest("[data-wi-panel]"):null,i=all().indexOf(at);
+  const was=!at?"":a.dataset.wiF?`[data-wi-f="${a.dataset.wiF}"]`:a.dataset.wiKind?`[data-wi-kind="${a.dataset.wiKind}"]`:"";
+  all().forEach(p=>{const t=document.createElement("div");t.innerHTML=panel(M,{two:p.dataset.wiPanel==="two"});p.replaceWith(t.firstElementChild);});
+  document.querySelectorAll("[data-wi-sum]").forEach(e=>{e.textContent=summary(M);});
+  if(i>=0){const p=all()[i],e=p&&((was&&p.querySelector(was))||p.querySelector("[data-wi-more]")||p.querySelector("[data-wi-f]"));if(e)e.focus({preventScroll:true});}
  }
 
  // ---- pressing and typing ----
  const sync=p=>{if(!draft||!p)return;p.querySelectorAll("[data-wi-f]").forEach(e=>{const k=e.dataset.wiF,v=e.value;
   draft[k]=k==="days"?Math.min(365,Math.max(0,Math.round(+v||0))):k==="day"?Math.min(28,Math.max(1,Math.round(+v||1))):k==="amt"?Math.max(0,+v||0):v;});};
- const worked=()=>{const M=Plan.model();if(!draft)return;const w=words(M,draft);document.querySelectorAll("[data-wi-worked]").forEach(e=>{e.innerHTML=(changes.length?"и ":"Что если ")+w.say+" · "+w.meta;});};
+ // The trial can stand twice on one screen - in a card and in the fold: what is typed in one is typed in both.
+ const mirror=t=>{document.querySelectorAll(`[data-wi-f="${t.dataset.wiF}"]`).forEach(e=>{if(e!==t&&e.value!==t.value)e.value=t.value;});};
+ const worked=M=>{if(!draft)return;const s=line(M,draft);document.querySelectorAll("[data-wi-worked]").forEach(e=>{e.innerHTML=s;});};
+ // One change of a kind for one payment or one row: a second takes the first one's place. Each is made from the
+ // plan's own dates and sums, so two would not add up - the later would win, and the list would state both.
+ // «Все платежи» takes the place of every «только этот» of its client; «только этот» stands beside «все платежи»
+ // and answers for its own payment. Returns how many it replaced.
+ function put(d){
+  const k=d.k==="cost"?"":key(d.row),n=changes.length;
+  changes=changes.filter(q=>!(d.k!=="cost"&&q.k===d.k&&key(q.row)===k&&(d.k!=="late"||!d.item||q.item===d.item)));
+  changes.push(d);return n+1-changes.length;
+ }
  document.addEventListener("click",ev=>{
   const t=ev.target,c=s=>t.closest&&t.closest(s),p=c("[data-wi-panel]");let x;if(!p)return;
-  const M=Plan.model();
-  if((x=c("[data-wi-kind]"))){draft=fresh(M,x.dataset.wiKind);return Plan.redraw();}
-  if(c("[data-wi-go]")){sync(p);if(!draft)return;
-   if(draft.k==="late"&&!(draft.days>0))return toast("Впишите, на сколько дней позже: от 1 до 365");
-   if(draft.k==="cost"&&!(draft.amt>0))return toast("Впишите сумму в месяц");
-   if(draft.k==="cost"&&draft.from<firstMonth(M,draft.day))draft.from=firstMonth(M,draft.day);
-   changes.push(draft);draft=null;return Plan.redraw();}
-  if(c("[data-wi-cancel]")){draft=null;return Plan.redraw();}
-  if(c("[data-wi-more]")){const have=k=>changes.some(q=>q.k===k),ks=kinds(M).map(k=>k[0]),next=["late","cost","stop","draw"].find(k=>ks.includes(k)&&!have(k))||ks[0];origin=null;draft=fresh(M,next);return Plan.redraw();}
-  if((x=c("[data-wi-drop]"))){changes.splice(+x.dataset.wiDrop,1);return Plan.redraw();}
   if(c("[data-wi-end]"))return end(true);
+  const M=Plan.model();if(!can(M))return;
+  if((x=c("[data-wi-kind]"))){draft=fresh(M,x.dataset.wiKind);return redraw();}
+  if(c("[data-wi-go]")){sync(p);heal(M);const d=draft;if(!d)return redraw();
+   if(d.k==="late"&&!(d.days>0))return toast("Впишите, на сколько дней позже: от 1 до 365");
+   if(d.k==="cost"&&!(d.amt>0))return toast("Впишите сумму в месяц");
+   if(d.k==="cost")d.from=costFrom(M,d);
+   if(d.k==="draw"){const its=drawOpen(M,d.row).filter(it=>it.occ.ym>=d.from);if(its.length&&its.every(it=>Math.abs((+it.amt||0)-d.amt)<0.005))return toast("В плане на эти месяцы та же сумма — впишите другую");}
+   const why=dead(M,d,[]);if(why)return toast(why[0].toUpperCase()+why.slice(1));
+   draft=null;const gone=put(d);redraw();if(gone)toast("Прежнее изменение для этой строки заменено новым.");return;}
+  if(c("[data-wi-cancel]")){draft=null;return redraw();}
+  if(c("[data-wi-more]")){
+   // In a row's card the next question is about that row again, while nothing in the trial is about it yet.
+   const o=p.closest("[data-ed-card]")&&origin&&hold(origin.row)?origin:null,k=o&&!changes.some(q=>q.row&&key(q.row)===key(o.row))?fits(M,M.items.find(it=>it.id===o.item)):"";
+   const have=q=>changes.some(z=>z.k===q),ks=kinds(M).map(z=>z[0]);if(!k)origin=null;
+   draft=fresh(M,k||["late","cost","stop","draw"].find(q=>ks.includes(q)&&!have(q))||ks[0]);return redraw();}
+  if((x=c("[data-wi-drop]"))){changes.splice(+x.dataset.wiDrop,1);return redraw();}
  });
- document.addEventListener("input",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]"))return;sync(t.closest("[data-wi-panel]"));if(t.tagName==="INPUT")worked();});
- document.addEventListener("change",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]"))return;sync(t.closest("[data-wi-panel]"));
-  if(draft&&draft.k==="late"&&t.dataset.wiF==="row")draft.item="";
-  if(t.tagName==="SELECT"||t.dataset.wiF==="day")Plan.redraw();});
+ document.addEventListener("input",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]")||t.tagName==="SELECT")return;const M=Plan.model();if(!draft||!can(M))return;
+  mirror(t);sync(t.closest("[data-wi-panel]"));
+  // The first month a cost can begin in follows its day: the month's list is written again where it stands, with
+  // no draw of the panel - a draw while a field is being left would take «Посчитать» from under the press.
+  if(draft.k==="cost"&&t.dataset.wiF==="day"){draft.from=costFrom(M,draft);const f=firstMonth(M,draft.day);document.querySelectorAll('select[data-wi-f="from"]').forEach(s=>{s.innerHTML=opt(monthOpts(M).filter(m=>m[0]>=f),draft.from);});}
+  worked(M);});
+ document.addEventListener("change",ev=>{const t=ev.target;if(!t.matches||!t.matches("[data-wi-f]"))return;const M=Plan.model(),k=t.dataset.wiF;if(!draft||!can(M))return;
+  if(t.tagName!=="SELECT"){if(k==="day")t.value=draft.day;else if(k==="days"&&+t.value>365)t.value=365;mirror(t);return;}
+  mirror(t);sync(t.closest("[data-wi-panel]"));
+  if(draft.k==="late"&&k==="row")draft.item="";
+  if(draft.k==="draw"&&k==="row"){const open=drawOpen(M,draft.row),at=open.find(it=>it.occ.ym>=draft.from)||open[0];if(at)draft.amt=+at.amt||0;}
+  redraw();});
  document.addEventListener("keydown",ev=>{const t=ev.target;if(ev.key!=="Enter"||!t.matches||!t.matches("input[data-wi-f]"))return;ev.preventDefault();const b=t.closest("[data-wi-panel]").querySelector("[data-wi-go]");if(b)b.click();});
  function end(say){
   const had=changes.length;changes=[];draft=null;origin=null;
-  const c=Ed.open();if(c&&c.wi)Ed.close();else Plan.redraw();
+  const c=Ed.open();if(c&&c.wi)Ed.close();else redraw();
   if(say)toast(had?"Проба закончена. В плане ничего не изменилось.":"Проба закрыта.");
  }
- return{panel,n:()=>changes.length,end,
-  // «Что если…» pressed in a row's card: what is asked next starts from that row.
-  from(it){origin=it?{row:it.row||it.id,item:it.id}:null;draft=null;},
+ return{panel,summary,fits,n:()=>changes.length,end,
+  // «Что если…» pressed in a row's card: what is asked next is about that row.
+  from(it){const M=Plan.model(),k=fits(M,it);origin=k?{row:ik(it),item:it.id}:null;draft=k?fresh(M,k):null;},
   // For the checks, and for an assistant that reads the page: what a list of changes does to the plan's figures,
-  // without touching the trial on the screen; and the trial that is on the screen.
-  ask(list){const M=Plan.model();if(!M||M.v0||!M.free)return null;return{plan:read(M),trial:read(modelOf(M,list||[]))};},
+  // without touching the trial on the screen - `skipped` names the changes that were not made, and why; and the
+  // trial that is on the screen. null where the page has nothing to count from.
+  ask(list){const M=Plan.model();if(!can(M))return null;const skip=[],B=modelOf(M,Array.isArray(list)?list:[],skip);return{plan:read(M),trial:read(B),skipped:skip};},
   peek(){const M=Plan.model();return{changes:JSON.parse(JSON.stringify(changes)),plan:planOf(M),model:changes.length?modelOf(M):null};}};
 })();
 
@@ -4860,7 +5010,9 @@ const Trial=(()=>{
 //    should read, which fields changed, now, who) writes what the card's «Сохранить» would; Ed.does(verb, item id)
 //    is a data-ed-do pressed from the script (a tick is not a button); Ed.names(list) the names the table offers.
 // A row's card has one button that is not the plan's: «Что если…» (data-wi-open) turns the card over into the trial
-// (Trial, above; `wi` on the open card). It is drawn for a reader too, and is in no list of things that write.
+// (Trial, above; `wi` on the open card). It is drawn for a reader too, and is in no list of things that write. It
+// stands only in the card of a row there is something to ask about (Trial.fits): a client's payment, a client that
+// repeats, a monthly withdrawal - a cost or a tax has no such button, and never a question about another row.
 const Ed=(()=>{
  const BLOCKS={inflows:["rev"],team:["cogs"],taxes:["tax"],other:["fixed","other","behalf"],div:[]},BLK0={inflows:"rev",team:"cogs",taxes:"tax",other:"other",div:"div"};
  const WHAT=[["inflows","Поступление"],["team","Команда"],["subs","Подписка"],["other","Прочий расход"],["taxes","Налог студии"],["div","Дивиденды"]],NEW={inflows:"От кого",team:"Кому",taxes:"Какой налог",div:"Что",other:"На что",subs:"Сервис"};
@@ -5139,7 +5291,7 @@ const Ed=(()=>{
   // of the row beside it that writes, and no «Сохранить» for Enter to press. The same for a reader and a writer:
   // a trial changes no document. `cur.wi` is the face; the trial itself is Trial's and outlives the card.
   if(cur.wi)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}"><div class="ed-why">Проба: в план ничего не записывается.</div><div data-ed-askbox="wi">${Trial.panel(M,{})}</div><div class="ed-foot"><span></span><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
-  const wi='<button class="sm ghost" data-wi-open>Что если…</button>';
+  const wi=Trial.fits(M,it)?'<button class="sm ghost" data-wi-open>Что если…</button>':"";
   if(RO)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it,true)}<div class="ed-foot"><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
   const done=it.state==="done",tax=it.src==="tax",occ=it.src==="occ";
   let body="";
@@ -5869,8 +6021,7 @@ const Today=(()=>{
  // «Что если»: one folded line, shut whenever the page opens. Folded, it says only that a trial is on; its figures
  // are inside, under the words «в этом случае», and carry no data-live - the screen's figures are the plan's.
  function whatIf(){
-  const n=Trial.n();
-  return `<details class="td-wi"${st.wi?" open":""}><summary><span>Что если</span><span class="td-meta">${n?`идёт проба: ${n} ${plural(n,"изменение","изменения","изменений")} · в план ничего не записано`:"платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму"}</span></summary><div class="stack"><section class="card" aria-label="Что если">${Trial.panel(M,{two:true})}</section></div></details>`;
+  return `<details class="td-wi"${st.wi?" open":""}><summary><span>Что если</span><span class="td-meta" data-wi-sum>${esc(Trial.summary(M))}</span></summary><div class="stack"><section class="card" aria-label="Что если">${Trial.panel(M,{two:true})}</section></div></details>`;
  }
  function analytics(){
   return `<details class="td-anl"${st.anl?" open":""}><summary><span>Аналитика</span><span class="td-meta">${M.v0?"изменение кассы":"остаток"} по дням · налоги</span></summary><div class="stack">${chartCard()}${taxCard()}</div></details>`;
