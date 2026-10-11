@@ -5964,8 +5964,9 @@ await run('rv-whatif', '«Что если» answers with the engine\'s own figur
   await pg.click(K('row') + '[data-wi-open]');
   await pg.waitForSelector(K('row') + '[data-wi-panel]');
   const sel = (f) => pg.$eval(K('row') + `[data-wi-f="${f}"]`, (e) => (e.tagName === 'SELECT' ? e.selectedOptions[0].textContent.replace(/ /g, ' ') : e.value));
-  same([await pg.$$eval(K('row') + '[data-ed-save], ' + K('row') + '[data-ed-f], ' + K('row') + '[data-ed-do]', (l) => l.length), await sel('row'), /^только /.test(await sel('item')), await sel('days'), await texts(pg, K('row') + '.wi-kinds .chip.active')],
-    [0, 'Meridian Labs', true, '30', ['платёж придёт позже']], 'turned over, the card holds no field or button of the row; the client and the payment of the row stand ready, thirty days');
+  // (third reading: a card is its row's - there is no list of clients in it to choose another from)
+  same([await pg.$$eval(K('row') + '[data-ed-save], ' + K('row') + '[data-ed-f], ' + K('row') + '[data-ed-do]', (l) => l.length), await pg.$(K('row') + '[data-wi-f="row"]'), /Что если Meridian Labs заплатит на 30 дней позже/.test(await text(pg, K('row') + '[data-wi-worked]')), /^только /.test(await sel('item')), await sel('days'), await texts(pg, K('row') + '.wi-kinds .chip.active')],
+    [0, null, true, true, '30', ['платёж придёт позже']], 'turned over, the card holds no field or button of the row, and no list of other clients; the client and the payment of the row stand ready, thirty days');
   // (second reading: a chip in a row's card could ask about another row - the withdrawal, from a client's card)
   same(await texts(pg, K('row') + '.wi-kinds .chip'), ['платёж придёт позже', 'клиент уйдёт', 'наймём человека'], 'in a client\'s card the questions are about that client, and a hire: «выводим другую сумму» is not offered there');
   await pg.selectOption(K('row') + '[data-wi-f="item"]', '');
@@ -6092,6 +6093,13 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   // (second reading: through the script two changes of one payment were both made, the later winning in silence; and a sum that is no number was counted as nothing)
   const twice = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 30 }, { k: 'late', row: 'c-halden-co', item: '', days: 60 }, { k: 'draw', row: 'd-draw', amt: null, from: '2026-11' }]);
   same([of(twice), twice.skipped.map((x) => x.i)], [of(await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 60 }])), [0, 2]], 'asked through the script: of two changes of one payment the later is made and the earlier is named as replaced; a withdrawal with no sum is not made');
+  // (third reading: a «только этот» named as replaced still shielded its payment - «все платежи» then moved everything but it; and one with days out of range shielded too)
+  const all30 = of(await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 30 }]));
+  const oneAll = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: 'c-halden-co@2026-11', days: 20 }, { k: 'late', row: 'c-halden-co', item: '', days: 30 }]), allBad = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: '', days: 30 }, { k: 'late', row: 'c-halden-co', item: 'c-halden-co@2026-11', days: 400 }]);
+  same([of(oneAll), oneAll.skipped.map((x) => x.i), of(allBad), allBad.skipped.map((x) => x.i)], [all30, [0], all30, [1]], 'through the script «только этот» and then «все платежи» is «все платежи»: a change that is replaced, or not made, shields no payment');
+  // (third reading: «позже» and «уйдёт» of one client in one trial - the «позже» line still told of a payment arriving that the same trial had taken away)
+  const leaves = await ask(pg, [{ k: 'late', row: 'c-halden-co', item: 'c-halden-co@2026-11', days: 10 }, { k: 'stop', row: 'c-halden-co', from: '2026-11' }]);
+  same([of(leaves), leaves.skipped.map((x) => x.i), /клиент уходит раньше/.test(leaves.skipped[0].why)], [of(await ask(pg, [{ k: 'stop', row: 'c-halden-co', from: '2026-11' }])), [0], true], 'a payment moved and its client leaving before it: the move is not made, and is named so');
   // (first reading: a cost in a currency no account keeps was counted as the same number of pounds)
   const eur = await ask(pg, [{ k: 'cost', amt: 3000, cur: 'EUR', day: 25, from: '2026-11', name: '' }, { k: 'late', row: 'no-such-row', item: '', days: 30 }]);
   same([of(eur), eur.skipped.map((x) => x.i), /EUR/.test(eur.skipped[0].why)], [[M0.LOW, M0.LOWDAY, M0.IN, M0.OUT], [0, 1], true], 'a cost in euros, where no account with a balance keeps euros, is not made - and whoever asked is told which changes were not made, and why');
@@ -6206,6 +6214,15 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await thin.click(F + '[data-wi-more]');
   await kind(thin, 'stop');
   same((await opts(thin, 'row')).filter((n) => /Halden/.test(n)), ['Halden & Co · 14-го, £9,750', 'Halden & Co · 20-го, £3,200'], 'two rows of one name are told apart by their day and their sum');
+  // (third reading: at thirty days, with no «Можно вывести» named, the notes still put the edge of what the trial sees at sixty)
+  await thin.click('#view-today [data-td-h="30"]');
+  await kind(thin, 'cost');
+  await thin.fill(F + '[data-wi-f="day"]', '20');
+  await thin.selectOption(F + '[data-wi-f="from"]', '2026-11');
+  await thin.fill(F + '[data-wi-f="amt"]', '8000');
+  const far30 = await worked(thin);
+  await thin.click(F + '[data-wi-go]');
+  ok(/в 30 дней не попадает ни одной выплаты$/.test(far30) && /Новый расход идёт каждый месяц и дальше 30 дней — этого проба уже не видит/.test(await text(thin, F + '.wi-notes')), 'thirty days and no «Можно вывести» to name: a cost that begins on day 45 is beyond what the trial sees, and the page says thirty, not sixty', [far30, await text(thin, F + '.wi-notes')]);
   await thin.context().close();
 
   // ---- 3. A plan that is in the minus by itself.
@@ -6306,7 +6323,42 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await tight.click(F + '[data-wi-go]');
   // (second reading: «в этом случае впритык» with no word that the plan is exactly as tight without the change)
   ok(/^В этом случае хватает, но впритык: .* По плану тоже впритык\.$/.test(await say(tight)), 'a cost that begins after the low point: the answer says the plan is «впритык» too', await say(tight));
+  // (third reading, on the screen: the line of a payment that comes later, when its client leaves before it)
+  await tight.click(F + '[data-wi-more]');
+  await kind(tight, 'late');
+  await tight.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  await tight.selectOption(F + '[data-wi-f="item"]', 'c-halden-co@2026-11');
+  await tight.click(F + '[data-wi-go]');
+  await tight.click(F + '[data-wi-more]');
+  await kind(tight, 'stop');
+  await tight.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  await tight.click(F + '[data-wi-go]');
+  same([/Halden & Co заплатит на 30 дней позже.*это изменение сейчас не считается: в этой же пробе клиент уходит раньше/.test((await texts(tight, F + '.wi-ch'))[1]), plain(await tight.$eval('#view-today .td-wi > summary .td-meta', (e) => e.textContent))], [true, 'идёт проба: 3 изменения · 1 сейчас не считается · в план ничего не записано'], 'the client leaves from the month of the payment that was moved: the move\'s line says it is not counted, and the folded line counts it so');
   await tight.context().close();
+
+  // ---- 7. The studio at the end of October: Kestrel Bank's November invoice was dated 18 October by a founder and is overdue.
+  const T7 = '2026-10-28', led7 = demoLedger(T7), P7 = demoPlan(T7), kb = row(P7, 'inflows', 'c-kestrel-bank');
+  kb.rec = { ...kb.rec, x: { ...(kb.rec.x || {}), '2026-11': { ...((kb.rec.x || {})['2026-11'] || {}), date: '2026-10-18' } } };
+  const eom = await scene('what if, an overdue month ahead', led7, P7, { H: 60, at: '2026-10-28T12:00:00+00:00' });
+  const M7 = (await holds(eom, 'a plan whose next month of a client is already overdue')).M;
+  same(M7.items.find((it) => it.id === 'c-kestrel-bank@2026-11').state, 'late', 'Kestrel Bank\'s November is overdue, and counted today');
+  await unfold(eom);
+  await kind(eom, 'stop');
+  await eom.selectOption(F + '[data-wi-f="row"]', 'c-kestrel-bank');
+  // (third reading: the line said that overdue payment «остаётся в расчёте» while the copy took it out - and named a smaller sum than «Придёт» lost)
+  const k7 = await ask(eom, [{ k: 'stop', row: 'c-kestrel-bank', from: '2026-11' }]);
+  ok(/Kestrel Bank уйдёт с ноября · не придут 2 платежа · £8,400 за 60 дней/.test(await worked(eom)) && !/остаётся в расчёте/.test(await worked(eom)) && Math.round((k7.plan.IN - k7.trial.IN) * 100) === 840000, 'he leaves from November: the overdue November and December do not come - the line counts both, the sum «Придёт» loses', [await worked(eom), k7.plan.IN - k7.trial.IN]);
+  await eom.selectOption(F + '[data-wi-f="from"]', '2027-01');
+  ok(/его платежи с января в эти 60 дней не попадают; его просроченный платёж \(£4,200\) остаётся в расчёте — о нём спрашивает «Нужно решить»/.test(await worked(eom)), 'he leaves from January: the overdue payment of an earlier month is still counted, and the line does not say he has no other payments', await worked(eom));
+  // (third reading: «ноябрь уже получен» was said of a month closed by «Частично», whose rest is still awaited)
+  await eom.evaluate(() => { const S = window.__cash.state(), it = window.__money.model({ H: 60 }).items.find((x) => x.id === 'c-halden-co@2026-11'); window.__money.write.partial(S, it, 1500, 'x-rest', Date.now(), 'Mika', window.__money.today, '2026-11-20'); });
+  await goCash(eom);
+  await eom.click('.nav [data-tab="today"]');
+  await eom.waitForSelector(F + '[data-wi-panel]');
+  await kind(eom, 'stop');
+  await eom.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
+  ok(/за ноябрь получено £1,500 из £9,750 — этот месяц и его остаток остаются как в плане/.test(await worked(eom)) && !/ноябрь уже получен/.test(await worked(eom)), 'a month closed by «Частично»: the line says how much came, and that the month and its rest stay as the plan has them', await worked(eom));
+  await eom.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

@@ -4732,10 +4732,13 @@ const Trial=(()=>{
  // The first month a new monthly cost can begin in: its day of that month has not passed.
  const firstMonth=(M,day)=>M.T<=ymT(M)+"-"+pad(day)?ymT(M):ymAdd(ymT(M),1);
  const costFrom=(M,c)=>c.from<firstMonth(M,c.day)?firstMonth(M,c.day):c.from;
- // The payments a «придёт позже» moves. One that a later change names alone is that change's, not this one's.
- const moves=(M,c,L)=>{const h=hold(c.row);if(!h||h.k!=="inflows")return[];
-  const own=(L||[]).filter(q=>q&&q!==c&&q.k==="late"&&q.item&&int(q.days)&&q.days>0&&key(q.row)===h.chain).map(q=>q.item);
-  return pays(M,h.chain).filter(it=>c.item?it.id===c.item:!own.includes(it.id));};
+ // The payments a «придёт позже» moves, among the changes `L` it stands with. One that another change names alone
+ // (a valid one) is that change's, not this one's; and a payment that an «уйдёт» of the same client takes away
+ // moves nowhere (`all`: without that second rule - to tell «нет платежа» from «клиент уходит раньше»).
+ const cutOf=(L,chain)=>{const s=(L||[]).filter(q=>q&&q.k==="stop"&&isYm(q.from)&&key(q.row)===chain).pop();return s?s.from:"";};
+ const moves=(M,c,L,all)=>{const h=hold(c.row);if(!h||h.k!=="inflows")return[];
+  const own=(L||[]).filter(q=>q&&q!==c&&q.k==="late"&&q.item&&int(q.days)&&q.days>0&&q.days<=365&&key(q.row)===h.chain).map(q=>q.item),cut=all?"":cutOf(L,h.chain);
+  return pays(M,h.chain).filter(it=>(c.item?it.id===c.item:!own.includes(it.id))&&!(cut&&it.src==="occ"&&it.occ.ym>=cut));};
  // Why a change is not made ("" - it is). Said in its line, and to whoever asked through window.__money.whatIf.
  function dead(M,c,L){
   if(!c||typeof c!=="object")return "это не изменение";
@@ -4743,7 +4746,7 @@ const Trial=(()=>{
   if(c.k==="cost")return !(num(c.amt)&&c.amt>0)?"сумма не вписана":!(int(c.day)&&c.day>=1&&c.day<=28)?"день месяца — от 1 до 28":!isYm(c.from)?"месяц не назван":!acctFor(M,c.cur)?`в плане нет счёта с остатком в ${CURS.includes(c.cur)?c.cur:"этой валюте"}`:"";
   const h=hold(c.row);
   if(!h)return "строки больше нет в плане";
-  if(c.k==="late")return h.k!=="inflows"?"это не поступление":!(int(c.days)&&c.days>0&&c.days<=365)?"не сказано, на сколько дней: от 1 до 365":!moves(M,c,L).length?"платежа, который можно сдвинуть, в плане сейчас нет":"";
+  if(c.k==="late")return h.k!=="inflows"?"это не поступление":!(int(c.days)&&c.days>0&&c.days<=365)?"не сказано, на сколько дней: от 1 до 365":!moves(M,c,L,1).length?"платежа, который можно сдвинуть, в плане сейчас нет":!moves(M,c,L).length?"в этой же пробе клиент уходит раньше":"";
   if(c.k==="stop")return h.k!=="inflows"||!h.r.rec?"эта строка не повторяется":!isYm(c.from)?"месяц не назван":"";
   if(c.k==="draw")return h.k!=="div"||!h.r.rec||h.r.ptax?"эта строка — не ежемесячный вывод":!(num(c.amt)&&c.amt>=0)?"сумма не вписана":!isYm(c.from)?"месяц не назван":!drawAll(M,h.chain,c.from).length?"выводов с этого месяца в плане нет":"";
   return "";
@@ -4773,10 +4776,13 @@ const Trial=(()=>{
  // The plan with a list of changes made to a copy of it. `skip` collects the ones that were not made, and why.
  function planOf(M,list,skip){
   const P=JSON.parse(JSON.stringify(Plan.doc())),now=Date.now(),by=Plan.by(),L=list||changes;
-  // (A list handed in through the script has not been through put(): of two changes of one payment or row the
-  // later is made, as on the screen, and the earlier is named among those that were not.)
-  const live=L.map(c=>{try{return !dead(M,c,L);}catch(e){return false;}});
-  L.forEach((c,i)=>{let why="";try{why=dead(M,c,L)||(L.some((d,j)=>j>i&&live[j]&&clash(d,c))?"его место заняло следующее изменение той же строки":"");if(!why)apply(P,M,c,L,now,by);}catch(e){why="не получилось применить";}if(why&&skip)skip.push({i,why});});
+  // (A list handed in through the script has not been through put(). It is reduced here the way put() would have
+  // reduced it - a change that could be pressed takes the place of the earlier ones it clashes with - and only
+  // what is left is made, and shields: a change named as replaced shields nothing.)
+  const gone=L.map(()=>false),ok=c=>{try{return !dead(M,c,[]);}catch(e){return false;}};
+  L.forEach((d,j)=>{if(ok(d))for(let i=0;i<j;i++)if(clash(d,L[i]))gone[i]=true;});
+  const K=L.filter((c,i)=>!gone[i]);
+  L.forEach((c,i)=>{let why="";try{why=gone[i]?(dead(M,c,[])||"его место заняло следующее изменение той же строки"):dead(M,c,K);if(!why)apply(P,M,c,K,now,by);}catch(e){why="не получилось применить";}if(why&&skip)skip.push({i,why});});
   return P;
  }
  const modelOf=(M,list,skip)=>Live.compute(ledIn(),planOf(M,list,skip),M.T,{H:M.H});
@@ -4797,7 +4803,8 @@ const Trial=(()=>{
  // the change is not made now. A line never denies the row «Можно вывести» beside it: what lies beyond the days
  // of the chip and inside the sixty that figure looks at is said (also).
  function words(M,c,L){
-  const why=dead(M,c,L),h=c.k==="cost"?null:hold(c.row),H=M.H,end=M.end,fr=far(M),wide=fr>end,off=why?{meta:"это изменение сейчас не считается: "+why,off:true}:null;
+  // (Sixty days only where the page names «Можно вывести»: with no sum named the trial sees the chip's days.)
+  const why=dead(M,c,L),h=c.k==="cost"?null:hold(c.row),H=M.H,end=M.end,fr=M.free&&!NOSUM[M.free.why]?far(M):end,wide=fr>end,off=why?{meta:"это изменение сейчас не считается: "+why,off:true}:null;
   const also=t=>t?` · дальше ${H} дней, но в 60 днях, на которые смотрит «Можно вывести»: ${t}`:"",mid=l=>wide?l.filter(it=>it.day>end&&it.day<=fr):[];
   if(c.k!=="cost"&&!h)return{say:"строки больше нет в плане",meta:"это изменение не считается",off:true};
   if(c.k==="late"){
@@ -4808,14 +4815,20 @@ const Trial=(()=>{
    return{say,meta:(inH.length?`${inH.length} ${plural(inH.length,"платёж","платежа","платежей")} в ближайшие ${H} дней · ${inH.map(arrow).join(" · ")}`:`в ближайшие ${H} дней его платежей нет`)+also(mid(its).map(arrow).join(" · "))};}
   if(c.k==="stop"){
    const say=`${nm(h.r)} уйдёт с ${monG(c.from)}`;if(off)return Object.assign({say},off);
-   const ahead=pays(M,h.chain).filter(it=>it.src==="occ"&&it.occ.ym>=c.from),all=pays(M,h.chain).filter(it=>it.day<=end),lost=ahead.filter(it=>it.day<=end),more=mid(ahead),sum=l=>l.reduce((a,it)=>a+Math.abs(it.cash),0);
-   // A payment of his that is overdue is still counted - today - in the plan and in the trial alike.
-   const late=M.items.filter(it=>it.list==="inflows"&&it.src!=="tax"&&ik(it)===h.chain&&it.open&&it.day&&it.state==="late"),kept=came(M,h.chain,c.from);
+   // What will not come is every counted month from `from` on - an overdue one too: the copy has none of them.
+   // An overdue payment of an earlier month is still counted, today, in the plan and in the trial alike.
+   const cnt=M.items.filter(it=>it.list==="inflows"&&it.src==="occ"&&ik(it)===h.chain&&it.open&&it.day).sort(byDay),ahead=cnt.filter(it=>it.occ.ym>=c.from);
+   const all=pays(M,h.chain).filter(it=>it.day<=end),lost=ahead.filter(it=>it.day<=end),more=mid(ahead),sum=l=>l.reduce((a,it)=>a+Math.abs(it.cash),0),late=cnt.filter(it=>it.state==="late"&&it.occ.ym<c.from);
+   // The months from `from` on that have come stay: one that came whole, and one that «Частично» closed - with
+   // its rest, which is a row of its own and is not touched.
+   const keptI=occs(M,h.chain,c.from).filter(it=>it.state==="done").sort((x,y)=>x.occ.ym<y.occ.ym?-1:1),isPart=it=>!!(it.done&&it.done.note==="partial"),kept=keptI.filter(it=>!isPart(it)).map(it=>it.occ.ym),part=keptI.filter(isPart);
+   const owes=late.length?`его просроченный платёж (${fmt(sum(late))}) остаётся в расчёте — о нём спрашивает «Нужно решить»`:"";
    const same=heads("inflows").filter(q=>q.chain!==h.chain&&nmOf(q.r).toLowerCase()===nmOf(h.r).toLowerCase()&&q.r.on!==false).length;
-   return{say,meta:(lost.length?`не ${plural(lost.length,"придёт","придут","придут")} ${lost.length} ${plural(lost.length,"платёж","платежа","платежей")} · ${fmt(sum(lost))} за ${H} дней`
-      :late.length?`его просроченный платёж (${fmt(sum(late))}) остаётся в расчёте — о нём спрашивает «Нужно решить»; других его платежей в эти ${H} дней нет`
-      :all.length?`его платежи с ${monG(c.from)} в эти ${H} дней не попадают`:`в ближайшие ${H} дней его платежей и так нет`)
+   return{say,meta:(lost.length?`не ${plural(lost.length,"придёт","придут","придут")} ${lost.length} ${plural(lost.length,"платёж","платежа","платежей")} · ${fmt(sum(lost))} за ${H} дней${owes?"; "+owes:""}`
+      :all.length?`его платежи с ${monG(c.from)} в эти ${H} дней не попадают${owes?"; "+owes:""}`
+      :owes?`${owes}; других его платежей в эти ${H} дней нет`:`в ближайшие ${H} дней его платежей и так нет`)
      +(kept.length?` · ${and(kept.map(monN))} уже ${kept.length>1?"получены — эти месяцы остаются":"получен — этот месяц остаётся"}`:"")
+     +part.map(it=>` · за ${monN(it.occ.ym)} получено ${money(+it.done.got||0,it.cur)} из ${money(it.amt*(it.factor||1),it.cur)} — этот месяц и его остаток остаются как в плане`).join("")
      +also(more.length?`не ${plural(more.length,"придёт","придут","придут")} ещё ${more.length} ${plural(more.length,"платёж","платежа","платежей")} на ${fmt(sum(more))}`:""),
     note:"Клиент уходит, а расходы на его команду остались в расчёте: страница не знает, кто на нём работает. Его разовые счета тоже остались."+(same?" В плане есть и другие строки с этим названием — проба убирает одну, они остаются.":"")};}
   if(c.k==="cost"){
@@ -4919,23 +4932,24 @@ const Trial=(()=>{
  const tell=r=>r.rec?`${+r.rec.day}-го, ${money(+r.amt||0,r.cur)}`:`${r.date?dRu(r.date)+", ":""}${money(+r.amt||0,r.cur)}`;
  const named=hs=>{const n={};hs.forEach(h=>{const k=nmOf(h.r).toLowerCase();n[k]=(n[k]||0)+1;});return hs.map(h=>[h.chain,nmOf(h.r)+(n[nmOf(h.r).toLowerCase()]>1?" · "+tell(h.r):"")]);};
  const monthOpts=M=>months(M).map(m=>[m,`с ${monG(m)} ${m.slice(0,4)}`]);
- const lead=()=>changes.length?"и ":"Что если ",line=(M,d)=>{const w=words(M,d,[]);return lead()+w.say+(w.meta?" · "+w.meta:"");};
+ const lead=()=>changes.length?"и ":"Что если ",stops=()=>changes.filter(q=>q.k==="stop"),line=(M,d)=>{const w=words(M,d,stops());return lead()+w.say+(w.meta?" · "+w.meta:"");};
  function composer(M,o){
   if(!draft)draft=fresh(M,kind0(M,o),o);heal(M);
-  const d=draft,ms=monthOpts(M),val=v=>v==null?"":esc(v);let f="";
-  if(d.k==="late")f=fld("Клиент",`<select data-wi-f="row">${opt(named(clients(M)),d.row)}</select>`)
+  // (In a row's card a question about that row has no list of rows to choose another from: the card is the row's.)
+  const d=draft,ms=monthOpts(M),val=v=>v==null?"":esc(v),own=!!(o&&d.k!=="cost"&&key(d.row)===o.row);let f="";
+  if(d.k==="late")f=(own?"":fld("Клиент",`<select data-wi-f="row">${opt(named(clients(M)),d.row)}</select>`))
    // (The payment a card was opened on is offered also when it lies beyond the days the page looks at: the fields
    // must be able to show what the change holds.)
    +fld("Какой платёж",`<select data-wi-f="item">${opt([["","все платежи"]].concat(pays(M,d.row).filter(it=>it.day<=M.end||it.id===d.item).map(it=>[it.id,`только ${waits(it)?"платёж ":""}${whenF(M,it)} · ${fmt(Math.abs(it.cash))}`])),d.item)}</select>`)
    +fld("На сколько дней позже",`<input data-wi-f="days" type="number" min="1" max="365" inputmode="numeric" value="${val(d.days)}" placeholder="30">`);
-  if(d.k==="stop")f=fld("Клиент",`<select data-wi-f="row">${opt(named(repeats(M)),d.row)}</select>`)+fld("С какого месяца",`<select data-wi-f="from">${opt(ms.slice(1),d.from)}</select>`);
+  if(d.k==="stop")f=(own?"":fld("Клиент",`<select data-wi-f="row">${opt(named(repeats(M)),d.row)}</select>`))+fld("С какого месяца",`<select data-wi-f="from">${opt(ms.slice(1),d.from)}</select>`);
   if(d.k==="cost")f=fld("Сколько в месяц",`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${val(d.amt)}">`)
    +fld("Валюта",`<select data-wi-f="cur">${opt(curs(M).map(c=>[c,c]),d.cur)}</select>`)
    +fld("День месяца",`<input data-wi-f="day" type="number" min="1" max="28" inputmode="numeric" value="${val(d.day)}">`)
    +fld("С какого месяца",`<select data-wi-f="from">${opt(ms.filter(m=>m[0]>=firstMonth(M,d.day)),d.from)}</select>`)
    +fld("Название",`<input data-wi-f="name" value="${val(d.name)}" placeholder="например, дизайнер" autocomplete="off">`,true);
   if(d.k==="draw"){const dr=draws(M),cur=drawCur(M,d.row,d.from);
-   f=(dr.length>1?fld("Какой вывод",`<select data-wi-f="row">${opt(named(dr),d.row)}</select>`):"")
+   f=(dr.length>1&&!own?fld("Какой вывод",`<select data-wi-f="row">${opt(named(dr),d.row)}</select>`):"")
     +fld("Сколько выводить в месяц"+(cur!=="GBP"?", "+cur:""),`<input data-wi-f="amt" type="number" min="0" step="any" inputmode="decimal" value="${val(d.amt)}">`)
     // (From the first month that is still to be taken: a month taken in full is not offered.)
     +fld("С какого месяца",`<select data-wi-f="from">${opt(ms.filter(m=>m[0]>=drawFrom(M,d.row,ymT(M))),d.from)}</select>`);}
@@ -4959,6 +4973,8 @@ const Trial=(()=>{
   const endB=`<div class="row"><button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`;
   if(!can(M))return wrap(`<p class="note" style="margin:0">Проба считает от остатков на счетах и от плана. Пока вписано не всё, сравнивать не с чем.</p>${n?`<span class="wi-meta">В пробе ${n} ${plural(n,"изменение","изменения","изменений")}: ${plural(n,"оно посчитается","они посчитаются","они посчитаются")}, когда будет от чего считать.</span>${endB}`:""}`);
   const org=item?rowOf(M,item):null,any=kinds(M,org).length;
+  // (The card was turned over, and then its payment came or its row went: no question about another row here.)
+  if(item&&!org)return wrap(`<p class="note" style="margin:0">Про эту строку спрашивать больше нечего.</p>${n?listed(M)+endB+`<div class="wi-ans">${answer(M)}</div>`:""}`);
   if(!any&&!n)return wrap(`<p class="note" style="margin:0">Пробовать пока нечего: в плане нет ни клиентов с платежами впереди, ни счёта с остатком.</p>`);
   const more=any?`<button type="button" class="sm" data-wi-more>+ и ещё…</button>`:"";
   const ask=`<div class="wi-q">Что если…</div>${listed(M)}`+((draft||!n)&&any?composer(M,org):`<div class="row">${more}<button type="button" class="sm ghost" data-wi-end>Закончить пробу</button></div>`);
@@ -5002,7 +5018,7 @@ const Trial=(()=>{
    if(d.k==="late"&&!(d.days>0))return toast("Впишите, на сколько дней позже: от 1 до 365");
    if((d.k==="cost"&&!(d.amt>0))||(d.k==="draw"&&d.amt==null))return toast("Впишите сумму в месяц");
    if(d.k==="draw"){const its=drawIts(M,d.row,d.from);if(its.length&&its.every(it=>Math.abs((+it.amt||0)-d.amt)<0.005))return toast("В плане на эти месяцы та же сумма — впишите другую");}
-   const why=dead(M,d,[]);if(why)return toast(why[0].toUpperCase()+why.slice(1));
+   const why=dead(M,d,stops());if(why)return toast(why[0].toUpperCase()+why.slice(1));
    delete d.pick;draft=null;const gone=put(d);redraw();if(gone)toast("Прежнее изменение для этой строки заменено новым.");return;}
   if(c("[data-wi-cancel]")){draft=null;return redraw();}
   if(c("[data-wi-more]")){
