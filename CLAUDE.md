@@ -308,6 +308,22 @@ a deploy:
   document, beside the typed rates `fx`, which stay as they are for the days
   before the table began). **A change to how the page counts must keep this**:
   the check `rv-rates` moves today's rate and holds every figure of the past.
+- **A mark on a withdrawal remembers the plan** (13 October 2026). Which
+  ledger rows a withdrawal holds is decided by a walk over every withdrawal
+  that stands before it, so a change to another line used to deal old rows
+  into a marked withdrawal or out of it, and «Денег сейчас» moved with
+  nothing new from the bank. «Оплачено» and «Частично» on a withdrawal now
+  store, beside the mark, the lines that stood before it (`paid.saw`: owners,
+  windows, sums - no ledger row, no sum taken), and a marked withdrawal is
+  dealt against those lines as they were. Two halves, and **a change to how
+  withdrawals are dealt must keep both**: while the plan is unchanged the
+  page counts exactly as it would without the memory, whatever the ledger
+  does; and a change to another line never moves a marked withdrawal. A
+  marked withdrawal that changes hands has its mark look again in the same
+  save - `Plan.edit` calls `Live.write.resee` - so a writer that changes
+  `whose` must go through `Plan.edit`. A mark without `paid.saw` (made by a
+  page from before) is read as marks always were. The check `rv-wdmark`
+  holds each of these, and `docs/handoff.md`, rule 4, says them in words.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
   `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
   `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them
