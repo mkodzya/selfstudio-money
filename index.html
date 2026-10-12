@@ -2846,6 +2846,12 @@ const Cash=(()=>{
 //    paid           {on:"YYYY-MM-DD", at:ms, by, amt?, ok?, legacy?} — a hand mark: «Оплачено» / «Получено». With
 //                   amt it is «Частично»: so much was paid (in cur, the tax on top included) and the line is closed
 //                   at that; the rest was written as a row of its own (carry). `true` (an old tab) reads as legacy
+//    paid.saw       on a withdrawal, since 13 October 2026: what the mark remembers - {from, to, rows:[[ref, gbp]…]}:
+//                   the withdrawal's window when the mark was made, and every founder's row the page then showed in
+//                   it, with the pounds of it this withdrawal held (0: a taking that was not this withdrawal's).
+//                   `ref` is a hash of the statement's own key for the row - the same when the statement is read
+//                   in again - or "#"+id for a row without one. null: the withdrawal has changed hands, and the
+//                   mark is to look again (write.resee). Absent: a mark from before, read as it always was
 //    carry:{ym}     what is left of a line of the month `ym` that was paid in part, written by «Частично»: a one-off
 //                   row on the day the founder named for the rest. With that date it is counted like any dated row —
 //                   but it is never «the month's own row» of its label, and a payment that fits both it and that row
@@ -2918,7 +2924,12 @@ const Cash=(()=>{
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it. `on` is
 //                                  the day the founder says it was paid: today — or, for a line older than its
-//                                  account's balance that he says is inside that balance, the line's own date
+//                                  account's balance that he says is inside that balance, the line's own date.
+//                                  On a withdrawal the mark also remembers its rows (paid.saw, from item.saw), and
+//                                  so does «Частично»
+//  resee(P, led, T)                the marks whose withdrawal has changed hands (paid.saw: null - `set` with v.whose
+//                                  leaves it so) look again: each remembers the takings as the page shows them now.
+//                                  The one writer that reads the ledger; Plan.edit calls it after every change
 //  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
 //                                  new row (id) dated `date`, the day the founder named — «{name} — остаток с
 //                                  {октября}», carry:{ym}, no mon, the same list, link and VAT; a one-off row even
@@ -2987,6 +2998,18 @@ const Cash=(()=>{
 //    it has over passes on in that order, and what finds no withdrawal stays outside the plan. What is not taken
 //    by the end of the window (as the statements of its bank reach it) is dropped. Never late or missed, never in
 //    a card.
+//    A MARKED withdrawal («Оплачено», «Частично») has been taken, the founder says, and its mark is worth what its
+//    rows leave of the sum said. It is dealt before the others, and by its mark's memory (paid.saw), not by the
+//    walk: 1 the rows the page counted in it when the mark was made give it what they gave then, and no more -
+//    whatever is done to other lines; one that is gone or is no longer its taking gives nothing, and the mark
+//    covers its share; 2 a row that is new to the mark - uploaded after it, or on the page then but not as a
+//    taking (in «Разбор», in another block) - and dated no later than a week after the mark's day takes the
+//    mark's place before it goes to any other withdrawal; 3 nothing else is ever its: not a founder's row the
+//    page already showed and did not count in it, not a taking made later than that week. So what a marked
+//    withdrawal holds - and «Денег сейчас» with it - does not depend on the lines that are not marked. Saying
+//    whose a marked withdrawal is makes its mark look again, as if it were made after the choice: the two orders
+//    write one plan. A mark from before 13 October 2026 has no memory and is read as it was: its withdrawal takes
+//    rows by the walk, and what the mark is worth moves with every deal.
 //  ONE-OFF ROWS (E3)  a row uploaded after the line was written, not more than ten days early, of its label (or its
 //    block, for an unlinked line — and never a payment whose own label has ever been a series): 1 within tolerance
 //    (in ±2%, min £2; out −2% … +5%; ±6% across currencies) → the oldest such line; 2 the invoice with the tax on
@@ -3144,6 +3167,9 @@ const Cash=(()=>{
 //    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
 //                                  the plan document); dated, or — in a plan from before — without a date
 //    wd                            for a withdrawal: {from, to, got} — its window and what was taken (native)
+//    saw                           for a dated withdrawal that is not closed: what a mark made now would remember
+//                                  (paid.saw.rows) - [[ref, gbp]…], every founder's row dated in its window and the
+//                                  pounds of it this withdrawal holds. Also given while a mark is to look again
 //    whose                         for a withdrawal: the founder whose it is, "" when it is everybody's
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
@@ -3289,6 +3315,22 @@ const Cash=(()=>{
 //    вывести», the month's blocks and every sum of `div` are still one figure for the studio - nothing in the model
 //    is per founder. Two rows of one name are still one payment to «каждый месяц» and to «Продублировать», whoever
 //    they belong to (twins are by name).
+//  · A mark on a withdrawal remembers its rows (13 October 2026; the fault is older than «Чей вывод», which made it
+//    an everyday one). The design has a marked withdrawal go on taking rows like any other, and its mark worth what
+//    they leave: so every deal made over - a row deleted or re-filed, a plan row moved or deleted, a withdrawal
+//    given to a founder - could put a row the page had long shown into the marked withdrawal, or take one out, and
+//    «Денег сейчас» moved with nothing new from the bank. A fixed sum on the mark (paid.had, tried and withdrawn
+//    on 12 October) counted one bank row in two withdrawals. What is kept now is WHICH rows the mark saw, and how
+//    much of each was this withdrawal's (D2 above). Three things follow that the design does not say. A marked
+//    withdrawal has first claim on a row that is new to it, before the founder's own unmarked withdrawals and the
+//    earlier ones: as E6 and R7 give a marked line the row that then shows it - and without it a new row dated
+//    inside an earlier, full withdrawal pushed an old row out, which could no longer take the mark's place.
+//    Under a mark that remembers, «Частично» is the limit of what new rows give, and a taking dated more than a
+//    week after the mark's day is not the marked withdrawal's at all: the rest is a row of its own, and it is
+//    what later takings use up (without a memory the withdrawal still takes rows up to its whole sum, to the end
+//    of its window, as it did - so the rest «Частично» wrote got them or not by which of the two was dated
+//    earlier). And an old row from outside the window the mark had is never new to it, whatever is done to the
+//    window since.
 //  · «под налоги сейчас» (taxes.reserve) is the reserve from facts and from lines marked received — the design's
 //    RES[T−1] plus what a mark made today accrues: that money is in «сейчас» already.
 //  · A marked month of a repeating row keeps first claim on the row uploaded after the mark and dated on.−3 … +7,
@@ -3421,7 +3463,7 @@ const Live=(()=>{
   // it belongs to the bank's pound account, which «Вписать остаток» can fill, not to an account nobody can type.
   const cur3=c=>CURS.includes(c)?c:"GBP";
   const row=(r,inbox)=>{const o=r.o&&isFinite(+r.o.a)?{a:+r.o.a,cur:cur3(r.o.cur)}:null,a=inbox?r2((+r.a||0)*sg(r)):+r.a||0;
-   return{id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0};};
+   return{id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0,k:r.key==null?"":String(r.key)};};
   const pool=txs.filter(r=>r.c&&r.c!=="skip").map(r=>row(r,false)).concat(inb.filter(isProv).map(r=>row(r,true))).sort(byDate);
   const poolIds=new Set(pool.map(r=>r.id)),anyRow={};all.forEach(r=>{anyRow[String(r.id)]=r;});
   const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:r.c==="skip"||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,""),bal:isFinite(r.o.bal)&&r.o.bal!==null&&+r.o.balAt>0?+r.o.bal:null,balAt:+r.o.balAt||0,balIn:+r.o.balIn||+r.o.balAt||0})).sort(byDate);
@@ -3770,15 +3812,60 @@ const Live=(()=>{
   // With no owner anywhere that order is `wds` itself, and the plan reads to the penny as it did.
   const wds=items.filter(it=>it.wd&&it.date).sort(byItem),wdOf={};
   FOUNDERS.forEach(k=>{wdOf[k]=wds.filter(it=>it.whose===k).concat(wds.filter(it=>!it.whose));});
-  // (Known, and older than «Чей вывод»: a withdrawal that carries a hand mark goes on taking rows, and what the
-  // mark is worth is what they leave. So a deal made over - a row deleted or moved, a withdrawal given to a
-  // founder - can change «Денег сейчас» until a statement passes the mark's day. A mark that remembered a fixed
-  // sum was tried on 12 October 2026 and withdrawn the same day: it counted one bank row in two withdrawals. The
-  // card says it when a choice of owner moves the figure - Ed.rowSave.)
-  wds.forEach(it=>{const n=it.src==="occ"?nextOf(it):null;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);});
-  if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);
-   for(const it of wdOf[f.c]){if(left<0.005)break;if(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1)continue;
-    const open=gbp(it.amt,it.cur)-it.gotG;if(open<0.005)continue;const take=Math.min(left,open);it.gotG+=take;left-=take;it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);}});
+  // «Оплачено» on a withdrawal says it has been taken - in full, or («Частично») to the sum named - and the mark is
+  // worth what its rows leave of that. So the rows must not be dealt over under it, or «Денег сейчас» moves with
+  // nothing new from the bank. A mark made since 13 October 2026 therefore remembers what the page showed as
+  // takings in the withdrawal's window when it was made (paid.saw: every founder's row of those days, by the
+  // statement's own key, and how much of each this withdrawal held), and from then on:
+  //   1. those rows are the mark's own. Each gives the withdrawal what it gave then and no more, before anything
+  //      else is dealt - whatever is done to the other lines of the plan, and whoever they belong to (its window
+  //      as it is today is not asked: a month's window ends where the next month's begins, and that month is
+  //      another line). One that is gone, or is no longer a taking this withdrawal may count - filed elsewhere,
+  //      another founder's than the withdrawal's - gives nothing, and the mark covers its share; read in again -
+  //      another id, the same key - it gives it back;
+  //   2. a row that is new to the mark - uploaded after it, or on the page then but not as a taking (unsorted in
+  //      «Разбор», filed in another block) - and dated no later than a week after the mark's day takes the mark's
+  //      place before it goes anywhere else: like any marked line, a marked withdrawal has first claim on the row
+  //      that then shows it;
+  //   3. nothing else is this withdrawal's. A founder's row that the page already showed and did not count in it
+  //      is not what «Оплачено» was said of - wherever a later deal leaves that row; and neither is a taking made
+  //      more than a week after the day it was said to be paid.
+  // What a marked withdrawal holds is so a matter of its own row, its mark and the table, and never of the lines
+  // that are not marked. A mark without a memory - any made before that day, and one whose withdrawal has changed
+  // hands and has not looked again (paid.saw: null, see write.resee) - is read as it always was: the withdrawal
+  // goes on taking rows by the walk above, and what its mark is worth moves with every deal.
+  // (The mark's place is what was said to be paid and no row holds yet: of the whole sum - or of the sum «Частично»
+  // named: the rest is a row of its own, and once the line has had what was said no further row is its.)
+  const refOf=f=>f.k?hash(f.k):"#"+f.id,capOf=it=>gbp(it.amt,it.cur),placeOf=it=>(it.pamt!=null?Math.min(capOf(it),gbp(it.pamt,it.cur)):capOf(it))-it.gotG;
+  const memOf=it=>{const p=it.paid,s=p&&!word(it)&&obj(p.saw)?p.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to))return null;
+   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length)had.set(String(x[0]),Math.max(0,+x[1]||0));});return{from:s.from,to:s.to,at:+p.at||0,till:plus(p.on,7),had};};
+  wds.forEach(it=>{const n=it.src==="occ"?nextOf(it):null;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.mem=memOf(it);it.took=new Map();it.m0=it.match.length;});
+  // The takings: the rows of the founders' blocks that a bank gave a sum for. `w` is what a row has left to give.
+  const takers=pool.filter(f=>FOUNDERS.includes(f.c)&&f.o&&!f.ret),avail=takers.filter(f=>!used.has(f.id)),mems=wds.filter(it=>it.mem);
+  takers.forEach(f=>{f.ref=refOf(f);f.w=Math.abs(f.a);});
+  const its=(it,f)=>canPay(it)&&!word(it)&&f.at>it.c0&&!it.notx.includes(f.id),may=(it,f)=>its(it,f)&&f.d>=it.w0&&f.d<=it.w1;
+  const hold=(it,f,take)=>{it.gotG+=take;f.w-=take;it.took.set(f.ref,(it.took.get(f.ref)||0)+take);if(!it.match.includes(f.id))it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);};
+  // New to a mark: not among the rows it remembers, and either uploaded after it or dated in the window it then
+  // had (so it was on the page, and not as a taking). An older row from outside that window is neither: the mark
+  // cannot tell what it was, and a row that may have been counted already never takes a mark's place. And dated
+  // no later than a week after the mark's day - the days any mark is given its row (E6): «Оплачено» was said of
+  // what had been taken by then, and a taking made later is another one - the next withdrawal's, or the rest's
+  // that «Частично» wrote.
+  const isNew=(it,f)=>!it.mem.had.has(f.ref)&&f.d<=it.mem.till&&(f.at>it.mem.at||(f.d>=it.mem.from&&f.d<=it.mem.to));
+  if(mems.length){const once=new Set();
+   avail.forEach(f=>{if(once.has(f.ref))return;once.add(f.ref);mems.forEach(it=>{const h=it.mem.had.get(f.ref);if(!h||(it.whose&&it.whose!==f.c)||!its(it,f))return;
+    const take=Math.min(h,f.w,capOf(it)-it.gotG);if(take>=0.005)hold(it,f,take);});});
+   avail.forEach(f=>{for(const it of wdOf[f.c]){if(f.w<0.005)break;if(!it.mem||!may(it,f)||!isNew(it,f))continue;
+    const take=Math.min(f.w,placeOf(it));if(take>=0.005)hold(it,f,take);}});}
+  // … and the rest by the walk, among the withdrawals no mark remembers for.
+  if(wds.length)avail.forEach(f=>{for(const it of wdOf[f.c]){if(f.w<0.005)break;if(it.mem||!may(it,f))continue;
+    const open=capOf(it)-it.gotG;if(open<0.005)continue;hold(it,f,Math.min(f.w,open));}});
+  // (The rows of a withdrawal are listed oldest first, however many passes dealt them.)
+  if(mems.length){const ord=new Map(pool.map((f,i)=>[f.id,i]));mems.forEach(it=>{it.match=it.match.slice(0,it.m0).concat(it.match.slice(it.m0).sort((a,b)=>ord.get(a)-ord.get(b)));});}
+  // What a mark made now would remember: the takings dated in the window, and what this withdrawal holds of each -
+  // to the last digit, not to the penny: dealt again from what it remembers, the withdrawal must hold exactly what
+  // it held, and a withdrawal in another currency leaves a row with a sum that is not whole pence.
+  const sawOf=it=>{const out=[],u=new Set();takers.forEach(f=>{if(f.d<it.w0||f.d>it.w1||u.has(f.ref))return;u.add(f.ref);out.push([f.ref,it.took.get(f.ref)||0]);});return out;};
   // Done when what is left is nothing to speak of — or when the statements of its bank reach the end of its
   // window: what was not taken by then is dropped, in words «взято £6,000 из £10,000», never carried as late.
   wds.forEach(it=>{if(!canPay(it))return;const t=gbp(it.amt,it.cur),lo=tol(t,-1)[0],got=r2(nat(it.gotG,it.cur));
@@ -4428,7 +4515,7 @@ const Live=(()=>{
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
     mark:p?{on:isD(p.on)?p.on:"",at:+p.at||0,by:String(p.by||""),counts:!!it.counts,cov:it.markCov||"",amt:it.pamt!=null?r2(it.pamt):null}:null,part:it.got>0&&!d?{got:r2(it.got),of:r2(it.amt*it.vk)}:null,hint:it.hint,rows:it.match.slice(),fixed:it.fixed,c0:it.c0,who:it.who,
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
-    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
+    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,saw:it.wd&&it.w0&&(!d||(p&&p.saw===null))?sawOf(it):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
@@ -4482,9 +4569,17 @@ const Live=(()=>{
  const fields=(r,v,inflow)=>{["name","cur","bank"].forEach(f=>{if(v[f]!==undefined)r[f]=v[f];});if(v.amt!==undefined)r.amt=+v.amt||0;if(v.vat!==undefined&&inflow)r.vat=!!v.vat;};
  // «это подписка»: said of a row of «Прочие расходы», and of no other list. Like the name it is the row's, not a month's.
  const subOf=(r,v,k)=>{if(v.sub===undefined||k!=="other")return;if(v.sub)r.sub=true;else delete r.sub;};
+ // What a mark on a withdrawal remembers (paid.saw): the takings the page showed in its window when it was made,
+ // as the model lists them (item.saw). A line that is no withdrawal, or has no date, remembers nothing.
+ const memo=it=>Array.isArray(it.saw)&&obj(it.wd)&&isD(it.wd.from)&&isD(it.wd.to)?{saw:{from:it.wd.from,to:it.wd.to,rows:it.saw}}:{};
+ // A withdrawal that changes hands is another withdrawal to its mark: other rows may be its now. What the mark
+ // remembered is put aside (null - read as a mark without a memory) until it has looked again: write.resee, which
+ // Plan.edit calls in the same change. A mark that never had a memory gets none.
+ const marksOf=r=>[r.paid].concat(obj(r.rec)&&obj(r.rec.x)?Object.keys(r.rec.x).map(k=>obj(r.rec.x[k])?r.rec.x[k].paid:null):[]).filter(obj);
+ const again=r=>marksOf(r).forEach(p=>{if(p.saw!==undefined)p.saw=null;});
  // «Чей вывод»: said of a withdrawal, and of no other row. Like the name it is the row's, not a month's; nobody's
  // is no key at all. Nothing here reads the name: a row called «Vanya» is everybody's until somebody says whose.
- const whoseOf=(r,v,k)=>{if(v.whose===undefined||k!=="div"||r.ptax)return;if(FOUNDERS.includes(v.whose))r.whose=v.whose;else delete r.whose;};
+ const whoseOf=(r,v,k)=>{if(v.whose===undefined||k!=="div"||r.ptax)return;const was=FOUNDERS.includes(r.whose)?r.whose:"";if(FOUNDERS.includes(v.whose))r.whose=v.whose;else delete r.whose;if((r.whose||"")!==was)again(r);};
  // A repeating row that «… и дальше» split is several stored rows of one chain - one line through time. Whose it is
  // goes to every one of them when it is said of a month («Только {месяц}», the card of a closed month), and with
  // `from` to the parts that begin in that month or later («{Месяц} и дальше»).
@@ -4529,8 +4624,19 @@ const Live=(()=>{
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
     if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
-  mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
+  mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid=Object.assign({on,at,by},memo(it));},
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
+  // The marks that are to look again (paid.saw: null - their withdrawal has changed hands): each remembers the
+  // takings as the page shows them now, as a mark made this minute would, and keeps its own day and moment. So
+  // «Оплачено» and then «Чей вывод» is the plan that «Чей вывод» and then «Оплачено» writes. The one hand that
+  // reads more than the plan: `led` is the ledger and T the day, and it works the model out - and writes nothing
+  // but those memories. Returns how many looked.
+  resee(P,led,T){const todo=[];(Array.isArray(P.div)?P.div:[]).forEach(r=>{if(obj(r))marksOf(r).forEach(p=>{if(p.saw===null)todo.push(p);});});
+   if(!todo.length)return 0;let n=0;
+   compute(led,P,T).items.forEach(it=>{const m=memo(it).saw;if(!m)return;const s=slot(P,it),p=s&&s.paid;if(obj(p)&&p.saw===null){p.saw=m;n++;}});
+   // (One that has no line to look at - its month is further back than the page writes months out - stays a mark
+   // without a memory, and is not asked again.)
+   todo.forEach(p=>{if(p.saw===null)delete p.saw;});return n;},
   // «Не придёт» / «Не платим» / the tick taken off: a row is switched off, a month of a repeating row is switched
   // off for that month alone, a computed tax is «не платим».
   off(P,it){const s=slot(P,it,true);if(!s)return;if(it.src==="tax")s.none=true;else if(it.src==="occ")s.off=true;else s.on=false;},
@@ -4549,7 +4655,7 @@ const Live=(()=>{
   // after the line it was said of — which is what a plan from before may hold. Returns the new row.
   partial(P,it,got,id,now,by,on,date){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
    const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,day=isD(date)?date:"",from=day&&obj(r.carry)&&isM(r.carry.ym)?r.carry.ym:"";
-   s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
+   s.paid=Object.assign({on,at:now,by,amt:g},memo(it));if(!(rest>0))return null;
    const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
    ["sk","skBy","vat","ptax","f","whose","sub"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
@@ -4660,8 +4766,9 @@ window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vat
 // ---------- the plan, as every tab reaches it ----------
 // The plan document lives inside Cash, which loads it and saves it under its own revision. This is the one door to
 // it. doc() is the document; model() the forecast worked out from it and the ledger, for today; edit(label, fn) one
-// change — a copy kept for «Отменить», fn(plan, now, who) changing the document in place, the save, and every tab
-// that shows the plan redrawn. A tab asks to be redrawn by watch(fn): fn runs after every change, and whenever one
+// change — a copy kept for «Отменить», fn(plan, now, who) changing the document in place (and, where the change gave
+// a marked withdrawal to another founder, its mark looking at its rows again - Live.write.resee - so that the two are
+// one save), the save, and every tab that shows the plan redrawn. A tab asks to be redrawn by watch(fn): fn runs after every change, and whenever one
 // of the editing cards below opens or closes. «Касса» is such a tab like «Сегодня»; the one thing it does past this
 // door is a keystroke in a row of a month, which it writes and saves itself so as not to be redrawn under the
 // cursor. H is how far ahead to look, 30 or 60 days — a habit of whoever is looking, so it is kept in the browser
@@ -4678,7 +4785,7 @@ const Plan=(()=>{
   // is made, in the same breath that used to answer «Сохранено»: lost() says so and is true. Every hand that
   // changes the plan asks it first, and answers in its own words only after edit() has returned true.
   lost(){if(RO){toast(RO_SAY);return true;}if(Cash.status()!=="stale")return false;toast(LOST);return true;},
-  edit(label,fn){const P=Cash.plan();if(!P||this.lost())return false;Cash.snap(label);fn(P,Date.now(),who);Cash.changed();redraw();return true;},
+  edit(label,fn){const P=Cash.plan();if(!P||this.lost())return false;Cash.snap(label);fn(P,Date.now(),who);Live.write.resee(P,ledIn(),Live.today());Cash.changed();redraw();return true;},
   undo(){Cash.undo();}};
 })();
 Plan.watch(()=>Cash.draw());
@@ -5237,9 +5344,11 @@ const Ed=(()=>{
  // it carries data-ed-f, so a reader's page shuts it with every other field.
  const whoseSelect=v=>`<label class="fld" for="ed-whose"><span>Чей вывод</span><select id="ed-whose" data-ed-f="whose">${opt([["","общий"]].concat(FOUNDERS.map(k=>[k,FN[k]])),FOUNDERS.includes(v)?v:"")}</select></label>`;
  const whoseSay=f=>FN[f]?`вывод ${FN[f]}`:"вывод общий";
- // Saying whose a withdrawal is deals the table's rows over. While some withdrawal carries «Оплачено» that no
- // statement has confirmed yet, that can change what its mark stands for, and «Денег сейчас» with it - with nothing
- // new from the bank. It is never silent: the toast names the figure as it now is.
+ // Saying whose a withdrawal is deals the table's rows over. A marked withdrawal is not moved by it (its mark
+ // remembers its rows - Live, D2), with two exceptions, and in both «Денег сейчас» may change with nothing new
+ // from the bank: the withdrawal that changes hands is itself marked - its mark looks again, as if it were made
+ // after the choice; or some withdrawal carries a mark from before 13 October 2026, which has no memory. It is
+ // never silent: the toast names the figure as it now is.
  const nowOf=()=>{const m=Plan.model();return m&&!m.v0&&typeof m.now==="number"?m.now:null;};
  const nowSay=n0=>{const n1=nowOf();return n0!=null&&n1!=null&&Math.abs(n1-n0)>=0.5?` · «Денег сейчас» теперь ${fmt(n1)}: пересчитана отметка «Оплачено» на выводе`:"";};
  // What a name says of whose a NEW withdrawal is: the one founder named in it, in Latin or in Russian - or nobody
