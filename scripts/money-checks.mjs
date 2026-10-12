@@ -6431,21 +6431,19 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   same(chain(R), [['2026-05', '2026-09', 'misha', 1000], ['2026-10', '2026-11', 'vanya', 1000], ['2026-12', '', 'vanya', 1500]], '«Октябрь и дальше» with Vanya: every part from October on is Vanya\'s - the December part too - and the months before stay Misha\'s');
   R = await wr(R, 'onward', await month(R, 'wR3@2026-11'), { amt: 1200 }, 'wR4', TAP, BY);
   same(chain(R).map((x) => x[2]), ['misha', 'vanya', 'vanya', 'vanya'], 'a sum changed «и дальше» moves nobody\'s owner');
-  // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is dealt an old row into the marked one, and «Денег сейчас» and the month\'s fact moved with nothing new from the bank)
-  const MARK = ms('2026-10-13T10:00:00Z'), head = (M) => [M.now, M.month.blocks.div.fact, M.marksGbp];
+  // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is deals an old row into the marked one, and «Денег сейчас» moves with nothing new from the bank. That is how a mark on a withdrawal has always counted - a row deleted or moved does the same - and it is known and left: a mark that remembered a fixed sum was tried and withdrawn the same day, because it counted one bank row in two withdrawals. What is held here: a bank row is counted once, and - on the screen, below - the card says it when the figure moves.)
+  const MARK = ms('2026-10-13T10:00:00Z');
   let Q2 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-12', { blk: 'div' })]) };
   const L2 = ledP({ tx: [filed('m1', '2026-10-09', -2000, 'mika', '', { at: AT })] });
   let Mq = await C(L2, Q2, D);
   same([item(Mq, 'wA').state, item(Mq, 'wA').rows, item(Mq, 'wB').wd.got], ['done', ['m1'], 0], 'Mika\'s 2,000 closes the row called «Vanya»; «Вывод» is untouched');
   Q2 = await wr(Q2, 'mark', item(Mq, 'wB'), D, MARK, BY);
   Mq = await C(L2, Q2, D);
-  const marked = head(Mq);
-  same([Q2.div.find((r) => r.id === 'wB').paid.had, marked[2]], [0, -3000], '«Оплачено» on «Вывод»: the mark remembers that its rows had given nothing, and stands for the whole 3,000');
+  const marked = [Mq.now, Mq.marksGbp];
   Q2 = await wr(Q2, 'set', item(Mq, 'wA'), { whose: 'vanya' }, MARK + 60000, BY);
   Mq = await C(L2, Q2, D);
-  same([head(Mq), item(Mq, 'wA').cash, item(Mq, 'wB').rows], [marked, -2000, []], '«Vanya» given to Vanya: his row is open again with its 2,000, and Mika\'s row - on the page before the mark was made - does not take the mark\'s place: «Денег сейчас», the month\'s fact and the mark are what they were');
-  const Mlate = await C(ledP({ tx: [filed('m1', '2026-10-09', -2000, 'mika', '', { at: AT }), filed('m2', '2026-10-13', -3000, 'misha', '', { at: MARK + 3600e3 })] }), Q2, D);
-  same([item(Mlate, 'wB').done.by, item(Mlate, 'wB').rows, Mlate.now], ['row', ['m2'], marked[0]], '… and a row uploaded after the mark still takes its place, as it always did');
+  same([Object.keys(Q2.div.find((r) => r.id === 'wB').paid).sort(), item(Mq, 'wA').cash, item(Mq, 'wA').wd.got + item(Mq, 'wB').wd.got, [round2(Mq.now - marked[0]), round2(Mq.marksGbp - marked[1])]], [['at', 'by', 'on'], -2000, 2000, [2000, 2000]],
+    '«Vanya» given to Vanya with «Вывод» marked: his row is open again with its 2,000; Mika\'s 2,000 is counted once - it now stands in the marked «Вывод», whose mark is worth the 1,000 that is left - so «Денег сейчас» is 2,000 higher until a statement passes the mark; a mark stores no sum of its own');
   // (independent reading: a founder\'s row that a choice left outside the plan was taken as the payment of a marked salary of the same sum)
   let Q3 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' })]), team: P.team.concat([row('pz', 'Person Z', 2000, '2026-10-12', { blk: 'cogs', paid: paid(D, MARK) })]) };
   const L3 = ledP({ tx: [filed('m1', '2026-10-10', -2000, 'mika', '', { at: MARK + 3600e3 })] });
@@ -6541,6 +6539,19 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await calm(pg, 'the card of a withdrawal with «Чей вывод»', 'cash');
   await shot(pg, 'rv-whose');
   await pg.context().close();
+
+  // (independent reading: with a withdrawal marked «Оплачено» the same press moved «Денег сейчас», and nothing said so)
+  serve(ledP({ tx: [filed('m1', '2026-10-05', -2000, 'mika', '', { at: AT2 })] }), { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод оплачен', 1500, '2026-10-06', { blk: 'div', paid: paid(T) })]) });
+  const mk = await reopen('whose, a mark');
+  const now0 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
+  await goCash(mk);
+  await rowCard(mk, 'div', 'wA');
+  await mk.selectOption(K('row') + '[data-ed-f="whose"]', 'vanya');
+  await mk.click(K('row') + '[data-ed-save]');
+  await puts('cash', 1);
+  const now1 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
+  same([round2(now1 - now0), await toastText(mk)], [1500, `Vanya: вывод Vanya · «Денег сейчас» теперь £${Math.round(now1).toLocaleString('en-GB')}: пересчитана отметка «Оплачено» на выводе`], 'a closed row given to Vanya while another withdrawal carries «Оплачено»: Mika\'s money moves into the marked one, «Денег сейчас» is 1,500 higher, and the toast names the figure and says why');
+  await mk.context().close();
 
   // somebody who only looks reads whose a withdrawal is, and is offered nothing
   serve(LS, { ...PS, div: PS.div.map((r) => (r.id === 'wdO' ? { ...r, whose: 'vanya' } : r)) });

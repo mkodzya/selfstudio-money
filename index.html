@@ -2872,9 +2872,6 @@ const Cash=(()=>{
 //                   never by `f` - the upgrade from v2 left `f` on every draw it moved here; a NEW row carries what
 //                   the form proposed from its name unless the founder chose otherwise. It is the line's: every
 //                   stored row of a chain that «… и дальше» split
-//    paid.had       on a withdrawal: what its rows had given when the mark was made (native). The rows that were on
-//                   the page then give it no more than that, however they are dealt later; absent on a mark from
-//                   before 12 October 2026
 //  tax                             the studio's taxes, by rules
 //    since:"YYYY-MM-DD"            the day this plan became v3 — the day the page began to answer for the built-in
 //                                  rules. The page stamps it once (Cash); read as T while absent
@@ -3773,18 +3770,15 @@ const Live=(()=>{
   // With no owner anywhere that order is `wds` itself, and the plan reads to the penny as it did.
   const wds=items.filter(it=>it.wd&&it.date).sort(byItem),wdOf={};
   FOUNDERS.forEach(k=>{wdOf[k]=wds.filter(it=>it.whose===k).concat(wds.filter(it=>!it.whose));});
-  // A withdrawal marked «Оплачено» or «Частично» remembers what its rows had given when the mark was made
-  // (paid.had). The rows that were on the page at that moment give it no more than that, however they are dealt
-  // afterwards - a row deleted, a row given to a founder, a withdrawal moved - and only rows uploaded since take the
-  // mark's place. Otherwise a deal made later would change what the mark is worth, and «Денег сейчас» with it,
-  // with nothing new from the bank. (A mark from before 12 October 2026 holds no `had` and is read as it was.)
-  wds.forEach(it=>{const n=it.src==="occ"?nextOf(it):null,p=it.paid;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);
-   it.hadG=p&&!word(it)&&p.had!=null&&isFinite(+p.had)?Math.min(gbp(Math.max(0,+p.had),it.cur),gbp(it.amt,it.cur)):null;it.oldG=0;it.lateG=0;});
+  // (Known, and older than «Чей вывод»: a withdrawal that carries a hand mark goes on taking rows, and what the
+  // mark is worth is what they leave. So a deal made over - a row deleted or moved, a withdrawal given to a
+  // founder - can change «Денег сейчас» until a statement passes the mark's day. A mark that remembered a fixed
+  // sum was tried on 12 October 2026 and withdrawn the same day: it counted one bank row in two withdrawals. The
+  // card says it when a choice of owner moves the figure - Ed.rowSave.)
+  wds.forEach(it=>{const n=it.src==="occ"?nextOf(it):null;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);});
   if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);
    for(const it of wdOf[f.c]){if(left<0.005)break;if(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1)continue;
-    const h=it.hadG,old=h!=null&&!(f.at>(+it.paid.at||0)),open=old?h-it.oldG:gbp(it.amt,it.cur)-(h!=null?h+it.lateG:it.gotG);if(open<0.005)continue;
-    const take=Math.min(left,open);if(h==null)it.gotG+=take;else if(old)it.oldG+=take;else it.lateG+=take;left-=take;it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);}});
-  wds.forEach(it=>{if(it.hadG!=null)it.gotG=it.hadG+it.lateG;});
+    const open=gbp(it.amt,it.cur)-it.gotG;if(open<0.005)continue;const take=Math.min(left,open);it.gotG+=take;left-=take;it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);}});
   // Done when what is left is nothing to speak of — or when the statements of its bank reach the end of its
   // window: what was not taken by then is dropped, in words «взято £6,000 из £10,000», never carried as late.
   wds.forEach(it=>{if(!canPay(it))return;const t=gbp(it.amt,it.cur),lo=tol(t,-1)[0],got=r2(nat(it.gotG,it.cur));
@@ -4535,7 +4529,7 @@ const Live=(()=>{
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
     if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
-  mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid=it.wd?{on,at,by,had:+it.wd.got||0}:{on,at,by};},
+  mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
   // «Не придёт» / «Не платим» / the tick taken off: a row is switched off, a month of a repeating row is switched
   // off for that month alone, a computed tax is «не платим».
@@ -4555,7 +4549,7 @@ const Live=(()=>{
   // after the line it was said of — which is what a plan from before may hold. Returns the new row.
   partial(P,it,got,id,now,by,on,date){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
    const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,day=isD(date)?date:"",from=day&&obj(r.carry)&&isM(r.carry.ym)?r.carry.ym:"";
-   s.paid=it.wd?{on,at:now,by,amt:g,had:+it.wd.got||0}:{on,at:now,by,amt:g};if(!(rest>0))return null;
+   s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
    const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
    ["sk","skBy","vat","ptax","f","whose","sub"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
@@ -4891,7 +4885,9 @@ const Trial=(()=>{
   if(c.k==="draw"){
    const ok=isYm(c.from),from=ok?drawFrom(M,h.chain,c.from):"",cur=ok?drawCur(M,h.chain,c.from):h.r.cur,many=draws(M).length>1;
    // (Two withdrawals of one name are told apart by whose they are - in the line as in the list they were chosen from.)
-   const twin=many&&draws(M).filter(q=>nmOf(q.r).toLowerCase()===nmOf(h.r).toLowerCase()).length>1,who=twin&&FN[h.r.whose]&&!h.r.ptax?`, <span class="td-nm">вывод ${FN[h.r.whose]}</span>`:"";
+   // (Whose: of the months the change reaches - the parts of a chain may belong to different founders.)
+   const twin=many&&draws(M).filter(q=>nmOf(q.r).toLowerCase()===nmOf(h.r).toLowerCase()).length>1,reach=ok?drawIts(M,h.chain,c.from):[];
+   const owners=[...new Set((reach.length?reach.map(it=>it.whose||""):[h.r.whose||""]).filter(w=>FN[w]))],who=twin&&owners.length?`, <span class="td-nm">вывод ${owners.map(w=>FN[w]).join(" и ")}</span>`:"";
    const say=(num(c.amt)&&c.amt===0?`мы перестанем выводить с ${from?monG(from):"…"}`:`мы будем выводить по ${num(c.amt)?money(c.amt,cur):"…"} в месяц, начиная с ${from?monG(from):"…"}`)+(many?` — строка «${nm(h.r)}»${who}`:"");if(off)return Object.assign({say},off);
    const its=drawIts(M,h.chain,c.from),inH=its.filter(it=>it.day<=end),rest=drawRest(M,h.chain,c.from),inst=it=>`${dYF(M,it.day)} — вместо ${money(it.amt,it.cur)}`;
    return{say,meta:`в ${H} дней `+(inH.length?`${plural(inH.length,"попадает","попадают","попадают")} ${inH.length} ${plural(inH.length,"вывод","вывода","выводов")}: ${and(inH.map(inst))}`:"не попадает ни одного вывода")+also(and(mid(its).map(inst))),
@@ -5241,6 +5237,11 @@ const Ed=(()=>{
  // it carries data-ed-f, so a reader's page shuts it with every other field.
  const whoseSelect=v=>`<label class="fld" for="ed-whose"><span>Чей вывод</span><select id="ed-whose" data-ed-f="whose">${opt([["","общий"]].concat(FOUNDERS.map(k=>[k,FN[k]])),FOUNDERS.includes(v)?v:"")}</select></label>`;
  const whoseSay=f=>FN[f]?`вывод ${FN[f]}`:"вывод общий";
+ // Saying whose a withdrawal is deals the table's rows over. While some withdrawal carries «Оплачено» that no
+ // statement has confirmed yet, that can change what its mark stands for, and «Денег сейчас» with it - with nothing
+ // new from the bank. It is never silent: the toast names the figure as it now is.
+ const nowOf=()=>{const m=Plan.model();return m&&!m.v0&&typeof m.now==="number"?m.now:null;};
+ const nowSay=n0=>{const n1=nowOf();return n0!=null&&n1!=null&&Math.abs(n1-n0)>=0.5?` · «Денег сейчас» теперь ${fmt(n1)}: пересчитана отметка «Оплачено» на выводе`:"";};
  // What a name says of whose a NEW withdrawal is: the one founder named in it, in Latin or in Russian - or nobody
  // (two names say nothing). A proposal in the form and no more: a row that is stored is never read by its name.
  const whoseBy=name=>{const s=" "+String(name||"").toLowerCase()+" ",R={mika:/[^a-zа-яё](mika|мик[аиеу]|микой)[^a-zа-яё]/,misha:/[^a-zа-яё](misha|миш[аиеу]|мишей)[^a-zа-яё]/,vanya:/[^a-zа-яё](vanya|ван[яиею]|ваней)[^a-zа-яё]/},hit=FOUNDERS.filter(k=>R[k].test(s));return hit.length===1?hit[0]:"";};
@@ -5462,7 +5463,7 @@ const Ed=(()=>{
   // The card of a closed row holds one field: whose a withdrawal is, or what a tax row was for.
   if(it.state==="done"){const w=q(card,'[data-ed-f="whose"]');
    if(w){const to=FOUNDERS.includes(w.value)?w.value:"";if(to===(it.whose||"")){cur=null;return Plan.redraw();}
-    const say=`${it.name}: ${whoseSay(to)}${it.src==="occ"?" — для всех месяцев":""}`;cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{whose:to},now,by);}))toast(say,back);return;}
+    const say=`${it.name}: ${whoseSay(to)}${it.src==="occ"?" — для всех месяцев":""}`,n0=nowOf();cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{whose:to},now,by);}))toast(say+nowSay(n0),back);return;}
    const e=q(card,'[data-ed-f="of"]');if(!e)return;
    if(e.value==="")return miss(card,"of","Выберите, к чему относится этот налог");
    if(e.value===ofValue(it)&&it.of!==null){cur=null;return Plan.redraw();}
@@ -5494,7 +5495,8 @@ const Ed=(()=>{
   const wt=ch.whose?" · "+whoseSay(v.whose)+(was&&!onward?" — для всех месяцев":""):"";
   const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)+wt
    :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${wt}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
-  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(left?" · «Частично» не записано — ответьте на него заново":""),back);
+  const n0=ch.whose?nowOf():null;
+  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(ch.whose?nowSay(n0):"")+(left?" · «Частично» не записано — ответьте на него заново":""),back);
   drop(gone);
  }
  // What a change to a row's fields writes. `v` is the row as it should now read, `ch` names the fields that differ
