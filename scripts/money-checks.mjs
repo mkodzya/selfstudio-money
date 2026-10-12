@@ -463,7 +463,7 @@ const held = { runs: 0, bad: [] };
 // away or unconfirmed counts nowhere; 31 no key names a founder. And G: the month's columns add up.
 const addM = (ym, k) => { const n = +ym.slice(0, 4) * 12 + +ym.slice(5, 7) - 1 + k; return Math.floor(n / 12) + '-' + String((n % 12) + 1).padStart(2, '0'); };
 const addD = (d, k) => new Date(Date.parse(d + 'T00:00:00Z') + k * 864e5).toISOString().slice(0, 10);
-function inv(M, P) {
+function inv(M, P, L) {
   const bad = [];
   const say = (cond, msg) => { if (!cond) bad.push(msg); };
   const by = Object.fromEntries(M.items.map((it) => [it.id, it]));
@@ -559,6 +559,14 @@ function inv(M, P) {
     else { const d = l.filter((it) => it.state === 'doubt'); if (d.length) say(l.some((it) => it.occ.stops && it.state === 'late' && d.every((x) => it.occ.ym < x.occ.ym)) && !l.some((it) => d.some((x) => it.occ.ym > x.occ.ym) && it.done && it.done.by === 'row'), `21: ${c} is doubted without a late month before it, or after a later month was paid`); }
   });
   M.items.forEach((it) => { if (it.wd) say(!['late', 'missed'].includes(it.state) && !M.cards.some((cd) => cd.item === it.id), `23: the withdrawal ${it.id} is ${it.state}, or is in a card`); });
+  // 23, «Чей вывод» (12 October 2026): the model says of a withdrawal what its row says - a founder, or nobody - and
+  // of nothing else; and a withdrawal that is somebody's holds no row of another block, save one a founder named by
+  // hand. (The second half needs the ledger, which C() hands in and holds() does not.)
+  const FND = ['mika', 'misha', 'vanya'];
+  M.items.forEach((it) => { const r = (rows[it.src === 'occ' ? it.row : it.id] || {}).r || {};
+    say((it.whose || '') === (it.wd && FND.includes(r.whose) ? r.whose : ''), `23: ${it.id} is not whose its row says`); });
+  if (L) { const blk = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), r.c]));
+    M.items.forEach((it) => { if (it.wd && it.whose) say(it.rows.every((id) => blk[id] === it.whose || hand.has(String(id))), `23: ${it.id} is ${it.whose}'s and holds a row of another block`); }); }
   // 22
   if (M.free) {
     const f = M.free;
@@ -614,7 +622,9 @@ function inv(M, P) {
 // Runs the engine where it lives. The documents go in frozen — a function that changed what it was handed would
 // throw — and the plan goes in a second time with everything the engine must not read turned upside down (§5.14):
 // the plan's own rates, its horizon, the old on/off tick of the balances, and all that the first iteration kept
-// about history — plan.ser, tails, the cautious switch, plan.vat, and on the rows sure, extra, inv, src, cyc.
+// about history — plan.ser, tails, the cautious switch, plan.vat, and on the rows sure, extra, inv, src, cyc. And
+// `f` on a withdrawal: the upgrade from v2 left it on every draw it moved to «Дивиденды», and it is not whose the
+// withdrawal is (that is `whose`, which IS read).
 async function C(led, P, day = T, opts = { H: 30 }, note = '') {
   const r = await page.evaluate(([l, p, t, o]) => {
     const freeze = (x) => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.freeze(x); Object.values(x).forEach(freeze); } return x; };
@@ -628,12 +638,13 @@ async function C(led, P, day = T, opts = { H: 30 }, note = '') {
     if (other.v >= 3) {
       other.ser = { 'rev|client a': { made: true, amt: 5, day: 3 } }; other.tails = { rev: { on: false } }; other.cautious = { on: true }; other.vat = { on: false };
       ['inflows', 'team', 'taxes', 'other', 'div'].forEach((k) => (other[k] || []).forEach((x) => { x.sure = false; x.extra = true; x.inv = true; x.src = 'hist'; x.cyc = '2026-10'; }));
+      (other.div || []).forEach((x) => { if (!x.ptax) x.f = x.f === 'vanya' ? 'misha' : 'vanya'; });
     }
     return { model, deaf: model === JSON.stringify(window.__money.compute(JSON.parse(a), other, t, o)), again: model === JSON.stringify(window.__money.compute(JSON.parse(a), JSON.parse(b), t, o)) };
   }, [led, P, day, opts]);
   const M = JSON.parse(r.model);
   // The invariants read the plan as the engine did: a plan older than v3 is upgraded first.
-  const bad = inv(M, P.v >= 3 ? P : await up(P, led, day));
+  const bad = inv(M, P.v >= 3 ? P : await up(P, led, day), led);
   if (!r.deaf) bad.push('14: the model changed with something the engine must not read');
   if (!r.again) bad.push('12: the same documents gave another model');
   held.runs++;
@@ -1782,6 +1793,7 @@ await run('p12', 'the upgrade v2 → v3: every stored row survives; what leaves 
   same(await up(v2, L), X, '… and pure: the same documents give the same plan');
   // nothing a founder wrote changed its money
   const M = await C(L, X);
+  same([item(M, 'draw').wd !== null, item(M, 'draw').whose, 'whose' in r('draw')], [true, '', false], 'the draw that came from the old plan carries f and is everybody\'s withdrawal: f is not whose it is, and the upgrade writes no owner');
   same(['h|rev|client a|2026-10', 'd1', 'h|rev|client d|2026-10', 'v1', 'x1', 'h|cogs|person b|2026-10', 't1', 't2', 'rent@2026-10', 'rent@2026-11', 'draw'].map((id) => item(M, id) && item(M, id).full), [8500, 850, 4150, 1200, -700, -6000, -3800, -500, -900, -900, -3000],
     '… each line is worth what A counted for it — the row with «+ VAT» too, 1,200 for its 1,000, though «Считать VAT» was off and the rule is: a rule that is off is not worked out, the client pays it all the same (§5.30)');
   same([M.taxes.rate, M.inParts.vat, per(M, 'vat|2026Q4')], [20, 200, null], '… its VAT is inside «Придёт» (£200), and nothing is accrued or reserved for a rule that is off');
@@ -2028,7 +2040,8 @@ const look = (pg, tab = 'today') => pg.evaluate((tab) => {
   const word = /по истории|в среднем|осторожн/i;
   // Nothing on either tab is a guess, so no «≈» stands anywhere on them — not in a text, not in a label, not in a
   // title: a tax worked out by a rule is muted and says «посчитано по правилу». And no founder is named as a kind of
-  // money: a founder's name may stand only where somebody typed it — a row's own name, and who wrote a line.
+  // money: a founder's name may stand only where somebody typed it or chose it — a row's own name, who wrote a
+  // line, and whose a withdrawal is (in its card's first sentence and in the options of «Чей вывод»).
   const founder = /(^|[^a-zа-яё])(mika|misha|vanya|мика|миша|ваня)([^a-zа-яё]|$)/i;
   const typed = '.td-nm, .cs-nmt, .cs-nt, .cs-hn, .op-name, .ed-why, .cs-act, .td-accs, .td-fwhy, .td-fsay, .kpi .hint, .td-steps, .cs-note, .cs-rm, .cs-sugg, .cs-auto, .cs-undo, .ed-ask, .ed-an, .ed-passed, #cs-have, .td-tax .td-meta, option';
   const invented = [...root.querySelectorAll('*')].filter((e) => !e.closest('svg') && ([...e.childNodes].some((x) => x.nodeType === 3 && (x.textContent.includes('≈') || (founder.test(x.textContent) && !e.closest(typed)))) || /≈/.test((e.getAttribute('aria-label') || '') + (e.getAttribute('title') || '') + (e.getAttribute('placeholder') || ''))))
@@ -2142,6 +2155,7 @@ async function fill(pg, kind, f) {
   if (f.bank) await pg.selectOption(c + '#ed-bank', f.bank);
   if (f.date !== undefined) await pg.fill(c + '#ed-date', f.date);
   for (const k of ['vat', 'monthly', 'sub']) if (f[k] !== undefined) await pg.setChecked(c + `[data-ed-f="${k}"]`, f[k]);
+  if (f.whose !== undefined) await pg.selectOption(c + '[data-ed-f="whose"]', f.whose);
 }
 const rowIds = (pg) => pg.evaluate(() => { const P = window.__cash.state(); return ['inflows', 'team', 'taxes', 'other', 'div'].flatMap((k) => P[k].map((r) => String(r.id))); });
 // «Добавить» → what → the fields → «Добавить». Returns the id the new row was given.
@@ -4310,7 +4324,7 @@ await run('rv-save', 'what a founder decided is still there when the page is ope
     inflows: [row('i1', 'Client A', 100, '2026-10-20', { vat: true, sk: 'rev|client a', skBy: 'hand', blk: 'rev', tx: ['x1'], notx: ['x2'], closed: true, fixed: true, paid: paid(T), rec: { day: 20, from: '2026-10', to: '2026-12', chain: 'i0', x: { '2026-11': { amt: 90, date: '2026-11-21', off: true, paid: paid(T), tx: ['x3'], notx: ['x4'], closed: true } } } })],
     team: [row('t1', 'Person B — остаток с сентября', 50, '', { mon: '2026-10', carry: { ym: '2026-09' }, blk: 'cogs' }), row('t2', 'Person B — остаток с октября', 60, '2026-11-12', { carry: { ym: '2026-10' }, blk: 'cogs' })],
     taxes: [row('x1', 'VAT Q3', 10, '2026-11-07', { of: { r: 'vat', p: '2026Q3', part: true }, blk: 'tax' }), row('x2', 'Corp', 10, '2026-11-01', { of: false, blk: 'tax' })],
-    div: [row('d1', 'HMRC Mika', 10, '2026-10-21', { ptax: true, f: 'mika', blk: 'div' })],
+    div: [row('d1', 'HMRC Mika', 10, '2026-10-21', { ptax: true, f: 'mika', blk: 'div' }), row('d2', 'Вывод Vanya', 10, '2026-10-22', { blk: 'div', whose: 'vanya' })],
     tax: { since: T, rules: [VAT(), USN()], cl: { 'client a': 'vat' }, per: { 'vat|2026Q3': { amt: 4000, date: '2026-11-08', paid: paid(T), tx: ['p1'], notx: ['p2'], m: { t: TAP, by: BY } } } },
   });
   serve(ledP(), full);
@@ -4319,7 +4333,7 @@ await run('rv-save', 'what a founder decided is still there when the page is ope
   const lost = [];
   const walk = (a, b, path) => { if (a && typeof a === 'object') { if (!b || typeof b !== 'object') return void lost.push(path); Object.keys(a).forEach((k) => walk(a[k], b[k], path + '.' + k)); } else if (a !== b && !(path.endsWith('.log') || path.endsWith('.info') || path.endsWith('.tag'))) lost.push(path + ' = ' + JSON.stringify(a)); };
   ['banks', 'inflows', 'team', 'taxes', 'other', 'div', 'tax', 'fresh', 'cushion'].forEach((k) => walk(full[k], got[k], k));
-  same(lost, [], 'a plan that carries every field the engine reads — carry on a row without a date and on a dated one, rec with its exceptions, of, ptax, f, vat, the links and marks, tax.cl and tax.per, fresh — comes through the page\'s way in whole');
+  same(lost, [], 'a plan that carries every field the engine reads — carry on a row without a date and on a dated one, rec with its exceptions, of, ptax, f, whose a withdrawal is, vat, the links and marks, tax.cl and tax.per, fresh — comes through the page\'s way in whole');
   await again.context().close();
 });
 
@@ -6359,6 +6373,130 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await eom.selectOption(F + '[data-wi-f="row"]', 'c-halden-co');
   ok(/за ноябрь получено £1,500 из £9,750 — этот месяц и его остаток остаются как в плане/.test(await worked(eom)) && !/ноябрь уже получен/.test(await worked(eom)), 'a month closed by «Частично»: the line says how much came, and that the month and its rest stay as the plan has them', await worked(eom));
   await eom.context().close();
+});
+
+// =====================================================================================================================
+// «ЧЕЙ ВЫВОД» (the owner's decision of 12 October 2026: «да, делай, А»). A withdrawal may say whose it is. Then only
+// that founder's block uses it up: his rows go to his own withdrawals first, oldest first, what they have over to
+// the ones that are everybody's, never to another founder's - and a plan that says nothing reads to the penny as
+// it did. The rows that exist stay everybody's until somebody says whose they are.
+// =====================================================================================================================
+await run('rv-whose', 'a withdrawal that says whose it is is used up by that founder alone - his rows first, the rest to the shared ones, nobody else\'s ever; a plan that says nothing reads as it did; the card and «Добавить» ask «Чей вывод»', async () => {
+  const D = '2026-10-13', AT = ms('2026-10-13T08:00:00Z'), P = await plan2();
+  const three = (own = {}) => ({ ...P, div: P.div.concat([
+    row('wdV', 'Вывод Vanya', 3000, '2026-10-08', { blk: 'div', ...(own.V !== undefined ? { whose: own.V } : {}) }),
+    row('wdM', 'Вывод Misha', 2000, '2026-10-10', { blk: 'div', ...(own.M !== undefined ? { whose: own.M } : {}) }),
+    row('wdS', 'Вывод', 5000, '2026-10-12', { blk: 'div' })]) });
+  const L = ledP({ tx: [filed('m1', '2026-10-09', -4500, 'mika', '', { at: AT }), filed('v1', '2026-10-10', -3500, 'vanya', '', { at: AT }), filed('v2', '2026-10-11', -800, 'vanya', '', { at: AT })] });
+  const of = (M) => ['wdV', 'wdM', 'wdS'].map((id) => { const it = item(M, id); return [!!it.done, it.wd.got, it.cash, it.rows]; });
+
+  // Nobody's: as the page did until 12 October - the oldest withdrawal first, whoever took.
+  const M0 = await C(L, three(), D);
+  same(of(M0), [[true, 3000, 0, ['m1']], [true, 2000, 0, ['m1', 'v1']], [false, 3800, -1200, ['v1', 'v2']]], 'no row says whose: Mika\'s 4,500 closes «Вывод Vanya» and most of «Вывод Misha», and Vanya\'s own money goes to the row after them');
+  const plain0 = JSON.stringify(M0);
+  for (const junk of ['', null, 'studio', 7, ['vanya'], 'Vanya']) ok(JSON.stringify(await C(L, three({ V: junk }), D)) === plain0, `whose: ${JSON.stringify(junk)} is nobody - the same model, byte for byte`);
+  { const Q = three(); Q.div.find((r) => r.id === 'wdV').f = 'vanya'; ok(JSON.stringify(await C(L, Q, D)) === plain0, '`f` on a withdrawal - what the upgrade from the old plan left there - is not whose it is'); }
+
+  // Somebody's.
+  const M1 = await C(L, three({ V: 'vanya', M: 'misha' }), D);
+  same([of(M1), M1.items.some((it) => it.rows.includes('v2')), item(M1, 'wdM').state, M1.cards.some((c) => c.item === 'wdM'), [item(M1, 'wdV').whose, item(M1, 'wdM').whose, item(M1, 'wdS').whose]],
+    [[[true, 3000, 0, ['v1']], [false, 0, -2000, []], [true, 5000, 0, ['m1', 'v1']]], false, 'waiting', false, ['vanya', 'misha', '']],
+    'Vanya\'s row takes Vanya\'s 3,000 and none of Mika\'s; the 500 he has over and Mika\'s 4,500 fill the shared one; Misha, who took nothing, still has his 2,000 ahead - never late, no card; Vanya\'s 800 finds no row and stays outside the plan');
+  same([M1.now, M1.free.wd.n, round2(M1.OUT - M0.OUT), M1.month.blocks.div.fact], [M0.now, 1, 800, M0.month.blocks.div.fact], '«Денег сейчас» and the month\'s fact are what they were - the bank does not know whose a plan row is; what is still to be taken is 2,000 where it was 1,200');
+  // a founder with no row of his own, and no shared row left: outside the plan
+  const lone = { ...P, div: P.div.concat([row('wdV', 'Вывод Vanya', 3000, '2026-10-08', { blk: 'div', whose: 'vanya' })]) };
+  const M2 = await C(ledP({ tx: [filed('m1', '2026-10-09', -4500, 'mika', '', { at: AT })] }), lone, D);
+  same([item(M2, 'wdV').wd.got, item(M2, 'wdV').cash, item(M2, 'wdV').rows], [0, -3000, []], 'the only withdrawal is Vanya\'s and Mika takes 4,500: the row is untouched');
+  // saying whose a row is deals the rows over - by the founder's own act, through the page's own verb
+  const picked = await wr(three(), 'set', item(M0, 'wdV'), { whose: 'vanya' }, TAP, BY);
+  same([picked.div.find((r) => r.id === 'wdV').whose, of(await C(L, picked, D))], ['vanya', [[true, 3000, 0, ['v1']], [true, 2000, 0, ['m1']], [false, 3800, -1200, ['m1', 'v1', 'v2']]]], '«Vanya» chosen on the first row: Mika\'s 4,500 leaves it for the two that are everybody\'s, Vanya\'s own 3,000 closes it, and what he has over follows Mika\'s into the last');
+  const back = await wr(picked, 'set', item(M0, 'wdV'), { whose: '' }, TAP, BY);
+  same(['whose' in back.div.find((r) => r.id === 'wdV'), JSON.stringify(await C(L, back, D)) === JSON.stringify(await C(L, { ...back, div: back.div.map((r) => (r.id === 'wdV' ? { ...r, m: three().div.find((x) => x.id === 'wdV').m } : r)) }, D))], [false, true], '«общий» again: the key is gone from the row, not left empty');
+  // what the other verbs do with it: the rest of «Частично», «Продублировать», a month and onward, and a row that is no withdrawal
+  const own3 = three({ V: 'vanya' }), MV = await C(ledP(), own3);
+  const rest = await wr(own3, 'partial', item(MV, 'wdV'), 1000, 'rest1', TAP, BY, T, '2026-10-20');
+  const dup = await wr(own3, 'dup', [item(MV, 'wdV'), item(MV, 'wdS')], '2026-11', ['n1', 'n2'], TAP, BY);
+  const odd = await wr(own3, 'add', 'team', row('odd', 'Person X', 10, '2026-10-20', { whose: 'vanya' }));
+  same([rest.div.find((r) => r.id === 'rest1').whose, dup.div.find((r) => r.id === 'n1').whose, 'whose' in dup.div.find((r) => r.id === 'n2'), 'whose' in odd.team.find((r) => r.id === 'odd')], ['vanya', 'vanya', false, false],
+    'the rest «Частично» leaves of Vanya\'s withdrawal is Vanya\'s; «Продублировать» keeps whose a row is; a row of «Команда» never carries the key');
+
+  // ---- on the screen ----
+  // A plan with one withdrawal that Mika's money has already closed, one that is open, and a monthly one.
+  const PS = { ...P, div: P.div.concat([
+    row('wdC', 'Vanya', 3000, '2026-10-05', { blk: 'div' }),
+    row('wdO', 'Вывод ноябрь', 2000, '2026-10-20', { blk: 'div' }),
+    row('wdR', 'Вывод', 1000, '2026-10-25', { blk: 'div', rec: { day: 25, from: '2026-10' } })]) };
+  const LS = ledP({ tx: [filed('m1', '2026-10-05', -3000, 'mika', '', { at: AT2 })] });
+  const pg = await scene('whose', LS, PS);
+  const b0 = await holds(pg, 'a plan whose row «Vanya» was closed by what Mika took');
+  same([item(b0.M, 'wdC').state, item(b0.M, 'wdC').rows, item(b0.M, 'wdC').whose], ['done', ['m1'], ''], 'the row called «Vanya» is closed by Mika\'s 3,000: a name says nothing of whose a row is');
+  const stored = (id) => pg.evaluate((id) => { const r = window.__cash.state().div.find((x) => String(x.id) === id); return r ? ['whose' in r, r.whose || ''] : null; }, id);
+  const whoseOf = (kind) => pg.$eval(K(kind) + '[data-ed-f="whose"]', (e) => [e.value, [...e.options].map((o) => o.textContent)]);
+  // «Добавить»: the form proposes what the name says, and a choice made by hand stands
+  await openAdd(pg, 'div');
+  same([await whoseOf('add'), plain(await pg.$eval(K('add') + '[data-ed-kind] ~ .note', (e) => e.textContent))], [['', ['общий', 'Mika', 'Misha', 'Vanya']], 'сколько и когда решили взять — общий вывод или одного фаундера'], '«Дивиденды» → «Вывод»: the form asks «Чей вывод» - общий, Mika, Misha, Vanya - and starts from «общий»');
+  const says = async (name) => { await pg.fill(K('add') + '#ed-name', name); return (await whoseOf('add'))[0]; };
+  same([await says('Vanya'), await says('Вывод Миши'), await says('Mika и Vanya'), await says('Вывод'), await says('Иванян')], ['vanya', 'misha', '', '', ''], 'a name with one founder in it proposes him - in Latin or in Russian; two names, or none, propose nobody; a word that only holds a name proposes nobody');
+  await pg.fill(K('add') + '#ed-name', 'Вывод Vanya');
+  await pg.selectOption(K('add') + '[data-ed-f="whose"]', 'misha');
+  await pg.fill(K('add') + '#ed-name', 'Вывод Vanya, декабрь');
+  same((await whoseOf('add'))[0], 'misha', 'a founder chosen by hand is not overruled by the name typed after');
+  await pg.click(K('add') + '[data-ed-kind="ptax"]');
+  same(await pg.$(K('add') + '[data-ed-f="whose"]'), null, '«Личный налог» has no such field: whose a personal tax is, its name says');
+  await pg.click(K('add') + '[data-ed-kind="wd"]');
+  same((await whoseOf('add'))[0], 'misha', '… and back at «Вывод» the choice is still there');
+  await fill(pg, 'add', { amt: 700, date: '2026-10-22' });
+  await pg.click(K('add') + '[data-ed-save]');
+  await puts('cash', 1);
+  const added = await pg.evaluate(() => window.__cash.state().div.find((r) => r.name === 'Вывод Vanya, декабрь'));
+  same([added.whose, await toastText(pg)], ['misha', 'В плане: Вывод Vanya, декабрь · вывод Misha'], 'saved: the row says whose it is, and so does the toast');
+  const shared = await addRow(pg, 'div', { name: 'Вывод общий', amt: 500, date: '2026-10-23' });
+  same(await stored(shared), [false, ''], 'a withdrawal that is everybody\'s is saved without the key');
+  // the card of an open withdrawal
+  await goCash(pg);
+  await rowCard(pg, 'div', 'wdO');
+  same([await whoseOf('row'), await text(pg, K('row') + '.ed-why')], [['', ['общий', 'Mika', 'Misha', 'Vanya']], 'В плане: вписал Mika 6 окт · вывод: закроется тем, что возьмут фаундеры.'], 'the card of a withdrawal that exists: «общий», whatever it is called');
+  const before = store.cash.puts;
+  await rowSet(pg, 'div', 'wdO', { whose: 'vanya' });
+  await puts('cash', before + 1);
+  same([await stored('wdO'), await toastText(pg)], [[true, 'vanya'], 'Сохранено: Вывод ноябрь · вывод Vanya'], '«Vanya» chosen and saved');
+  await rowCard(pg, 'div', 'wdO');
+  same([(await whoseOf('row'))[0], await text(pg, K('row') + '.ed-why')], ['vanya', 'В плане: вписал Mika 6 окт · вывод Vanya: закроется тем, что возьмёт Vanya.'], '… the card now says whose it is, and how it will be closed');
+  await rowSet(pg, 'div', 'wdO', { whose: '' });
+  await puts('cash', before + 2);
+  same(await stored('wdO'), [false, ''], '«общий» again: the key is gone');
+  // the card of a withdrawal that is closed holds this one field
+  await rowCard(pg, 'div', 'wdC');
+  same([await pg.$$eval(K('row') + '[data-ed-f]', (l) => l.map((e) => e.dataset.edF)), (await whoseOf('row'))[0], (await texts(pg, K('row') + '.ed-foot button')).includes('Сохранить')], [['whose'], '', true], 'the closed row «Vanya»: its card holds «Чей вывод» and «Сохранить», and nothing else to type');
+  await pg.selectOption(K('row') + '[data-ed-f="whose"]', 'vanya');
+  await pg.click(K('row') + '[data-ed-save]');
+  await puts('cash', before + 3);
+  const b1 = await holds(pg, 'with the closed row given to Vanya', 'cash');
+  same([await stored('wdC'), item(b1.M, 'wdC').state, item(b1.M, 'wdC').cash, item(b1.M, 'wdC').rows, b1.M.now], [[true, 'vanya'], 'waiting', -3000, [], b0.M.now], 'given to Vanya, it is open again with its whole 3,000: Mika\'s money no longer closes it, and «Денег сейчас» has not moved');
+  // a month of a repeating withdrawal: whose it is belongs to the row, like its name
+  await rowCard(pg, 'div', 'wdR@2026-10');
+  const notes = (await texts(pg, K('row') + '.note')).join(' | ');
+  ok(/название, банк, валюта и «чей вывод» — для всех месяцев/.test(notes), 'a month of «каждый месяц»: the card says «чей вывод» is for every month of the row', notes);
+  await pg.selectOption(K('row') + '[data-ed-f="whose"]', 'mika');
+  await pg.click(K('row') + '[data-ed-save="only"]');
+  await puts('cash', before + 4);
+  same([await stored('wdR'), (await pg.evaluate(() => window.__money.model({ H: 30 }).items.filter((it) => it.row === 'wdR').map((it) => it.whose))).every((w) => w === 'mika')], [[true, 'mika'], true], '«Только октябрь» with «Mika» chosen: the row is Mika\'s, in every month');
+  ok(await saved(pg), 'everything said on the screen is in the stored plan');
+  await calm(pg, 'the card of a withdrawal with «Чей вывод»', 'cash');
+  await shot(pg, 'rv-whose');
+  await pg.context().close();
+
+  // somebody who only looks reads whose a withdrawal is, and is offered nothing
+  serve(LS, { ...PS, div: PS.div.map((r) => (r.id === 'wdO' ? { ...r, whose: 'vanya' } : r)) });
+  asReader();
+  const rd = await open('whose, a reader', undefined, { who: 'Misha' });
+  await rd.waitForSelector('#view-today [data-live="verdict"]');
+  await goCash(rd);
+  await rd.click('#cs-sec-div tr[data-cs-id="wdO"]');
+  await rd.waitForSelector('#view-cash [data-ed-card="row"]');
+  same([await rd.$$eval('#view-cash [data-ed-card="row"] input, #view-cash [data-ed-card="row"] select', (l) => l.length), /вывод Vanya: закроется тем, что возьмёт Vanya\./.test(await text(rd, '#view-cash [data-ed-card="row"] .ed-why')), store.cash.puts], [0, true, 0], 'a reader\'s card of that withdrawal: whose it is, in words; no field, and no save');
+  await rd.context().close();
+  asOwner();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
