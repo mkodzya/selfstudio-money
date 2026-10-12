@@ -1999,7 +1999,7 @@ const Cash=(()=>{
  // lost when the page is opened, from the second when it is saved, and a change to one missing from the third is
  // answered «Сохранено» and never sent. (`carry` and `fresh` were each missing once: a debt carried by «Частично»
  // stopped being counted on the next load, and the setting about old balances was never stored.)
- const V2ROW=["c0","m","blk","sk","skBy","cyc","src","sure","inv","extra","vat","offAt","mon","tx","notx","closed","rec","of","ptax","f","carry","sub"],V2BANK=["asOf","at","by","legacy","ac"],V2DOC=["v","savedAt","ser","tails","vat","cautious","log","led","old","fx","horizon","tax","fresh"];
+ const V2ROW=["c0","m","blk","sk","skBy","cyc","src","sure","inv","extra","vat","offAt","mon","tx","notx","closed","rec","of","ptax","f","whose","carry","sub"],V2BANK=["asOf","at","by","legacy","ac"],V2DOC=["v","savedAt","ser","tails","vat","cautious","log","led","old","fx","horizon","tax","fresh"];
  const PAIDTAGS=["оплачено","не отмечен как оплачен"];
  function adopt(X){
   if(!X||typeof X!=="object"||Array.isArray(X)||!Array.isArray(X.banks))return null;
@@ -2867,6 +2867,11 @@ const Cash=(()=>{
 //                   read by its name (T11)
 //    ptax, f        div only: a founder's personal tax; whose ("mika"|"misha"|"vanya"), when the name says.
 //                   A div row without ptax is a withdrawal
+//    whose          div only, on a withdrawal: the founder whose it is ("mika"|"misha"|"vanya"). Absent = everybody's
+//                   (the owner's decision of 12 October 2026). A row that is stored is never read by its name, and
+//                   never by `f` - the upgrade from v2 left `f` on every draw it moved here; a NEW row carries what
+//                   the form proposed from its name unless the founder chose otherwise. It is the line's: every
+//                   stored row of a chain that «… и дальше» split
 //  tax                             the studio's taxes, by rules
 //    since:"YYYY-MM-DD"            the day this plan became v3 — the day the page began to answer for the built-in
 //                                  rules. The page stamps it once (Cash); read as T while absent
@@ -2902,10 +2907,13 @@ const Cash=(()=>{
 // WHAT A TAP WRITES (Live.write — each changes the plan it is handed, in place, and nothing else; `it` is an item of
 // the model the tap was made on, `c` a card of it; now and by come as arguments. The engine itself never writes)
 //  add(P, list, row)               a new row. A tax with a founder in its name goes to `div` as ptax; an inflow gets
-//                                  vat as a boolean; a tax row gets of:false unless told otherwise. Returns the list
+//                                  vat as a boolean; a tax row gets of:false unless told otherwise; `whose` is kept
+//                                  on a withdrawal and dropped anywhere else (the form proposes it - add reads no
+//                                  name). Returns the list
 //  dup(P, its, ym, ids, now, by)   «Продублировать с {октября}»: each line of `its` written again as a one-off row
-//                                  of the month `ym` on the same day of the month — the same name, currency, bank
-//                                  and VAT, and no sum (amt 0); not paid, not repeating, of:false for a tax.
+//                                  of the month `ym` on the same day of the month — the same name, currency, bank,
+//                                  VAT and owner of a withdrawal, and no sum (amt 0); not paid, not repeating,
+//                                  of:false for a tax.
 //                                  Returns the rows
 //  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it. `on` is
@@ -2926,7 +2934,9 @@ const Cash=(()=>{
 //                                  date keeps the row in v.mon; a row of `taxes` renamed after a founder moves to
 //                                  `div` as ptax, like a new one). A month of a repeating row — «Только {октябрь}»:
 //                                  amt and date go into x[ym] (and leave it when they are the row's own again); name,
-//                                  cur, bank and vat cannot differ for one month and change the row. A computed tax:
+//                                  cur, bank, vat and whose a withdrawal is (v.whose: a founder, "" = everybody's)
+//                                  cannot differ for one month and change the row - the owner every row of its
+//                                  chain. A computed tax:
 //                                  amt → per.amt, date → per.date. v.of on a row of `taxes` is «К чему относится»
 //  del(P, it)                      a row is removed; a month of a repeating row is switched off; a tax is «не платим»
 //  tick(P, it)                     «каждый месяц» on a row: rec:{day, from} from its date; a mark or a link it had
@@ -2940,7 +2950,8 @@ const Cash=(()=>{
 //  onward(P, it, v, id, now, by)   «{Октябрь} и дальше»: on the row's first month the row itself changes; later the
 //                                  row is split — the old one gets to = the month before, a copy with id `id`, the
 //                                  new values, the same c0, rec.from = this month, rec.chain and the x of this month
-//                                  and later takes over. v: {name, amt, cur, bank, vat, date}; a date is the new day
+//                                  and later takes over. v: {name, amt, cur, bank, vat, date, whose}; whose goes to
+//                                  every part of the chain from this month on; a date is the new day
 //  same(P, it, id, now, by)        «И дальше так же» on a month paid at another sum: onward from the NEXT month at
 //                                  what came (it.done.got without the tax on top)
 //  end(P, it) / stop(P, it)        «…и дальше» of a delete or of «Не придёт»: rec.to = the month before (the row goes
@@ -2969,10 +2980,13 @@ const Cash=(()=>{
 //  LINKS (D2)  inflows / team / other: the name as the table spells it → the longest rule key inside it → the longest
 //    label it begins with → the only label with its first word; else unlinked, and it closes by amount. taxes: the
 //    studio's tax rows (no owner). div + ptax: tax rows with an owner (that founder's when f is set). A withdrawal
-//    is linked to nothing: it is a BUDGET, used up by the rows of the three founders' blocks uploaded after it was
+//    is linked to nothing: it is a BUDGET, used up by the rows of the founders' blocks uploaded after it was
 //    written and dated in its window — date −10 … +20 for a one-off, to the day before the next month's window for a
-//    month — oldest first, what a row has over passing to the next withdrawal; what is not taken by the end of the
-//    window (as the statements of its bank reach it) is dropped. Never late or missed, never in a card.
+//    month. One that says whose it is (`whose`) is used up by that founder's rows alone. A founder's row goes to
+//    his own withdrawals first, oldest first, then to those that are everybody's, never to another founder's; what
+//    it has over passes on in that order, and what finds no withdrawal stays outside the plan. What is not taken
+//    by the end of the window (as the statements of its bank reach it) is dropped. Never late or missed, never in
+//    a card.
 //  ONE-OFF ROWS (E3)  a row uploaded after the line was written, not more than ten days early, of its label (or its
 //    block, for an unlinked line — and never a payment whose own label has ever been a series): 1 within tolerance
 //    (in ±2%, min £2; out −2% … +5%; ±6% across currencies) → the oldest such line; 2 the invoice with the tax on
@@ -3130,6 +3144,7 @@ const Cash=(()=>{
 //    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
 //                                  the plan document); dated, or — in a plan from before — without a date
 //    wd                            for a withdrawal: {from, to, got} — its window and what was taken (native)
+//    whose                         for a withdrawal: the founder whose it is, "" when it is everybody's
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
 //    tax                           for a computed tax: {rule, per, key}
@@ -3265,6 +3280,15 @@ const Cash=(()=>{
 //                                  rows[{ym,amt,cur}], gbp}
 //
 // WHAT THE DESIGN LEFT OPEN, AND WHERE ITS LETTER WAS NOT KEPT
+//  · «Чей вывод» (the owner's decision of 12 October 2026: «да, делай, А»). The design has one budget for the three
+//    founders; a withdrawal may now say whose it is (`whose`), and then only that founder's rows use it up. The key
+//    is its own: not `f` (the upgrade from v2 wrote `f` on every draw it moved to `div`, and reading it would have
+//    made those rows somebody's on the first load) and not the name (a row called «Vanya» is everybody's until a
+//    founder says so - reading a plan moves no figure). Saying whose a row is deals the rows over: what the others
+//    took no longer uses it up, and goes to the withdrawals that are everybody's, or outside the plan. «Можно
+//    вывести», the month's blocks and every sum of `div` are still one figure for the studio - nothing in the model
+//    is per founder. Two rows of one name are still one payment to «каждый месяц» and to «Продублировать», whoever
+//    they belong to (twins are by name).
 //  · «под налоги сейчас» (taxes.reserve) is the reserve from facts and from lines marked received — the design's
 //    RES[T−1] plus what a mark made today accrues: that money is in «сейчас» already.
 //  · A marked month of a repeating row keeps first claim on the row uploaded after the mark and dated on.−3 … +7,
@@ -3693,7 +3717,7 @@ const Live=(()=>{
    const lnk=linkOf(k,r),cur=CURS.includes(r.cur)?r.cur:"GBP",vat=k==="inflows"&&r.vat===true,amt0=Math.max(0,+r.amt||0);
    const of=k!=="taxes"||lnk.ptax?false:obj(r.of)&&r.of.r!=null&&r.of.p!=null?{r:String(r.of.r),p:String(r.of.p),part:!!r.of.part}:r.of===undefined?null:false;
    const base={kind:"typed",list:k,blk:lnk.blk,grp:lnk.ptax?"div":GRP[k],name:String(r.name==null?"":r.name),key:norm(alias(r.name)),cur,vat,vk:vat?TOP:1,dir:k==="inflows"?1:-1,bank:String(r.bank||""),mon:isM(r.mon)?r.mon:"",
-    sk:lnk.sk,lk:lnk.lk,how:lnk.how,label:lnk.label,c0:+r.c0||0,fixed:!!r.fixed,row:id,sub:k==="other"&&r.sub===true,wd:k==="div"&&!lnk.ptax,ptax:!!lnk.ptax,of,guess:"",who:String((obj(r.m)&&r.m.by)||""),chain:"",ym0:"",carry:null,moved:false,exc:false,rec:null,tax:null};
+    sk:lnk.sk,lk:lnk.lk,how:lnk.how,label:lnk.label,c0:+r.c0||0,fixed:!!r.fixed,row:id,sub:k==="other"&&r.sub===true,wd:k==="div"&&!lnk.ptax,whose:k==="div"&&!lnk.ptax&&FOUNDERS.includes(r.whose)?r.whose:"",ptax:!!lnk.ptax,of,guess:"",who:String((obj(r.m)&&r.m.by)||""),chain:"",ym0:"",carry:null,moved:false,exc:false,rec:null,tax:null};
    const one=(o,e,on)=>add(Object.assign({},base,o,{on,paid:e.paid===true?{on:"",legacy:true}:obj(e.paid)?e.paid:null,tx:arr(e.tx),notx:e===r?arr(r.notx):arr(r.notx).concat(arr(e.notx)),closed:!!e.closed,rem:o.amt,got:0,gotG:0,done:null,hint:null,match:[],last:""}));
    const rec=obj(r.rec)&&isM(r.rec.from)&&+r.rec.day>=1&&+r.rec.day<=31?r.rec:null;
    if(!rec)return void one({id,src:"row",amt:amt0,date:isD(r.date)?r.date:"",carry:obj(r.carry)&&isM(r.carry.ym)?{ym:r.carry.ym}:null},r,r.on!==false);
@@ -3741,10 +3765,19 @@ const Live=(()=>{
   // twenty after for a one-off, or to the day before the next month's window for a month of a repeating one. Rows
   // go, oldest first, to the earliest open withdrawal whose window holds them; what a row has over one remainder
   // passes on to the next. Never by amount: founders take their money in fourteen to thirty transfers a month.
-  const wds=items.filter(it=>it.wd&&it.date).sort(byItem);
+  // «Чей вывод» (12 October 2026): a withdrawal that says whose it is takes that founder's rows alone, and a
+  // founder's row looks at his own withdrawals before the ones that are everybody's (wdOf: the order it walks).
+  // With no owner anywhere that order is `wds` itself, and the plan reads to the penny as it did.
+  const wds=items.filter(it=>it.wd&&it.date).sort(byItem),wdOf={};
+  FOUNDERS.forEach(k=>{wdOf[k]=wds.filter(it=>it.whose===k).concat(wds.filter(it=>!it.whose));});
+  // (Known, and older than «Чей вывод»: a withdrawal that carries a hand mark goes on taking rows, and what the
+  // mark is worth is what they leave. So a deal made over - a row deleted or moved, a withdrawal given to a
+  // founder - can change «Денег сейчас» until a statement passes the mark's day. A mark that remembered a fixed
+  // sum was tried on 12 October 2026 and withdrawn the same day: it counted one bank row in two withdrawals. The
+  // card says it when a choice of owner moves the figure - Ed.rowSave.)
   wds.forEach(it=>{const n=it.src==="occ"?nextOf(it):null;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);});
   if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);
-   for(const it of wds){if(left<0.005)break;if(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1)continue;
+   for(const it of wdOf[f.c]){if(left<0.005)break;if(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1)continue;
     const open=gbp(it.amt,it.cur)-it.gotG;if(open<0.005)continue;const take=Math.min(left,open);it.gotG+=take;left-=take;it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);}});
   // Done when what is left is nothing to speak of — or when the statements of its bank reach the end of its
   // window: what was not taken by then is dropped, in words «взято £6,000 из £10,000», never carried as late.
@@ -3871,11 +3904,14 @@ const Live=(()=>{
   // nothing but the balance, so it may be the one whenever it was uploaded. (A line said «Частично» of has been
   // given the row of its part already, before the rows were dealt, wherever another line of its label could have
   // taken it; what it is still short of here is looked for among the rows nothing claimed.)
+  // (A row filed in a founder's block is a taking: it uses up withdrawals and never stands in for the mark of
+  // another line - a salary, a subscription - that happens to be of its sum. Such rows are left over more often
+  // since a withdrawal may be one founder's.)
   items.forEach(it=>{if(it.pamt!=null&&canPay(it))it.rem=Math.min(it.rem,Math.max(0,it.pamt-it.got)/it.vk);});
   const byMark=(a,b)=>a.paid.on<b.paid.on?-1:a.paid.on>b.paid.on?1:byItem(a,b);
   items.filter(it=>!it.wd&&it.paid&&canPay(it)&&!word(it)).sort(byMark).forEach(it=>{
    const t=it.rem*it.vk,n0=dn(it.paid.on),z=tol(t,it.dir);let best=null;if(t<0.005)return;
-   facts.forEach(f=>{if(f.own||used.has(f.id)||f.b!==it.bank||f.cur!==it.cur||Math.sign(f.a)!==it.dir||(!(f.at>(+it.paid.at||0))&&(poolIds.has(f.id)||f.twin)))return;const n=dn(f.d),x=Math.abs(f.a);
+   facts.forEach(f=>{if(f.own||used.has(f.id)||(poolIds.has(f.id)&&FOUNDERS.includes(anyRow[f.id].c))||f.b!==it.bank||f.cur!==it.cur||Math.sign(f.a)!==it.dir||(!(f.at>(+it.paid.at||0))&&(poolIds.has(f.id)||f.twin)))return;const n=dn(f.d),x=Math.abs(f.a);
     if(n<n0-3||n>n0+7||x<t-z[0]||x>t+z[1])return;const k=Math.abs(n-n0);if(!best||k<best.k)best={f,k};});
    if(best){used.add(best.f.id);it.done={by:"row",on:best.f.d,rows:[best.f.id],note:"mark"};it.match.push(best.f.id);}
   });
@@ -4084,7 +4120,7 @@ const Live=(()=>{
     // own currency - which is what was counted - at the rate of the day it was shut. (While a period is open, what
     // is owed for it is still ahead, and follows today's rate like every line that is.)
     const shut=(g,d)=>cur==="GBP"?g:gbpOn(nat(g,cur),cur,isD(d)?d:T);
-   const mk=(amt,o)=>{const it=add(Object.assign({id:"t|"+X.key,src:"tax",kind:"tax",list:"taxes",blk:"tax",grp:"tax",name:rule.name+" за "+perName(X.per),key:"",cur,vat:false,vk:1,dir:-1,bank,mon:"",sk:"",lk:"",how:"rule",label:"",c0:0,fixed:false,row:"",wd:false,ptax:false,
+   const mk=(amt,o)=>{const it=add(Object.assign({id:"t|"+X.key,src:"tax",kind:"tax",list:"taxes",blk:"tax",grp:"tax",name:rule.name+" за "+perName(X.per),key:"",cur,vat:false,vk:1,dir:-1,bank,mon:"",sk:"",lk:"",how:"rule",label:"",c0:0,fixed:false,row:"",wd:false,whose:"",ptax:false,
      of:false,guess:"",who:"",chain:"",ym0:"",carry:null,moved:isD(st.date),exc:st.amt!=null,rec:null,tax:{rule:rule.id,per:X.per,key:X.key},amt,date:X.d0,on:true,paid:p,tx:arr(st.tx),notx:arr(st.notx),closed:!!st.closed,rem:amt,got:0,gotG:0,done:null,hint:null,match:ids,last:"",g:10,cov:cov(bank),ck:"",lab:"tax#"+X.key},o));
     it.fullG=gbp(it.amt,cur);X.item=it;stand(it);settle(it);return it;};
    if(X.state==="none")return void(X.owed-X.PT-X.LP>=1&&mk(amtOf(X.owed-X.PT-X.LP),{on:false}));
@@ -4392,7 +4428,7 @@ const Live=(()=>{
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
     mark:p?{on:isD(p.on)?p.on:"",at:+p.at||0,by:String(p.by||""),counts:!!it.counts,cov:it.markCov||"",amt:it.pamt!=null?r2(it.pamt):null}:null,part:it.got>0&&!d?{got:r2(it.got),of:r2(it.amt*it.vk)}:null,hint:it.hint,rows:it.match.slice(),fixed:it.fixed,c0:it.c0,who:it.who,
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
-    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
+    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
@@ -4446,6 +4482,14 @@ const Live=(()=>{
  const fields=(r,v,inflow)=>{["name","cur","bank"].forEach(f=>{if(v[f]!==undefined)r[f]=v[f];});if(v.amt!==undefined)r.amt=+v.amt||0;if(v.vat!==undefined&&inflow)r.vat=!!v.vat;};
  // «это подписка»: said of a row of «Прочие расходы», and of no other list. Like the name it is the row's, not a month's.
  const subOf=(r,v,k)=>{if(v.sub===undefined||k!=="other")return;if(v.sub)r.sub=true;else delete r.sub;};
+ // «Чей вывод»: said of a withdrawal, and of no other row. Like the name it is the row's, not a month's; nobody's
+ // is no key at all. Nothing here reads the name: a row called «Vanya» is everybody's until somebody says whose.
+ const whoseOf=(r,v,k)=>{if(v.whose===undefined||k!=="div"||r.ptax)return;if(FOUNDERS.includes(v.whose))r.whose=v.whose;else delete r.whose;};
+ // A repeating row that «… и дальше» split is several stored rows of one chain - one line through time. Whose it is
+ // goes to every one of them when it is said of a month («Только {месяц}», the card of a closed month), and with
+ // `from` to the parts that begin in that month or later («{Месяц} и дальше»).
+ const whoseAll=(P,h,v,from)=>{if(v.whose===undefined)return;const c=String(obj(h.r.rec)&&h.r.rec.chain||h.r.id);
+  P[h.k].forEach(q=>{if(q&&obj(q.rec)&&String(q.rec.chain||q.id)===c&&(!from||String(q.rec.from)>=from))whoseOf(q,v,h.k);});};
  // A row of «Налоги» whose name now carries a founder is that founder's personal tax: it is stored in «Дивиденды»,
  // as a new row of that name is (add) — or the constructor kept it, and its sum, under «Налоги» while every
  // figure counted it as dividends.
@@ -4471,6 +4515,8 @@ const Live=(()=>{
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});if(f){k="div";r.ptax=true;r.f=f;delete r.of;}else if(r.of===undefined)r.of=false;}
    r.blk=k==="div"?"div":BLOCKS[k].includes(r.blk)?r.blk:BLK0[k];if(k==="inflows")r.vat=r.vat===true;else delete r.vat;
    if(k!=="other")delete r.sub;
+   // (An owner the form put on a withdrawal is kept; anywhere else, and anything that is not a founder, is dropped.)
+   if(!(k==="div"&&!r.ptax&&FOUNDERS.includes(r.whose)))delete r.whose;
    if(!Array.isArray(P[k]))P[k]=[];P[k].push(r);return k;},
   // «Продублировать с {октября}»: lines of the month before, written again as rows of the month `ym` — the name,
   // the currency, the bank and the VAT, on the same day of the month, and NO SUM: who is paid and when repeats, how
@@ -4481,7 +4527,7 @@ const Live=(()=>{
   dup(P,its,ym,ids,now,by){return its.map((it,i)=>{const src=(P[it.list]||[]).find(x=>String(x.id)===String(it.row))||{},day=isD(it.date)?+it.date.slice(8):0;
     const r={id:String(ids[i]),name:it.name,amt:0,cur:it.cur,bank:it.bank,on:true,tag:"",info:false,date:day?dayIn(ym,day):"",c0:now,m:{t:now,by},blk:src.blk};
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
-    if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}if(src.sub)r.sub=true;
+    if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
   mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
@@ -4505,7 +4551,7 @@ const Live=(()=>{
    const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r=h.r,day=isD(date)?date:"",from=day&&obj(r.carry)&&isM(r.carry.ym)?r.carry.ym:"";
    s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
    const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
-   ["sk","skBy","vat","ptax","f","sub"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
+   ["sk","skBy","vat","ptax","f","whose","sub"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
    P[h.k].splice(h.i+1,0,z);return z;},
   // A change to one line. A one-off row: its own fields. A month of a repeating row («Только {октябрь}», R3): the
@@ -4517,8 +4563,8 @@ const Live=(()=>{
    if(it.src==="occ"){const s=slot(P,it,true);
     if(v.amt!==undefined){if((+v.amt||0)===(+r.amt||0))delete s.amt;else s.amt=+v.amt||0;}
     if(v.date!==undefined){if(!v.date||v.date===dayIn(it.occ.ym,r.rec.day))delete s.date;else s.date=v.date;}
-    fields(r,{name:v.name,cur:v.cur,bank:v.bank,vat:v.vat},h.k==="inflows");subOf(r,v,h.k);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;tidy(P,it);r.m={t:now,by};personal(P,h);return r;}
-   fields(r,v,h.k==="inflows");subOf(r,v,h.k);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;
+    fields(r,{name:v.name,cur:v.cur,bank:v.bank,vat:v.vat},h.k==="inflows");subOf(r,v,h.k);whoseAll(P,h,v);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;tidy(P,it);r.m={t:now,by};personal(P,h);return r;}
+   fields(r,v,h.k==="inflows");subOf(r,v,h.k);whoseOf(r,v,h.k);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;
    if(v.date!==undefined){r.date=v.date||"";if(r.date)delete r.mon;else if(v.mon)r.mon=v.mon;}
    r.m={t:now,by};personal(P,h);return r;},
   // «Удалить»: a one-off row goes; a month of a repeating row is switched off for that month; a computed tax
@@ -4541,14 +4587,14 @@ const Live=(()=>{
   // exceptions of that month and later takes over, remembering the chain it continues. The past is never
   // rewritten. v: {name, amt, cur, bank, vat, date} — a date here is the month's new day, for every month on.
   onward(P,it,v,id,now,by){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return null;const r=h.r,ym=it.occ.ym;
-   const put=x=>{fields(x,v,h.k==="inflows");if(isD(v.date))x.rec.day=+v.date.slice(8);const e=obj(x.rec.x)?x.rec.x[ym]:null;
+   const put=x=>{fields(x,v,h.k==="inflows");whoseOf(x,v,h.k);if(isD(v.date))x.rec.day=+v.date.slice(8);const e=obj(x.rec.x)?x.rec.x[ym]:null;
     if(obj(e)){if(v.amt!==undefined)delete e.amt;if(isD(v.date))delete e.date;if(!Object.keys(e).length)delete x.rec.x[ym];if(!Object.keys(x.rec.x).length)delete x.rec.x;}x.m={t:now,by};return x;};
-   if(ym<=r.rec.from)return put(r);
+   if(ym<=r.rec.from){put(r);whoseAll(P,h,v,ym);return r;}
    const n=JSON.parse(JSON.stringify(r)),xo=obj(r.rec.x)?r.rec.x:{},xa={},xb={};Object.keys(xo).forEach(k=>{(k<ym?xa:xb)[k]=xo[k];});
    n.id=String(id);n.rec.from=ym;n.rec.chain=String(r.rec.chain||r.id);
    r.rec.to=ymAdd(ym,-1);if(Object.keys(xa).length)r.rec.x=xa;else delete r.rec.x;
    if(Object.keys(xb).length)n.rec.x=JSON.parse(JSON.stringify(xb));else delete n.rec.x;
-   P[h.k].splice(h.i+1,0,n);return put(n);},
+   P[h.k].splice(h.i+1,0,n);put(n);whoseAll(P,h,v,ym);return n;},
   // [И дальше так же] on a month that was paid at another sum: from the next month on the row is what came.
   same(P,it,id,now,by){return write.onward(P,{row:it.row,occ:{ym:ymAdd(it.occ.ym,1)}},{amt:r2(it.done.got/(it.factor||1))},id,now,by);},
   // «…и дальше» of a delete, of «Не придёт» and of «Не платим»: the repeat ends before this month (the row itself
@@ -4838,7 +4884,11 @@ const Trial=(()=>{
     note:`Новый расход идёт каждый месяц и дальше ${wide?60:H} дней — этого проба уже не видит.`};}
   if(c.k==="draw"){
    const ok=isYm(c.from),from=ok?drawFrom(M,h.chain,c.from):"",cur=ok?drawCur(M,h.chain,c.from):h.r.cur,many=draws(M).length>1;
-   const say=(num(c.amt)&&c.amt===0?`мы перестанем выводить с ${from?monG(from):"…"}`:`мы будем выводить по ${num(c.amt)?money(c.amt,cur):"…"} в месяц, начиная с ${from?monG(from):"…"}`)+(many?` — строка «${nm(h.r)}»`:"");if(off)return Object.assign({say},off);
+   // (Two withdrawals of one name are told apart by whose they are - in the line as in the list they were chosen from.)
+   // (Whose: of the months the change reaches - the parts of a chain may belong to different founders.)
+   const twin=many&&draws(M).filter(q=>nmOf(q.r).toLowerCase()===nmOf(h.r).toLowerCase()).length>1,reach=ok?drawIts(M,h.chain,c.from):[];
+   const owners=[...new Set((reach.length?reach.map(it=>it.whose||""):[h.r.whose||""]).filter(w=>FN[w]))],who=twin&&owners.length?`, <span class="td-nm">вывод ${owners.map(w=>FN[w]).join(" и ")}</span>`:"";
+   const say=(num(c.amt)&&c.amt===0?`мы перестанем выводить с ${from?monG(from):"…"}`:`мы будем выводить по ${num(c.amt)?money(c.amt,cur):"…"} в месяц, начиная с ${from?monG(from):"…"}`)+(many?` — строка «${nm(h.r)}»${who}`:"");if(off)return Object.assign({say},off);
    const its=drawIts(M,h.chain,c.from),inH=its.filter(it=>it.day<=end),rest=drawRest(M,h.chain,c.from),inst=it=>`${dYF(M,it.day)} — вместо ${money(it.amt,it.cur)}`;
    return{say,meta:`в ${H} дней `+(inH.length?`${plural(inH.length,"попадает","попадают","попадают")} ${inH.length} ${plural(inH.length,"вывод","вывода","выводов")}: ${and(inH.map(inst))}`:"не попадает ни одного вывода")+also(and(mid(its).map(inst))),
     note:(many?"В плане несколько ежемесячных выводов: проба меняет один, остальные остаются как есть.":"")+(rest.length?`${many?" ":""}С ${monG(rest[0].occ.ym)} этот вывод в плане в другой валюте (${rest[0].cur}): те месяцы проба не меняет.`:"")};}
@@ -4929,7 +4979,7 @@ const Trial=(()=>{
  const opt=(list,val)=>list.map(o=>`<option value="${esc(o[0])}"${String(o[0])===String(val)?" selected":""}>${esc(o[1])}</option>`).join("");
  const fld=(label,inner,wide)=>`<label class="fld${wide?" ed-wide":""}"><span>${label}</span>${inner}</label>`;
  // The rows a select offers. Two of one name are told apart by their day and their sum.
- const tell=r=>r.rec?`${+r.rec.day}-го, ${money(+r.amt||0,r.cur)}`:`${r.date?dRu(r.date)+", ":""}${money(+r.amt||0,r.cur)}`;
+ const tell=r=>(FN[r.whose]&&!r.ptax?FN[r.whose]+", ":"")+(r.rec?`${+r.rec.day}-го, ${money(+r.amt||0,r.cur)}`:`${r.date?dRu(r.date)+", ":""}${money(+r.amt||0,r.cur)}`);
  const named=hs=>{const n={};hs.forEach(h=>{const k=nmOf(h.r).toLowerCase();n[k]=(n[k]||0)+1;});return hs.map(h=>[h.chain,nmOf(h.r)+(n[nmOf(h.r).toLowerCase()]>1?" · "+tell(h.r):"")]);};
  const monthOpts=M=>months(M).map(m=>[m,`с ${monG(m)} ${m.slice(0,4)}`]);
  const lead=()=>changes.length?"и ":"Что если ",stops=()=>changes.filter(q=>q.k==="stop"),line=(M,d)=>{const w=words(M,d,stops());return lead()+w.say+(w.meta?" · "+w.meta:"");};
@@ -5182,6 +5232,19 @@ const Ed=(()=>{
   if(best)return (gbp>0&&gbp<0.7*best.owed?"p|":"w|")+best.key;
   return perOpen().some(p=>p.state!=="typed"&&!!date&&day(p)<=31&&gbp>=0.5*p.owed&&gbp<=1.5*p.owed)?"":"own";
  }
+ // «Чей вывод» (the owner's decision of 12 October 2026). A withdrawal is everybody's - any founder's taking uses
+ // it up - or one founder's, and then only his takings do. One select in the card of a withdrawal and in «Добавить»;
+ // it carries data-ed-f, so a reader's page shuts it with every other field.
+ const whoseSelect=v=>`<label class="fld" for="ed-whose"><span>Чей вывод</span><select id="ed-whose" data-ed-f="whose">${opt([["","общий"]].concat(FOUNDERS.map(k=>[k,FN[k]])),FOUNDERS.includes(v)?v:"")}</select></label>`;
+ const whoseSay=f=>FN[f]?`вывод ${FN[f]}`:"вывод общий";
+ // Saying whose a withdrawal is deals the table's rows over. While some withdrawal carries «Оплачено» that no
+ // statement has confirmed yet, that can change what its mark stands for, and «Денег сейчас» with it - with nothing
+ // new from the bank. It is never silent: the toast names the figure as it now is.
+ const nowOf=()=>{const m=Plan.model();return m&&!m.v0&&typeof m.now==="number"?m.now:null;};
+ const nowSay=n0=>{const n1=nowOf();return n0!=null&&n1!=null&&Math.abs(n1-n0)>=0.5?` · «Денег сейчас» теперь ${fmt(n1)}: пересчитана отметка «Оплачено» на выводе`:"";};
+ // What a name says of whose a NEW withdrawal is: the one founder named in it, in Latin or in Russian - or nobody
+ // (two names say nothing). A proposal in the form and no more: a row that is stored is never read by its name.
+ const whoseBy=name=>{const s=" "+String(name||"").toLowerCase()+" ",R={mika:/[^a-zа-яё](mika|мик[аиеу]|микой)[^a-zа-яё]/,misha:/[^a-zа-яё](misha|миш[аиеу]|мишей)[^a-zа-яё]/,vanya:/[^a-zа-яё](vanya|ван[яиею]|ваней)[^a-zа-яё]/},hit=FOUNDERS.filter(k=>R[k].test(s));return hit.length===1?hit[0]:"";};
  function ofSelect(v){
   const ps=perOpen(),known=x=>x==="own"||x===""||ps.some(p=>x.slice(2)===p.key),val=v==null?"own":v;
   const o=[["","Выберите, к чему относится"],["own","Отдельный налог или платёж"]].filter(x=>x[0]||val==="");
@@ -5275,7 +5338,7 @@ const Ed=(()=>{
   const d=it.done,inn=it.dir>0,out=[];
   if(it.kind==="tax"){const p=M.taxes.periods.find(x=>x.key===it.tax.key),r=M.taxes.rules.find(x=>x.id===it.tax.rule);
    out.push(p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.");}
-  else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?"вывод: закроется тем, что возьмут фаундеры":it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
+  else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?(FN[it.whose]?`вывод ${FN[it.whose]}: закроется тем, что возьмёт ${FN[it.whose]}`:"вывод: закроется тем, что возьмут фаундеры"):it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
   if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
   // What has happened is counted at the rate of its own day, and the card says which.
   if(d&&d.fx>0)out.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
@@ -5358,7 +5421,7 @@ const Ed=(()=>{
    <label class="fld" for="ed-cur"><span>Валюта</span><select id="ed-cur" data-ed-f="cur"${o.lockCur?" disabled":""}>${opt(CURS.map(c=>[c,c]),v.cur)}</select></label>
    <label class="fld" for="ed-bank"><span>Банк</span><select id="ed-bank" data-ed-f="bank"${o.lockBank?" disabled":""}>${opt(BANKS.map(b=>[b,b]),v.bank)}</select></label>
    <div class="fld ed-wide"><label class="lbl" for="ed-date">Дата</label><div class="ed-mv"><button type="button" data-ed-shift="-1" title="На день раньше" aria-label="На день раньше">‹</button><input id="ed-date" data-ed-f="date" type="date" max="${dAdd(Live.today(),731)}" value="${esc(v.date)}"><button type="button" data-ed-shift="1" title="На день позже" aria-label="На день позже">›</button></div></div>
-   ${o.of!==undefined?ofSelect(o.of):""}
+   ${o.of!==undefined?ofSelect(o.of):""}${o.whose!==undefined?whoseSelect(o.whose):""}
   </div>${o.lockName?"":`<datalist id="ed-names">${names(o.list).map(x=>`<option value="${esc(x.l)}">`).join("")}</datalist>`}
   ${boxes?`<div class="ed-chks">${boxes}</div>`:""}${o.note?`<span class="note">${o.note}</span>`:""}`;
  }
@@ -5375,8 +5438,10 @@ const Ed=(()=>{
    const o={list:it.list,lockName:tax,lockCur:tax,lockBank:tax,occ:it.occ};
    if(it.list==="inflows")o.vat=it.vat;
    if(tax)o.amtLabel="Сумма по декларации";
-   else{o.monthly=ticked(it);if(it.list==="other")o.sub=!!it.sub;if(occ)o.note=it.occ.last?"название, банк и валюта — для всех месяцев этой строки":`сумма и дата — только для ${monG(it.occ.ym)}, если не нажать «${MONF[+it.occ.ym.slice(5)-1]} и дальше»; название, банк и валюта — для всех месяцев`;}
+   else{const all=it.wd?"название, банк, валюта и «чей вывод»":"название, банк и валюта";
+    o.monthly=ticked(it);if(it.list==="other")o.sub=!!it.sub;if(occ)o.note=it.occ.last?`${all} — для всех месяцев этой строки`:`сумма и дата — только для ${monG(it.occ.ym)}, если не нажать «${MONF[+it.occ.ym.slice(5)-1]} и дальше»; ${all} — для всех месяцев`;}
    if(it.list==="taxes"&&!tax&&!it.ptax)o.of=ofValue(it);
+   if(it.wd)o.whose=it.whose||"";
    body=fields({name:it.name,amt:tax?Math.round(it.amt):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
   }
   // A closed row has nothing left to change - except what a tax row was for. A payment the bank showed before
@@ -5384,28 +5449,35 @@ const Ed=(()=>{
   // it (Mika, 8 October 2026: three instalments paid, two counted, and no way to say so on a row already closed).
   const ofOnly=done&&it.list==="taxes"&&!tax&&!it.ptax;
   if(ofOnly)body=`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
-  const save=ofOnly?'<button class="sm primary" data-ed-save>Сохранить</button>':done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
+  // The same for a withdrawal that is closed: whose it is can still be said. A row called after one founder and
+  // used up by what the others took is closed - and it is the row this field was asked for (Mika, 12 October 2026).
+  const whoseOnly=done&&!!it.wd;
+  if(whoseOnly)body=`<div class="ed-grid">${whoseSelect(it.whose||"")}</div>${occ?'<span class="note">«чей вывод» — для всех месяцев этой строки</span>':""}`;
+  const save=ofOnly||whoseOnly?'<button class="sm primary" data-ed-save>Сохранить</button>':done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
   return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it)}${body}${askBox(it)}
    <div class="ed-foot"><div class="row">${actions(it)}</div><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button>${save}</div></div></article>`;
  }
  const miss=(card,k,msg)=>{const f=q(card,`[data-ed-f="${k}"]`);if(f)f.focus();toast(msg);};
  function rowSave(card,mode){
   const it=item(card.dataset.edId);if(!it||Plan.lost())return;
-  // The card of a closed tax row holds one field: what the row was for.
-  if(it.state==="done"){const e=q(card,'[data-ed-f="of"]');if(!e)return;
+  // The card of a closed row holds one field: whose a withdrawal is, or what a tax row was for.
+  if(it.state==="done"){const w=q(card,'[data-ed-f="whose"]');
+   if(w){const to=FOUNDERS.includes(w.value)?w.value:"";if(to===(it.whose||"")){cur=null;return Plan.redraw();}
+    const say=`${it.name}: ${whoseSay(to)}${it.src==="occ"?" — для всех месяцев":""}`,n0=nowOf();cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{whose:to},now,by);}))toast(say+nowSay(n0),back);return;}
+   const e=q(card,'[data-ed-f="of"]');if(!e)return;
    if(e.value==="")return miss(card,"of","Выберите, к чему относится этот налог");
    if(e.value===ofValue(it)&&it.of!==null){cur=null;return Plan.redraw();}
    const say=`${it.name}: ${e.options[e.selectedIndex].textContent.trim().replace(/^./,c=>c.toLowerCase())}`,of=ofStore(e.value);
    cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{of},now,by);}))toast(say,back);return;}
   const f=k=>q(card,`[data-ed-f="${k}"]`),was=it.src==="occ",tick0=ticked(it),tax=it.src==="tax",amt0=tax?Math.round(it.amt):it.amt,of0=f("of")?ofValue(it):"";
-  const v={name:f("name").value.trim(),amt:+f("amt").value,cur:f("cur").value,bank:f("bank").value,date:f("date").value,vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:"",sub:f("sub")?f("sub").checked:!!it.sub};
+  const v={name:f("name").value.trim(),amt:+f("amt").value,cur:f("cur").value,bank:f("bank").value,date:f("date").value,vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:"",sub:f("sub")?f("sub").checked:!!it.sub,whose:f("whose")?f("whose").value:it.whose||""};
   if(f("amt").value===""||!(v.amt>=0))return miss(card,"amt","Впишите сумму");
   // A month of a repeating row with no amount is not a month of nothing: the tick says that.
   if(!(v.amt>0)&&forecast(it))return miss(card,"amt",NOZERO);
   if(!okDate(v.date))return miss(card,"date",FARMSG);
   if(!v.date&&(v.mon||forecast(it)))return miss(card,"date",forecast(it)?"У этой строки дата есть всегда":"Чтобы повторять каждый месяц, нужна дата");
   if(f("of")&&v.of==="")return miss(card,"of","Выберите, к чему относится этот налог");
-  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==it.date,vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub};
+  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==it.date,vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.whose||"")};
   // Nothing of the row was changed and «Частично» stands open in the card: the press on the card's own button — or
   // Enter in one of the row's fields — is the answer to that question, with its refusals. Read as «nothing to
   // save», it closed the card without a word, and the sum and the day just typed went with it. A change to the row
@@ -5419,9 +5491,12 @@ const Ed=(()=>{
   const moved=ch.name&&it.list==="taxes"&&!tax&&!!owner({c:"tax",l:v.name});
   // A row of its own whose new date is in another month leaves the month it was opened in: the toast says where to.
   const away=ch.date&&!was&&!tax&&!!v.date&&!!it.ym&&v.date.slice(0,7)!==it.ym;
-  const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)
-   :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
-  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(left?" · «Частично» не записано — ответьте на него заново":""),back);
+  // «Чей вывод» is the row's: said of a month of a repeat it is written to every month, whatever the press was for.
+  const wt=ch.whose?" · "+whoseSay(v.whose)+(was&&!onward?" — для всех месяцев":""):"";
+  const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)+wt
+   :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${wt}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
+  const n0=ch.whose?nowOf():null;
+  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(ch.whose?nowSay(n0):"")+(left?" · «Частично» не записано — ответьте на него заново":""),back);
   drop(gone);
  }
  // What a change to a row's fields writes. `v` is the row as it should now read, `ch` names the fields that differ
@@ -5430,7 +5505,7 @@ const Ed=(()=>{
  // a new amount or date is that month's alone (Live.write.set); the tick put on a row makes it repeat from its own
  // month, taken off a month it ends the repeat after that month. Returns the stored row, if there is one.
  function apply(P,it,v,ch,now,by){
-  const o={};["name","amt","cur","bank","date","vat","sub"].forEach(k=>{if(ch[k])o[k]=v[k];});
+  const o={};["name","amt","cur","bank","date","vat","sub","whose"].forEach(k=>{if(ch[k])o[k]=v[k];});
   if(ch.of)o.of=ofStore(v.of);
   if(o.date===""&&it.src==="row")o.mon=it.ym;
   const r=Object.keys(o).length?W.set(P,it,o,now,by):null;
@@ -5443,7 +5518,7 @@ const Ed=(()=>{
  // «{Октябрь} и дальше»: the same change for this month and every month after it — the row itself where this is
  // its first month, a new row that takes over from this month otherwise (Live.write.onward). The past stays as it was.
  function from(P,it,v,ch,now,by){
-  const o={};["name","amt","cur","bank","date","vat"].forEach(k=>{if(ch[k])o[k]=v[k];});
+  const o={};["name","amt","cur","bank","date","vat","whose"].forEach(k=>{if(ch[k])o[k]=v[k];});
   const r=W.onward(P,it,o,uid(),now,by);
   if(r&&ch.sub){if(v.sub)r.sub=true;else delete r.sub;}
   if(r&&ch.of)r.of=ofStore(v.of);
@@ -5456,9 +5531,11 @@ const Ed=(()=>{
   const d=cur.draft,what=cur.what;
   const chips=`<div class="row" role="group" aria-label="Что добавить">${WHAT.map(([k,n])=>`<button class="chip${what===k?" active":""}" data-ed-what="${k}" aria-pressed="${what===k}">${n}</button>`).join("")}</div>`;
   // «Дивиденды» are of two kinds: money the founders take, and a founder's own tax paid through the studio.
-  const kind=what==="div"?`<div class="row" role="group" aria-label="Что именно">${[["wd","Вывод"],["ptax","Личный налог"]].map(([k,n])=>`<button class="chip${cur.kind===k?" active":""}" data-ed-kind="${k}" aria-pressed="${cur.kind===k}">${n}</button>`).join("")}<span class="note">${cur.kind==="ptax"?"личный налог фаундера: страница его не считает, его вписывают строкой":"сколько и когда решили взять — одной строкой на всех"}</span></div>`:"";
+  const kind=what==="div"?`<div class="row" role="group" aria-label="Что именно">${[["wd","Вывод"],["ptax","Личный налог"]].map(([k,n])=>`<button class="chip${cur.kind===k?" active":""}" data-ed-kind="${k}" aria-pressed="${cur.kind===k}">${n}</button>`).join("")}<span class="note">${cur.kind==="ptax"?"личный налог фаундера: страница его не считает, его вписывают строкой":"сколько и когда решили взять — общий вывод или одного фаундера"}</span></div>`:"";
   const o=what?{list:listOf(what),nameLabel:what==="div"&&cur.kind==="ptax"?"Чей налог":NEW[what],vat:what==="inflows"?!!d.vat:undefined,monthly:!!d.monthly}:null;
   if(what==="taxes")o.of=cur.ofSet?cur.of:(cur.of=ofGuess(d.name,toG((+d.amt||0),d.cur),d.date));
+  // Whose a new withdrawal is: what its name says, until the founder chooses for himself.
+  if(what==="div"&&cur.kind!=="ptax")o.whose=cur.whoseSet?d.whose||"":(d.whose=whoseBy(d.name));
   const body=what?fields(d,o)+`<span class="note" data-ed-n="last"></span>`+(what==="inflows"?`<span class="note" data-ed-n="client">${clientNote()}</span>`:"")+`<span class="note" data-ed-n="also">${esc(alsoNote())}</span><div class="ed-foot"><span></span><div class="row"><button class="sm ghost" data-ed-x>Отмена</button><button class="sm primary" data-ed-save>Добавить</button></div></div>`
    :`<div class="ed-foot"><span class="note">В плане только то, что вписано: разовые строки и строки «каждый месяц».</span><button class="sm ghost" data-ed-x>Отмена</button></div>`;
   return `<article class="ed-card" data-ed-card="add"><div class="ed-h">Что добавить в план</div>${chips}${kind}${body}</article>`;
@@ -5480,8 +5557,8 @@ const Ed=(()=>{
   const of=list==="taxes"?(q(card,'[data-ed-f="of"]')||{}).value:"own";
   if(of==="")return miss(card,"of","Выберите, к чему относится этот налог");
   const mon_=cur.mon,ptax=list==="div"&&cur.kind==="ptax",own=list==="taxes"&&!!owner({c:"tax",l:name}),ck=d.vat&&cur.vatSet?newClient():"";
-  const tw=d.monthly&&d.date?twins(own?"div":list,name,d.date.slice(0,7)):[];
-  const say=(d.date?`В плане: ${name}`:`В плане без даты: ${name}. В расчёт пойдёт, когда появится дата`)+(own?" · личный налог — перенесён в «Дивиденды»":"")+(ck?" · запомню для клиента: UK, с VAT":"")+(tw.length?" · "+twinWords(tw):"");cur=null;
+  const tw=d.monthly&&d.date?twins(own?"div":list,name,d.date.slice(0,7)):[],whose=list==="div"&&!ptax&&FOUNDERS.includes(d.whose)?d.whose:"";
+  const say=(d.date?`В плане: ${name}`:`В плане без даты: ${name}. В расчёт пойдёт, когда появится дата`)+(whose?" · "+whoseSay(whose):"")+(own?" · личный налог — перенесён в «Дивиденды»":"")+(ck?" · запомню для клиента: UK, с VAT":"")+(tw.length?" · "+twinWords(tw):"");cur=null;
   // Every inflow says whether its invoice carries VAT — what the founder saw is what the plan counts. A tax says
   // what it is (`of`); one with a founder in its name is a personal tax and goes to «Дивиденды» (Live.write.add
   // sees to that).
@@ -5489,7 +5566,7 @@ const Ed=(()=>{
    const r={id:uid(),name,amt,cur:d.cur,bank:d.bank,on:true,tag:"",info:false,date:d.date||"",c0:now,m:{t:now,by},blk:BLK0[list]};
    if(!r.date)r.mon=mon_||Live.today().slice(0,7);if(list==="inflows")r.vat=!!d.vat;if(what==="subs")r.sub=true;
    if(list==="taxes")r.of=ofStore(of);
-   if(ptax){r.ptax=true;const f=owner({c:"tax",l:name});if(f)r.f=f;}
+   if(ptax){r.ptax=true;const f=owner({c:"tax",l:name});if(f)r.f=f;}else if(whose)r.whose=whose;
    relink(r,list);const k=W.add(P,list,r);
    if(d.monthly)W.tick(P,{id:r.id,twins:tw});
    if(ck)W.client(P,M,ck,"vat");
@@ -5774,7 +5851,8 @@ const Ed=(()=>{
    d[k]=t.type==="checkbox"?t.checked:t.value;
    // A name the table knows brings what the table knows of it: the bank and the currency of its latest payment —
    // until the founder chooses his own — and, in words, what that payment was. The sum is his to type.
-   if(k==="bank")cur.bankSet=true;if(k==="cur")cur.curSet=true;if(k==="monthly")cur.monSet=true;
+   if(k==="bank")cur.bankSet=true;if(k==="cur")cur.curSet=true;if(k==="monthly")cur.monSet=true;if(k==="whose")cur.whoseSet=true;
+   if(k==="name"&&cur.what==="div"&&cur.kind!=="ptax"&&!cur.whoseSet){const g=whoseBy(d.name),e=q(card,'[data-ed-f="whose"]');if(e&&g!==(d.whose||"")){d.whose=g;e.value=g;}}
    if(k==="name"){const l=lastOf(listOf(cur.what),d.name);
     if(l){const c=l.o&&CURS.includes(l.o.cur)?l.o.cur:"GBP",put=(f,v)=>{d[f]=v;const e=q(card,`[data-ed-f="${f}"]`);if(e)e.value=v;};
      if(!cur.bankSet&&BANKS.includes(l.b))put("bank",l.b);if(!cur.curSet)put("cur",c);}
