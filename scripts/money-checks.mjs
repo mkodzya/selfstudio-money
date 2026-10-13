@@ -6640,10 +6640,14 @@ await run('rv-wdmark', 'a change to another line of the plan moves neither a mar
   // a marked row made «каждый месяц», and back: the mark moves into the month and out of it, and its memory with it
   const Qt1 = await tap(La, Qb1, 'wB', 'tick'), Qt2 = await tap(La, Qt1, 'wB@2026-10', 'untick');
   same([held(Qt1, 'wB', '2026-10'), st(await C(La, Qt1, D), 'wB@2026-10'), held(Qt2, 'wB'), st(await C(La, Qt2, D), 'wB')], [[2000], ['mark', 2000, ['m1']], [2000], ['mark', 2000, ['m1']]], 'the marked withdrawal ticked «каждый месяц» and the tick taken off again: it is the same mark, and it holds what it held');
-  // what is said of the marked withdrawal itself. Its sum made smaller: it holds no more than its sum …
+  // what is said of the marked withdrawal itself. Its sum made another (no control of the page says that of a marked
+  // row; «… и дальше» in an earlier month's card does - below): that is its founder's word about it, and it is dealt afresh
   const Qs = await tap(La, Qb1, 'wB', 'set', { amt: 1500 }, LATER, BY), Ms = await C(La, Qs, D);
-  same([st(Ms, 'wB'), st(Ms, 'w0'), held(Qs, 'wB')], [['row', 1500, ['m1']], ['waiting', 500, ['m1']], [2000]], 'the marked withdrawal\'s own sum made 1,500: the row it remembers gives it 1,500 and no more, and the 500 over goes on by the walk');
-  // … its day moved within the month (no control of the page says that of a marked row; «… и дальше» in an earlier month's card does - below): it holds what it held
+  same([st(Ms, 'wB'), st(Ms, 'w0'), none(Qs)], [['mark', 0, []], ['row', 2000, ['m1']], true], 'the marked withdrawal\'s own sum made 1,500: no memory holds a withdrawal against what is said of it - the walk deals it again by the plan as it is, and Mika\'s row closes the earlier withdrawal, which is everybody\'s now');
+  // … and the same sum set by a page from before the rule, which neither sees nor keeps: the memory stays in the plan, and gives the withdrawal no more than its sum
+  const Mraw = await C(La, await wr(Qb1, 'set', item(Mb1, 'wB'), { amt: 1500 }, LATER, BY), D);
+  same([st(Mraw, 'wB'), st(Mraw, 'w0')], [['row', 1500, ['m1']], ['waiting', 500, ['m1']]], 'the marked withdrawal\'s sum made 1,500 by a bare writer: the row it remembers gives it 1,500 and no more - no withdrawal holds more than its sum - and the 500 over goes on by the walk');
+  // … its day moved (a bare hand here; on the page «… и дальше» in an earlier month's card can do it - below): it holds what it held
   const Qday = await tap(La, Qb1, 'wB', 'set', { date: '2026-11-20' }, LATER, BY), Mday = await C(La, Qday, D);
   same([st(Mday, 'wB'), st(Mday, 'w0'), item(Mday, 'wB').wd.from, [mem(Qday, 'wB').from, mem(Qday, 'wB').to]], [['mark', 2000, ['m1']], ['waiting', 0, []], '2026-11-10', ['2026-10-02', '2026-11-01']], 'the marked withdrawal\'s own day moved to 20 November: Mika\'s row of 9 October is outside the window that day gives - it is the same mark, and the withdrawal holds the row all the same');
   // … and given to a founder by a page from before the rule: the memory is of a withdrawal that was everybody's, and is not in force
@@ -6893,8 +6897,9 @@ await run('rv-wdmark', 'a change to another line of the plan moves neither a mar
     const X = await edit(Lfl, Qfl, f, T5), M1 = await C(Lfl, X, T5), one = M1.items.find((it) => it.wd && it.date === '2026-11-02');
     same([st(Mfl, 'wF@2026-10'), st(Mfl, 'wF@2026-11'), [one.id, one.done.by, one.wd.got, one.rows, one.wd.to], moved(M1, Mfl), !none(X)], [['mark', 1000, ['r1']], ['due', 2500, ['r2']], ['wF', 'mark', 1000, ['r1'], '2026-11-22'], [0, 0, 0], true],
       `a marked month of a repeat, moved into November; ${how}: the repeat is a row again, with a window that reaches the row of the 19th - it is the same mark, it holds the 1,000 it held, and «Денег сейчас» does not move`); }
-  // The marked month's own sum made smaller from an earlier month's card, and put back: it holds less while the sum
-  // is smaller, and what it held when the sum is back - a memory is not lowered by what a smaller sum could hold.
+  // The marked month's own sum made smaller from an earlier month's card, and put back: that is said of the marked
+  // month too, so it is dealt by the walk both times - it holds less while the sum is smaller, and what it held
+  // when the sum is back.
   const T6 = '2026-10-20', Lsm = ledP({ tx: [filed('r1', '2026-10-19', -3000, 'mika', '', { b: 'Barclays', at: ms('2026-10-19T18:00:00Z') }), reach('Wise', '2026-10-10', 'GBP', ms('2026-10-10T18:00:00Z'))] });
   const Qsm = await edit(Lsm, plan(every('wQ', 5000, 28, '2026-09', { c0: C8 })), async (X) => wr(X, 'mark', item(await C(Lsm, X, T6), 'wQ@2026-10'), T6, ms('2026-10-20T10:00:00Z'), BY), T6), Msm = await C(Lsm, Qsm, T6);
   const octOf = (M) => { const it = M.items.find((x) => x.wd && x.occ && x.occ.ym === '2026-10'); return [it.done.by, it.wd.got, it.rows, it.amt]; }, sepOf = (M) => M.items.find((x) => x.wd && x.occ && x.occ.ym === '2026-09');
