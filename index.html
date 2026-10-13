@@ -3251,10 +3251,11 @@ const Cash=(()=>{
 //                                  statement, and is later than its account's balance: what it holds of every taking
 //                                  it may count, as a memory would say it (paid.saw) - {w?, from, to, rows:[[ref,
 //                                  gbp]…]}; a taking of a balance's own day is [ref, gbp, at] there
-//    sawDay                        for any other withdrawal with a mark that is no word, while some account has a
-//                                  taking of its balance's own day: what it holds of those takings alone - the ones
-//                                  of its window, and any it holds - in the same shape (rows may be empty). Absent
-//                                  where no account has such a taking: a plan without one is read as it always was
+//    sawDay                        for any other withdrawal that is switched on, has a sum and a mark that is no
+//                                  word, while some account has a taking of its balance's own day: what it holds of
+//                                  those takings alone - the ones of its window, and any it holds - in the same
+//                                  shape (rows may be empty). Absent where no account has such a taking: a plan
+//                                  without one is read as it always was
 //    whose                         for a withdrawal: the founder whose it is, "" when it is everybody's
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
@@ -3419,30 +3420,36 @@ const Cash=(()=>{
 //    keep by the table it has, and deal over the rows it did not know: it does not change the plan at all - its save of
 //    the plan names the revision of its table, and the stand does not take it (Cash, push; Plan.lost). A page from
 //    before the rule neither sees nor keeps: after its changes rows are dealt over as they always were (a memory that
-//    such a page finds in the plan it leaves there, in force). Two marked withdrawals do not pass rows to one
+//    such a page finds in the plan it leaves there, in force - but a page from before the takings of a balance's day
+//    were held reads a memory only for a mark that can count: a plan that holds one for a mark that cannot is read
+//    by such a tab as if it held none, and until it is reloaded two windows can show two figures for one plan). Two marked withdrawals do not pass rows to one
 //    another: when one of them is given to a founder, the rows
 //    it lets go are not the other's - an open line takes them, or none. A withdrawal in another currency holds to a
 //    memory in pounds: one written on a day its sum was worth fewer pounds gives no more on a later day. A marked
 //    month that a change takes out of the plan and a later one brings back («каждый месяц» taken off an earlier
 //    month, then «Повтор продолжается») comes back with no memory. A mark that is inside its account's balance - a
-//    line ticked in «Что из этого уже прошло?», or one a balance was typed after - holds to no memory: its own worth
-//    is in no figure of «Денег сейчас», and its zeros would only send rows on to the next withdrawal. The month's
-//    fact may move by such a mark, as it always could. «Денег сейчас» could too, by a row dated on the very day of a
+//    line ticked in «Что из этого уже прошло?», or one a balance was typed after - holds to no memory but for the
+//    takings of a balance's day (below): its own worth is in no figure of «Денег сейчас», and its zeros would only
+//    send rows on to the next withdrawal. The month's fact may move by such a mark, as it always could. «Денег сейчас» could too, by a row dated on the very day of a
 //    typed balance - whether such a row is inside the balance or after it goes by the line that holds it, and a
 //    change to another line turned that, both ways (a row inside the balance taken off again; an afternoon's taking
 //    put inside it). For a founder's taking it does no longer: the takings of a balance's own day are held by every
 //    marked withdrawal, whether its mark can count or not (RECONCILIATION, D2; the check rv-wdday, and
 //    checks/withdrawals/sameday.cjs). Known of that, and kept. It is the walk that says first which line a taking
-//    of the day is - a plan written so that the row lies in an unmarked line beside a ticked one counts the row
-//    after the balance, as it always did; what is new is that a change to another line does not turn it. A marked
-//    withdrawal written on one bank that holds a taking of ANOTHER bank's balance day may still wait for its own
-//    bank's statement, and then the row stands for the mark only once the withdrawal is full - which other rows,
-//    not held, can still change. A taking that is PART of a marked withdrawal stands for the mark only when the
-//    withdrawal is closed: with a balance typed for an earlier day, such a part is inside the balance while the mark
-//    is worth the rest, and «Денег сейчас» is higher by the part until the rest comes - a statement moves that, not a
-//    change to the plan. And a row that is no founder's taking closes a line by its name and sum: of two lines of one
-//    payee and one sum, one of them marked, a change to the other - its day, its sum - can still say which of them
-//    the row of the day closed. A mark on a line of a bank nobody uploads statements of waits until a balance is typed for its
+//    of the day is - with a balance typed «на сейчас», a plan written so that the row lies in an unmarked line
+//    beside a ticked one counts the row after the balance, as it always did; what is new is that a change to another
+//    line does not turn it. A taking that is PART of a marked withdrawal stands for the mark only when the
+//    withdrawal is closed by its rows - full, or its mark's day passed by the statements: with a balance typed on a
+//    later day than the one it is for, such a part is inside the balance while the mark is worth the rest, and
+//    «Денег сейчас» is higher by the part until the rest comes - a statement moves that, not a change to the plan.
+//    But where the marked withdrawal holds a taking of ANOTHER ACCOUNT'S balance day - another bank's, or another
+//    currency's or another numbered account of its own bank - and still waits for a statement to pass its mark's
+//    day, a change to another line can move it too: whether the withdrawal is full goes by its other rows, which are
+//    not held, and by its window. (On one account this cannot be: the row of the balance's day ends the wait, or the
+//    mark is one that counts and holds every row.) And a row that is no founder's taking closes a line by its name -
+//    or, for a line the table has no name for and for any marked line, by its sum, within the tolerance: where two
+//    lines could take one row of the day and one of them is marked, a change to the other - its day, its sum, its
+//    deletion, switched off - can still say which of them the row closed, whoever the payee of each. A mark on a line of a bank nobody uploads statements of waits until a balance is typed for its
 //    account, and so does its memory; and a mark waits for a statement of its BANK - one of another currency's
 //    account of that bank ends the wait, as it always did. And the walk's own rule that a row counts for a line only
 //    if it was uploaded after the line was written is not changed - also for a transfer that sat unsorted in «Разбор»
@@ -3967,7 +3974,7 @@ const Live=(()=>{
   // with them (`sd`), once.
   const SD=opts.sd instanceof Map?opts.sd:null;
   const dayMem=(it,S)=>{const s=S&&it.paid&&!word(it)&&obj(it.paid.saw)?it.paid.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to)||String(s.w||"")!==it.whose)return null;
-   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length>2&&!had.has(String(x[0]))&&S.get(String(x[0]))===x[2])had.set(String(x[0]),Math.max(0,+x[1]||0));});return had.size?{had,day:true}:null;};
+   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length>2&&!had.has(String(x[0]))&&S.has(String(x[0]))&&S.get(String(x[0]))===x[2])had.set(String(x[0]),isFinite(+x[1])?Math.max(0,+x[1]):0);});return had.size?{had,day:true}:null;};
   wds.forEach(it=>{it.wt=waits(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:dayMem(it,SD);it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
   // The takings: the rows of the founders' blocks that a bank gave a sum for. One name (`ref`) for one taking,
   // however often it is read in; of two rows that share one - the upload makes none - the first is the taking.
@@ -4803,14 +4810,17 @@ const Live=(()=>{
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
   // A change to the plan must not deal the rows of a marked withdrawal over (D2). The page makes every change
   // between these two. `see`, BEFORE it: what each withdrawal whose mark can count holds of every taking, as the
-  // table lies - nothing is written. `keep`, AFTER it: the plan is read without any memory; if every one of those
+  // table lies - and what every other marked withdrawal holds of the takings of a balance's own day (`day`) -
+  // nothing is written. `keep`, AFTER it: the plan is read without any memory; if every one of those
   // withdrawals still holds what it held, in the window it had, the plan is left with none - the change dealt
   // nothing of theirs over, and the page goes on counting as it always did; if one does not, each is given the
   // memory of what it held - and, of a taking the plan's window now reaches and did not, that it held none - and
   // holds it. A withdrawal the change itself gave to another founder, gave another sum, unmarked or switched
   // off is left to the walk: that is its founder's word; and so is one whose mark can no longer count - the
-  // change typed a balance for its account. A memory of a mark that counts no longer, or of a line that is gone, goes with
-  // the next change. A `seen` that is no list - the seeing failed - keeps nothing and takes nothing
+  // change typed a balance for its account. Of a mark that cannot count only the takings of a balance's day are
+  // kept, and only while the balance they were read against stands: what it held of each, and that it held none of
+  // one its window now reaches. Every change writes the memories anew or takes them out: one that is needed no
+  // longer - of a line that is gone, of a balance typed again - goes with the next change. A `seen` that is no list - the seeing failed - keeps nothing and takes nothing
   // out. The two hands that read more than the plan - `led` is the ledger and T the day, and each works the
   // model out - and they write nothing but memories. `keep` returns how many it wrote.
   see(P,led,T){if(!(Array.isArray(P.div)?P.div:[]).some(r=>obj(r)&&!r.ptax&&marksOf(r).length))return[];

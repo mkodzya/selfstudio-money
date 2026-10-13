@@ -7307,6 +7307,28 @@ await run('rv-wdday', 'a founder\'s row dated on the very day a balance was type
   same([round2(n2 - n0), await toastText(pg), await rowsOf('wV'), await rowsOf('wM'), await kept()], [-3000, 'Вывод wV: вывод Misha · «Денег сейчас» теперь £44,000: пересчитана отметка «Оплачено» на выводе', ['ok', 0, []], ['row', 3000, ['r1']], null],
     'the ticked line itself given to Misha: its founder\'s word - Vanya\'s row is not Misha\'s, it pays Vanya\'s line and is after the balance, and the toast names the figure');
   await pg.context().close();
+  // A sum typed in a row of «Касса» is seen before its first letter and kept after each: Misha's withdrawal of
+  // 7,000 holds his earlier row of 6,000; typed down to 3,000, the half of the row it lets go would fill the ticked
+  // withdrawal, which is everybody's, before Vanya's row of the day reached it.
+  const LK = ledger([filed('r0', '2026-10-02', -6000, 'misha', '', { at: AT2 }), filed('r1', T, -3000, 'vanya', '', { at: AT2 })]);
+  const PK = plan3({ banks: [bal('Wise', 'GBP', 47000, T, { at: SAT })], div: [w('w0', 7000, '2026-10-01', { whose: 'misha' }), w('wV', 3000, T, { paid: { on: T, at: SAT - 1, by: BY } })] });
+  const Mk = await C(LK, PK, T), Mkold = await C(LK, await wr(PK, 'set', item(Mk, 'w0'), { amt: 3000 }, TAP, BY), T);
+  const pk = await scene('wdday, a keystroke', LK, PK);
+  const seen = (id) => pk.evaluate((id) => { const m = window.__money.model({ H: 30 }), it = m.items.find((x) => x.id === id); return [m.now, it.done ? it.done.by : it.state, it.rows]; }, id);
+  const k0 = await seen('wV');
+  await goCash(pk);
+  await pk.fill(box('div', 'w0', 'amt'), '3000');
+  await puts('cash', 1);
+  same([k0, await seen('wV'), await pk.evaluate(() => { const p = window.__cash.state().div.find((x) => x.id === 'wV').paid; return p.saw ? p.saw.rows.map((x) => x[1]) : null; }), Mkold.now, st(Mkold, 'wV')], [[47000, 'row', ['r1']], [47000, 'row', ['r1']], [3000], 44000, ['row', 3000, ['r0']]],
+    'Misha\'s withdrawal typed down to 3,000 in its row of «Касса»: the 3,000 of his row it lets go are not dealt into the ticked withdrawal - the mark keeps its room for the row of the day it held; «Денег сейчас» stays 47,000. (Before the rule: 44,000)');
+  await pk.context().close();
+  // «Что если» asks of a copy of the plan, changed as the page changes the plan: the same trial on a monthly withdrawal.
+  const PW = { ...PK, div: [row('w0', 'Вывод', 7000, '2026-10-01', { blk: 'div', c0: AT1, whose: 'misha', rec: { day: 1, from: '2026-10' } }), PK.div[1]] };
+  const pw = await scene('wdday, a trial', LK, PW);
+  const tr = await pw.evaluate(() => window.__money.whatIf([{ k: 'draw', row: 'w0', amt: 3000, from: '2026-10' }]));
+  same([tr && tr.skipped.length, tr && tr.plan.now, tr && round2(tr.trial.now - tr.plan.now), store.cash.puts, await pw.evaluate(() => 'saw' in window.__cash.state().div.find((x) => x.id === 'wV').paid)], [0, 47000, 0, 0, false],
+    'a trial of «выводим другую сумму» on the monthly withdrawal beside the ticked one: «Денег сейчас» of the trial is the plan\'s - the row of the day is held in the trial\'s copy too; nothing is saved, and the plan itself is given no memory');
+  await pw.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

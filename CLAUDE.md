@@ -334,14 +334,17 @@ a deploy:
   is read as it always was - the model differs by the two fields the rules
   add, `item.saw` and `item.sawDay`, and by nothing else; a change to
   another line never moves a withdrawal whose mark counts; it never moves a
-  taking of a balance's day into the balance or out of it; and no ledger
-  row gives the withdrawals more than its own sum. The first is held
+  taking of a balance's day into the balance or out of it, where the
+  marked withdrawal and the row are of one account; and no ledger row gives
+  the withdrawals more than its own sum. The first is held
   against the page of before the rules by the scripts in
   `checks/withdrawals/` (run by hand, under node - its README says how);
   the checks `rv-wdmark` and `rv-wdday` hold the others and the page's own
   hand. What the second rule does not reach - a row that is no founder's
-  taking, a part of a marked withdrawal, a withdrawal written on another
-  bank than its row - is in `docs/handoff.md`, the entry of 13 October. **A change the page makes to the plan sees
+  taking, a part of a marked withdrawal, a marked withdrawal that holds a
+  row of another account than its own (another bank's, or another
+  currency's of its own bank) - is in `docs/handoff.md`, the entry of
+  13 October, with the question that waits for the owner. **A change the page makes to the plan sees
   before and keeps after**: `Plan.edit` does, the keystroke in a row of
   «Касса» does it by hand, and «Что если» does it on its copy - a new way
   to change the plan that goes past them brings the fault back. Three

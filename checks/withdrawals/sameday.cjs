@@ -1,6 +1,7 @@
 // The rule of 13 October 2026 for the takings of a balance's own day: «a change to another line of the plan moves no
 // row dated on the day a balance was typed for into that balance or out of it». Lives of a plan made for it: an
-// account that stands on a typed balance - for today, or for yesterday - withdrawals around that day, some ticked in
+// account that stands on a typed balance - for today, or for yesterday - sometimes with a second bank's account or
+// a dollar account of the same bank beside it, typed for a day of its own; withdrawals around that day, some ticked in
 // «Что из этого уже прошло?» (a mark made a moment before the balance), some marked «Оплачено» after it, founders'
 // rows dated on the balance's day and around it; then statements come, the table is changed by hand, lines are
 // marked, a balance is typed again - with ticks - and the plan is changed the page's way (see, change, keep). What is
@@ -9,9 +10,10 @@
 //      item.saw and item.sawDay.
 //   S. A change made on ANOTHER line - one that is not a marked withdrawal, reaches none and takes no mark off -
 //      moves neither «Денег сейчас», nor the marks' sum, nor what any account counts after its balance. Not asked
-//      where a marked withdrawal holds a row of another bank than its own (the known limit: such a mark may wait for
-//      its own bank's statement while the row has come, and whether the row stands for the mark then goes by
-//      whether the withdrawal is full); those are counted.
+//      where a marked withdrawal holds a row of another ACCOUNT than its own - another bank's, or another currency's
+//      of its own bank (the known limit: such a mark may still wait for a statement to pass its day while the row
+//      has come, and whether the row stands for the mark then goes by whether the withdrawal is full); those are
+//      counted.
 //   D. No row gives the withdrawals more than its sum; none holds more than its own sum or than its rows' worth.
 //   K. The seeing and the keeping around no change at all move no figure, and write nothing into a plan without a
 //      memory.
@@ -34,13 +36,13 @@ const dayMem = (P) => /"rows":\[[^\]]*\[[^\]]*,[^\]]*,[^\]]*\]/.test(JSON.string
 const figs = (M) => JSON.stringify([M.now, M.marksGbp].concat(M.accounts.map((a) => [a.key, a.after, a.same])));
 const keyOf = (it) => String(it.occ ? it.occ.chain : it.row || it.id) + '|' + (it.occ ? it.occ.ym : String(it.date).slice(0, 7)) + '|' + (it.mark ? it.mark.at + '|' + it.mark.on : '');
 const self = (it) => JSON.stringify([it.date, it.amt, it.cur, it.whose, it.on, it.bank]);
-const abroad = (M, L) => { const bank = Object.fromEntries(L.tx.map((r) => [String(r.id), r.b])); return wdsOf(M).some((it) => it.mark && it.rows.some((id) => bank[id] && bank[id] !== it.bank)); };
+const abroad = (M, L) => { const acct = Object.fromEntries(L.tx.map((r) => [String(r.id), r.b + '|' + ((r.o && r.o.cur) || 'GBP')])); return wdsOf(M).some((it) => it.mark && it.rows.some((id) => acct[id] && acct[id] !== it.bank + '|' + it.cur)); };
 const conserve = (M, L) => {
-  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), ws = wdsOf(M);
+  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), all = wdsOf(M), ws = all.filter((it) => it.cur === 'GBP');
   if (ws.some((it) => it.wd.got > it.rows.reduce((s, id) => s + (amt[id] || 0), 0) + 0.011)) return 'a withdrawal holds more than its rows';
-  if (ws.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';
-  const rows = new Set(); ws.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = ws.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0);
-  return tot > cap + 0.011 ? `the withdrawals hold ${tot} of rows worth ${cap}` : '';
+  if (all.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';
+  if (all.every((it) => it.cur === 'GBP')) { const rows = new Set(); ws.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = ws.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0); if (tot > cap + 0.011) return `the withdrawals hold ${tot} of rows worth ${cap}`; }
+  return '';
 };
 function make(seed) {
   const R = rng(seed), pick = (a) => a[Math.floor(R() * a.length)], int = (lo, hi) => lo + Math.floor(R() * (hi - lo + 1)), chance = (p) => R() < p;
@@ -48,11 +50,14 @@ function make(seed) {
   const asOf = chance(0.6) ? T : day(T, -1), AT = ms(T + 'T09:00:00Z'), UP = ms(T + 'T17:00:00Z');
   const banks = [bal('Wise', 'GBP', 60000, asOf, { at: AT })];
   if (chance(0.3)) banks.push(bal('Barclays', 'GBP', 20000, chance(0.5) ? asOf : day(T, -int(2, 6)), { at: AT - 5 }));
+  // a dollar account of the same bank, typed in the same save or two days before, for a day of its own
+  const usd = chance(0.25); if (usd) banks.push(bal('Wise', 'USD', 13500, chance(0.4) ? asOf : day(T, -int(1, 4)), { at: chance(0.5) ? AT : AT - 2 * 864e5 }));
   const sums = [1000, 1500, 2000, 3000], div = [], nW = int(2, 6);
   for (let i = 0; i < nW; i++) {
     const more = { c0: C0 + int(-10, 5) * 864e5 + i };
     if (chance(0.45)) more.whose = pick(FOUNDERS);
-    if (chance(0.12) && banks.length > 1) more.bank = 'Barclays';
+    if (chance(0.12) && banks.some((b) => b.bank === 'Barclays')) more.bank = 'Barclays';
+    if (usd && chance(0.08)) more.cur = 'USD';
     const date = day(asOf, int(-9, 9)), amt = pick(sums);
     // a tick in «Что из этого уже прошло?» is a mark made a moment before the balance; «Оплачено» after it is later
     const k = R(), paid = date <= asOf && k < 0.4 ? { on: chance(0.7) ? asOf : date, at: AT - 1, by: BY } : k < 0.6 ? { on: chance(0.5) ? T : asOf, at: AT + int(1, 4) * 36e5, by: BY } : k < 0.66 ? { on: day(asOf, -int(1, 5)), at: AT - int(1, 5) * 864e5, by: BY } : null;
@@ -62,10 +67,11 @@ function make(seed) {
   }
   const tx = [], nR = int(2, 9);
   for (let i = 0; i < nR; i++) {
-    const k = R(), b = banks.length > 1 && chance(0.15) ? 'Barclays' : 'Wise', d0 = k < 0.55 ? asOf : day(asOf, int(-8, k < 0.9 ? 0 : 1));
+    const k = R(), b = banks.some((x) => x.bank === 'Barclays') && chance(0.15) ? 'Barclays' : 'Wise', cur = usd && b === 'Wise' && chance(0.3) ? 'USD' : 'GBP';
+    const d0 = k < 0.55 ? (cur === 'USD' ? banks.find((x) => x.cur === 'USD').asOf : asOf) : day(asOf, int(-8, k < 0.9 ? 0 : 1));
     // most rows come with the evening's statement; some were on the page before the balance was typed
-    const at = chance(0.75) ? UP + i : AT - int(1, 6) * 864e5 + i, amt = -pick([500, 1000, 1500, 2000, 3000]);
-    tx.push(chance(0.9) ? filed('f' + i, d0, amt, pick(FOUNDERS), '', { at, b }) : filed('f' + i, d0, amt, 'other', 'Thing ' + i, { at, b }));
+    const at = chance(0.75) ? UP + i : AT - int(1, 6) * 864e5 + i, amt = -pick([500, 1000, 1500, 2000, 3000]) * (cur === 'USD' ? 1.35 : 1);
+    tx.push(chance(0.9) ? filed('f' + i, d0, amt, pick(FOUNDERS), '', { at, b, cur }) : filed('f' + i, d0, amt, 'other', 'Thing ' + i, { at, b, cur }));
   }
   if (chance(0.6)) tx.push(reach('Wise', chance(0.7) ? T : asOf, 'GBP', UP + 50));
   return { L: ledger(tx, []), P: plan3({ banks, div }), R, pick, int, chance, asOf, UP };
@@ -117,7 +123,7 @@ for (let seed = 1; seed <= SEEDS; seed++) {
       if (JSON.stringify(Q) === JSON.stringify(P)) { up('changes that changed nothing'); continue; }
       P = Q; up('changes'); check('change ' + op);
       const own = !!it.mark || marked.some(([key, was]) => { const x = wdsOf(M).find((q) => keyOf(q) === key); return !x || self(x) !== was; });
-      if (!own && !marks && (abroad(before, L) || abroad(M, L))) up('S, not asked: a marked withdrawal holds a row of another bank');
+      if (!own && !marks && (abroad(before, L) || abroad(M, L))) up('S, not asked: a marked withdrawal holds a row of another account');
       else if (!own && !marks) { up('S'); if (figs(M) !== figs(before)) fail('S: a change to another line moved the figures (op ' + op + ')', seed, figs(before) + ' -> ' + figs(M)); else if (hasMem(P)) up('S, held by a memory'); }
     }
     // K. see and keep around nothing
