@@ -2,7 +2,8 @@
 // A life: a plan and a table; then, step by step, statements come (rows are shown in the order they were
 // uploaded), the table is changed by hand, lines are marked, and the plan is changed the page's way (see, change,
 // keep). What is held at every step:
-//   F. A plan that holds no memory is read as the page read it before the rule, byte for byte but for item.saw.
+//   F. A plan that holds no memory is read as the page read it before the rule, byte for byte but for item.saw
+//      and item.sawDay.
 //   B. A change made on ANOTHER line - another month of the same row too, as long as it leaves this one's day, sum,
 //      owner and bank as they were - moves nothing of a withdrawal whose mark can count: what it holds, its rows,
 //      whether its mark counts (one that rows or its window have closed: that it stays closed). And, unless the
@@ -25,7 +26,7 @@ const BY = 'Mika', T0 = ms('2026-10-01T08:00:00Z');
 const stat = {}, bad = {}, up = (k, n = 1) => { stat[k] = (stat[k] || 0) + n; };
 const fail = (k, seed, more) => { (bad[k] = bad[k] || []).push(seed); if (bad[k].length <= 2) console.log('FAIL', k, 'seed', seed, more || ''); };
 const wdsOf = (M) => M.items.filter((it) => it.wd && it.date);
-const strip = (M) => { const Q = clone(M); Q.items.forEach((it) => { delete it.saw; }); return JSON.stringify(Q); };
+const strip = (M) => { const Q = clone(M); Q.items.forEach((it) => { delete it.saw; delete it.sawDay; }); return JSON.stringify(Q); };
 const hasMem = (P) => JSON.stringify(P).includes('"saw"');
 const waiting = (M) => wdsOf(M).filter((it) => it.mark && it.saw);
 const TAKEN = JSON.stringify(['closed', false]);
@@ -104,7 +105,7 @@ for (let seed = 1; seed <= SEEDS; seed++) {
       if (!own && !marks && op !== 10) { up('B figures'); if (waiting(before).length) up('B figures, a mark that counts was there'); const fact = allCount(before) && allCount(M); if (fact) up('B figures, the fact too'); if (figs(M, fact) !== figs(before, fact)) fail('B: a change to another line moved the figures (op ' + op + ')', seed, figs(before) + ' -> ' + figs(M)); }
     }
     // K. see and keep around nothing
-    { const had = hasMem(P), Q = keep(clone(P), see(P)), M2 = C(L, Q, T); C(L, P, T); up('K'); if (had) up('K, with a memory'); if (JSON.stringify(Q) !== JSON.stringify(P)) up(hasMem(Q) ? 'K, the memory written anew' : 'K, the memory taken out'); const flat = (X) => { const Z = clone(X); Z.items.forEach((it) => { delete it.saw; if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); }; if (flat(M2) !== flat(M)) fail('K: see and keep alone moved the model', seed); if (strip(M2) !== strip(M)) up('K, only a window differs'); if (!had && hasMem(Q)) fail('K: see and keep alone wrote a memory', seed); if (had && hasMem(Q)) up('K, memory kept'); }
+    { const had = hasMem(P), Q = keep(clone(P), see(P)), M2 = C(L, Q, T); C(L, P, T); up('K'); if (had) up('K, with a memory'); if (JSON.stringify(Q) !== JSON.stringify(P)) up(hasMem(Q) ? 'K, the memory written anew' : 'K, the memory taken out'); const flat = (X) => { const Z = clone(X); Z.items.forEach((it) => { delete it.saw; delete it.sawDay; if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); }; if (flat(M2) !== flat(M)) fail('K: see and keep alone moved the model', seed); if (strip(M2) !== strip(M)) up('K, only a window differs'); if (!had && hasMem(Q)) fail('K: see and keep alone wrote a memory', seed); if (had && hasMem(Q)) up('K, memory kept'); }
   }
   if (hasMem(P)) up('lives that end with a memory');
   // C. the two orders on one row, with statements between

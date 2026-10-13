@@ -2894,7 +2894,12 @@ const Cash=(()=>{
 //                   force while w is whose the withdrawal is and the mark can count: it waits for a statement of the
 //                   line's own bank, and is later than its account's balance. The next change to the plan writes it
 //                   anew, or - when the walk gives every such withdrawal what it holds, in the window it has - takes
-//                   it out. Absent: the plan is read as it always was
+//                   it out. Absent: the plan is read as it always was.
+//                   A taking of a balance's own day - a row of an account that stands on a typed balance, dated on
+//                   the day that balance is for - is written [ref, gbp, at]: `at` names the balance it was read
+//                   against ("{account}|{asOf}|{moment typed}"). Such a row is held also when the memory is NOT in
+//                   force - on any withdrawal with a mark that is no word, whether the mark can count or not - while
+//                   that very balance stands; and a memory of a mark that cannot count holds those rows alone
 //    carry:{ym}     what is left of a line of the month `ym` that was paid in part, written by «Частично»: a one-off
 //                   row on the day the founder named for the rest. With that date it is counted like any dated row —
 //                   but it is never «the month's own row» of its label, and a payment that fits both it and that row
@@ -2969,14 +2974,20 @@ const Cash=(()=>{
 //                                  the day the founder says it was paid: today — or, for a line older than its
 //                                  account's balance that he says is inside that balance, the line's own date.
 //  see(P, led, T)                  what each withdrawal whose mark can count in «Денег сейчас» holds of every taking,
-//                                  as the table lies - [{k, ym, saw}]; nothing is written. The page calls it BEFORE a
-//                                  change to the plan …
+//                                  as the table lies - and what every other marked withdrawal holds of the takings
+//                                  of a balance's own day (day:true) - [{k, ym, amt, cur, saw, day?, ats}]; ats:
+//                                  the typed balances the accounts stand on. Nothing is written. The page calls it
+//                                  BEFORE a change to the plan …
 //  keep(P, led, T, seen)           … and this AFTER it: the plan is read without any memory, and if one of the
 //                                  withdrawals that were seen no longer holds what it held, or has another window,
 //                                  each is given the memory of what it held (paid.saw); if every one does, the plan
 //                                  is left with none. A withdrawal the change itself gave to another founder, gave
 //                                  another sum or unmarked gets none, nor does one whose mark can no longer count (a
-//                                  balance typed for its account). These two are the writers that read the ledger
+//                                  balance typed for its account) - but for the takings of a balance's day, which
+//                                  every marked withdrawal keeps while the balance they were read against stands:
+//                                  what it held of each, and that it held none of one its window now reaches. A
+//                                  balance the change itself typed is its founder's word about the account: nothing
+//                                  of its day is kept. These two are the writers that read the ledger
 //  partial(P, it, got, id, now, by, on, date)   «Частично»: paid:{on,at,by,amt:got} on the line, and the rest as a
 //                                  new row (id) dated `date`, the day the founder named — «{name} — остаток с
 //                                  {октября}», carry:{ym}, no mon, the same list, link and VAT; a one-off row even
@@ -3068,7 +3079,17 @@ const Cash=(()=>{
 //    again, and for «Чей вывод» the card says the figure when it moves. A memory holds for a mark that can count:
 //    once a statement of the line's bank, uploaded after the mark, has passed the mark's day - or a balance of its
 //    account is typed, or read from a statement, after the mark - the mark counts for nothing and the withdrawal is
-//    dealt by the walk again.
+//    dealt by the walk again - but for THE TAKINGS OF A BALANCE'S OWN DAY (13 October 2026). A row dated on the very
+//    day a balance was typed for is inside that balance or after it by the mark whose place it took (B): for a
+//    founder's taking, by the marked withdrawal that holds it - a line ticked in «Что из этого уже прошло?» says the
+//    row is inside, a line marked after the balance says it is after. That cannot be read off the row, and cannot be
+//    read off the marks alone either: which taking is a marked line's is known only by what the other lines took.
+//    So it goes by the walk, and is HELD through a change to another line: every marked withdrawal - whether its
+//    mark can count or not - keeps what it held of each taking of such a day, and that it held none of the others,
+//    while the balance the day is of stands (paid.saw, rows written with that balance). Room is kept in it for the
+//    takings it holds, so that an older row the change set loose cannot take their place. Every other row of a
+//    withdrawal whose mark cannot count is the walk's, as it always was. The founder's own word about the marked
+//    line - whose it is, its sum, its mark taken off - and a balance typed anew for the account are read by the walk.
 //  ONE-OFF ROWS (E3)  a row uploaded after the line was written, not more than ten days early, of its label (or its
 //    block, for an unlinked line — and never a payment whose own label has ever been a series): 1 within tolerance
 //    (in ±2%, min £2; out −2% … +5%; ±6% across currencies) → the oldest such line; 2 the invoice with the tax on
@@ -3229,7 +3250,12 @@ const Cash=(()=>{
 //    saw                           for a withdrawal whose mark can count in «Денег сейчас» - it waits for its
 //                                  statement, and is later than its account's balance: what it holds of every taking
 //                                  it may count, as a memory would say it (paid.saw) - {w?, from, to, rows:[[ref,
-//                                  gbp]…]}
+//                                  gbp]…]}; a taking of a balance's own day is [ref, gbp, at] there
+//    sawDay                        for any other withdrawal that is switched on, has a sum and a mark that is no
+//                                  word, while some account has a taking of its balance's own day: what it holds of
+//                                  those takings alone - the ones of its window, and any it holds - in the same
+//                                  shape (rows may be empty). Absent where no account has such a taking: a plan
+//                                  without one is read as it always was
 //    whose                         for a withdrawal: the founder whose it is, "" when it is everybody's
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
@@ -3394,18 +3420,36 @@ const Cash=(()=>{
 //    keep by the table it has, and deal over the rows it did not know: it does not change the plan at all - its save of
 //    the plan names the revision of its table, and the stand does not take it (Cash, push; Plan.lost). A page from
 //    before the rule neither sees nor keeps: after its changes rows are dealt over as they always were (a memory that
-//    such a page finds in the plan it leaves there, in force). Two marked withdrawals do not pass rows to one
+//    such a page finds in the plan it leaves there, in force - but a page from before the takings of a balance's day
+//    were held reads a memory only for a mark that can count: a plan that holds one for a mark that cannot is read
+//    by such a tab as if it held none, and until it is reloaded two windows can show two figures for one plan). Two marked withdrawals do not pass rows to one
 //    another: when one of them is given to a founder, the rows
 //    it lets go are not the other's - an open line takes them, or none. A withdrawal in another currency holds to a
 //    memory in pounds: one written on a day its sum was worth fewer pounds gives no more on a later day. A marked
 //    month that a change takes out of the plan and a later one brings back («каждый месяц» taken off an earlier
 //    month, then «Повтор продолжается») comes back with no memory. A mark that is inside its account's balance - a
-//    line ticked in «Что из этого уже прошло?», or one a balance was typed after - holds to no memory: its own worth
-//    is in no figure of «Денег сейчас», and its zeros would only send rows on to the next withdrawal. The month's
-//    fact may move by such a mark, as it always could; and so may «Денег сейчас» by a row dated on the very day of a
-//    typed balance - whether such a row is inside the balance or after it goes by the line that holds it (a row in
-//    the place of a mark made before the balance is inside it: the older rule), and a change to another line can
-//    still turn that. A mark on a line of a bank nobody uploads statements of waits until a balance is typed for its
+//    line ticked in «Что из этого уже прошло?», or one a balance was typed after - holds to no memory but for the
+//    takings of a balance's day (below): its own worth is in no figure of «Денег сейчас», and its zeros would only
+//    send rows on to the next withdrawal. The month's fact may move by such a mark, as it always could. «Денег сейчас» could too, by a row dated on the very day of a
+//    typed balance - whether such a row is inside the balance or after it goes by the line that holds it, and a
+//    change to another line turned that, both ways (a row inside the balance taken off again; an afternoon's taking
+//    put inside it). For a founder's taking it does no longer: the takings of a balance's own day are held by every
+//    marked withdrawal, whether its mark can count or not (RECONCILIATION, D2; the check rv-wdday, and
+//    checks/withdrawals/sameday.cjs). Known of that, and kept. It is the walk that says first which line a taking
+//    of the day is - with a balance typed «на сейчас», a plan written so that the row lies in an unmarked line
+//    beside a ticked one counts the row after the balance, as it always did; what is new is that a change to another
+//    line does not turn it. A taking that is PART of a marked withdrawal stands for the mark only when the
+//    withdrawal is closed by its rows - full, or its mark's day passed by the statements: with a balance typed on a
+//    later day than the one it is for, such a part is inside the balance while the mark is worth the rest, and
+//    «Денег сейчас» is higher by the part until the rest comes - a statement moves that, not a change to the plan.
+//    But where the marked withdrawal holds a taking of ANOTHER ACCOUNT'S balance day - another bank's, or another
+//    currency's or another numbered account of its own bank - and still waits for a statement to pass its mark's
+//    day, a change to another line can move it too: whether the withdrawal is full goes by its other rows, which are
+//    not held, and by its window. (On one account this cannot be: the row of the balance's day ends the wait, or the
+//    mark is one that counts and holds every row.) And a row that is no founder's taking closes a line by its name -
+//    or, for a line the table has no name for and for any marked line, by its sum, within the tolerance: where two
+//    lines could take one row of the day and one of them is marked, a change to the other - its day, its sum, its
+//    deletion, switched off - can still say which of them the row closed, whoever the payee of each. A mark on a line of a bank nobody uploads statements of waits until a balance is typed for its
 //    account, and so does its memory; and a mark waits for a statement of its BANK - one of another currency's
 //    account of that bank ends the wait, as it always did. And the walk's own rule that a row counts for a line only
 //    if it was uploaded after the line was written is not changed - also for a transfer that sat unsorted in «Разбор»
@@ -3918,26 +3962,46 @@ const Live=(()=>{
   const dead=new Set(Array.isArray(opts.dead)?opts.dead:[]),nameOf=it=>(it.src==="occ"?it.chain+"|"+it.ym0:it.id)+"|"+(+it.paid.at||0)+"|"+it.paid.on;
   const memOf=it=>{const s=it.wt&&!dead.has(nameOf(it))&&obj(it.paid.saw)?it.paid.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to)||String(s.w||"")!==it.whose)return null;
    const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length&&!had.has(String(x[0])))had.set(String(x[0]),Math.max(0,+x[1]||0));});return{from:s.from,to:s.to,had,shut:!!it.cov&&it.cov>=s.to};};
-  wds.forEach(it=>{it.wt=waits(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:null;it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
+  // The takings of a balance's own day (B, below: `sd`). Whether a statement row dated on the very day a balance
+  // was typed for is inside that balance goes by the mark whose place the row took - so, for a founder's taking, by
+  // the marked withdrawal that holds it, and so by the walk. A memory that is NOT in force as above - its mark is
+  // inside its account's balance, or waits no longer - still holds for those takings, and for no other row: each
+  // gives the withdrawal what it gave and no more (nothing, where it gave nothing), and room is kept for it, so
+  // that no older row a change set loose takes its place. Every other row of such a withdrawal is the walk's, as it
+  // always was. Such a row of a memory is written with the balance it was read against ([ref, gbp, at] - the
+  // account, the day and the moment it was typed) and holds while that very balance stands. Which takings are of a
+  // balance's day is known once the accounts are read, and does not depend on the deal: the plan is read again
+  // with them (`sd`), once.
+  const SD=opts.sd instanceof Map?opts.sd:null;
+  const dayMem=(it,S)=>{const s=S&&it.paid&&!word(it)&&obj(it.paid.saw)?it.paid.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to)||String(s.w||"")!==it.whose)return null;
+   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length>2&&!had.has(String(x[0]))&&S.has(String(x[0]))&&S.get(String(x[0]))===x[2])had.set(String(x[0]),isFinite(+x[1])?Math.max(0,+x[1]):0);});return had.size?{had,day:true}:null;};
+  wds.forEach(it=>{it.wt=waits(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:dayMem(it,SD);it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
   // The takings: the rows of the founders' blocks that a bank gave a sum for. One name (`ref`) for one taking,
   // however often it is read in; of two rows that share one - the upload makes none - the first is the taking.
   const takers=pool.filter(f=>FOUNDERS.includes(f.c)&&f.o&&!f.ret),mems=wds.filter(it=>it.mem),one=new Map();
   if(wds.some(it=>it.paid))takers.forEach(f=>{f.ref=refOf(f);if(!one.has(f.ref))one.set(f.ref,f);});
+  // (a taking the memory holds is the withdrawal's whatever the window the plan now gives it; never another founder's)
+  const holds=(it,f)=>canPay(it)&&!word(it)&&f.at>it.c0&&!it.notx.includes(f.id)&&(!it.whose||it.whose===f.c);
+  // (the room a day memory keeps: what its takings will give when the walk comes to them)
+  mems.forEach(it=>{if(!it.mem.day)return;it.rs=new Map();it.rsv=0;it.mem.had.forEach((h,ref)=>{const f=one.get(ref);if(h>0&&f&&!used.has(f.id)&&holds(it,f)){it.rs.set(ref,h);it.rsv+=h;}});});
   if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);const known=mems.length>0&&one.get(f.ref)===f;
    const may=it=>!(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1);
    const give=(it,take)=>{it.gotG+=take;left-=take;it.took.set(f.id,take);it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);};
-   // (a taking the memory holds is the withdrawal's whatever the window the plan now gives it; never another founder's)
-   const held=it=>canPay(it)&&!word(it)&&f.at>it.c0&&!it.notx.includes(f.id)&&(!it.whose||it.whose===f.c);
-   if(known)mems.forEach(it=>{const h=it.mem.had.get(f.ref);if(!h||!held(it))return;const take=Math.min(h,left,capOf(it)-it.gotG);if(take>=0.005)give(it,take);});
+   if(known)mems.forEach(it=>{const h=it.mem.had.get(f.ref);if(it.rs&&it.rs.has(f.ref)){it.rsv-=it.rs.get(f.ref);it.rs.delete(f.ref);}if(!h||!holds(it,f))return;const take=Math.min(h,left,capOf(it)-it.gotG);if(take>=0.005)give(it,take);});
    for(const it of wdOf[f.c]){if(left<0.005)break;if(!may(it)||(known&&it.mem&&it.mem.had.has(f.ref)))continue;
-    const open=capOf(it)-it.gotG;if(open<0.005)continue;give(it,Math.min(left,open));}});
+    const open=capOf(it)-it.gotG-(it.rsv||0);if(open<0.005)continue;give(it,Math.min(left,open));}});
   // What a mark that waits would remember (paid.saw): whose the withdrawal is, its window, the takings it may
   // count and what it holds of each - to the last digit, not to the penny: a withdrawal in another currency leaves
   // a row with a sum that is not whole pence. A taking a memory in force holds that is out of the table for now
   // is kept as it was remembered.
-  const sawOf=it=>{const rows=[],u=new Set(),m=it.mem;
-   takers.forEach(f=>{if(one.get(f.ref)!==f||(it.whose&&it.whose!==f.c)||!((f.d>=it.w0&&f.d<=it.w1)||(m&&m.had.has(f.ref))))return;u.add(f.ref);rows.push([f.ref,it.took.get(f.id)||0]);});
-   if(m)m.had.forEach((h,ref)=>{if(!u.has(ref))rows.push([ref,h]);});
+  // A taking of a balance's own day is written with the balance it was read against - [ref, gbp, at]. And what a
+  // mark that cannot count would remember (`day`): those takings alone - the ones of its window, and any it holds
+  // - and nothing at all where no account has such a taking.
+  const sd=new Map();
+  const sawOf=(it,day)=>{if(day&&!sd.size)return undefined;const rows=[],u=new Set(),m=it.mem;
+   takers.forEach(f=>{if(one.get(f.ref)!==f||(it.whose&&it.whose!==f.c))return;const at=sd.get(f.ref),t=it.took.get(f.id)||0;
+    if((day&&at===undefined)||!((f.d>=it.w0&&f.d<=it.w1)||(m&&m.had.has(f.ref))||(day&&t>0)))return;u.add(f.ref);rows.push(at===undefined?[f.ref,t]:[f.ref,t,at]);});
+   if(m&&!day)m.had.forEach((h,ref)=>{if(!u.has(ref))rows.push([ref,h]);});
    return Object.assign(it.whose?{w:it.whose}:{},{from:it.mm?it.mm.from:it.w0,to:it.mm?it.mm.to:it.w1,rows});};
   // Done when what is left is nothing to speak of — or when the statements of its bank reach the end of its
   // window: what was not taken by then is dropped, in words «взято £6,000 из £10,000», never carried as late.
@@ -4328,6 +4392,9 @@ const Live=(()=>{
   // вывести» the day after. So it is counted after the balance — the cautious half of the question the page does
   // not ask yet; money IN of that day stays inside. A row that took the place of a mark made before the balance
   // (a line ticked in «Что из этого уже прошло?») is inside it: the founder said so.
+  // So whether a row of that day is inside the balance goes by the line that holds it. For a founder's taking that
+  // is the walk's to say, and a change to another line of the plan must not turn it: every marked withdrawal keeps
+  // what it held of the takings of a balance's day (D2 - `sd`, below, is the list of them).
   const later=(p,A)=>p.on>A.asOf||(p.on===A.asOf&&(+p.at||0)>A.at),tookMark=new Map();
   items.forEach(it=>{const d=it.done,p=it.paid;if(!d||d.by!=="row"||!p||word(it))return;
    d.rows.forEach(id=>{if((it.src!=="occ"&&!it.wd)||(+(anyRow[id]||{}).at||0)>(+p.at||0))tookMark.set(id,p);});});
@@ -4372,7 +4439,12 @@ const Live=(()=>{
   // прошло?» - is of no use there, and its zeros would only send rows on to the next withdrawal: the plan is read
   // again without it (D2, `dead`). Whether a mark is later than a balance does not depend on the deal, so once is
   // enough.
-  {const gone=wds.filter(it=>it.mm&&!it.lat);if(gone.length)return compute(led,plan0,T,Object.assign({},opts,{dead:[...dead].concat(gone.map(nameOf))}));}
+  // The takings of a balance's own day: the rows of an account that stands on a typed balance, dated on its day -
+  // each by the balance it is read against. A memory that is not in force holds for these (D2): where the plan has
+  // one that names such a taking, it is read again with them - once, like `dead`.
+  if(one.size)facts.forEach(f=>{const a=rowHome.get(f),A=a&&a.anchor,t=A&&!A.file&&f.d===A.asOf?byPool[f.id]:null;if(t&&t.ref!==undefined&&one.get(t.ref)===t)sd.set(t.ref,a.key+"|"+A.asOf+"|"+A.at);});
+  {const gone=wds.filter(it=>it.mm&&!it.lat),day=!SD&&sd.size>0&&wds.some(it=>!(it.mm&&!it.mm.shut&&it.lat)&&dayMem(it,sd));
+   if(gone.length||day)return compute(led,plan0,T,Object.assign({},opts,{dead:[...dead].concat(gone.map(nameOf)),sd:SD||sd}));}
   const missing=ACC.filter(a=>a.active&&!a.anchor),v0=missing.length>0,nowRaw=ACC.reduce((s,a)=>s+(a.gbp||0),0),soon=plus(T,14);
   ACC.forEach(a=>{const A=a.anchor;a.through=A&&A.asOf>a.cov?A.asOf:a.cov;if(a.through>T)a.through=T;a.age=a.through?dn(T)-dn(a.through):null;
    a.material=a.active&&((!!A&&Math.abs(a.gbp)>0&&Math.abs(a.gbp)>=0.1*Math.abs(nowRaw))||items.some(it=>it.acct===a.key&&it.open&&it.date<=soon));
@@ -4595,7 +4667,7 @@ const Live=(()=>{
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
     mark:p?{on:isD(p.on)?p.on:"",at:+p.at||0,by:String(p.by||""),counts:!!it.counts,cov:it.markCov||"",amt:it.pamt!=null?r2(it.pamt):null}:null,part:it.got>0&&!d?{got:r2(it.got),of:r2(it.amt*it.vk)}:null,hint:it.hint,rows:it.match.slice(),fixed:it.fixed,c0:it.c0,who:it.who,
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
-    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
+    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
@@ -4656,6 +4728,8 @@ const Live=(()=>{
  // off moves a mark between a row and its month, «… и дальше» said in an earlier month's card moves it to another
  // stored row or another day, a repeat left with one month is a row again - and it is still that mark; and whether two memories of one withdrawal are of one window and hold the same of every taking (in one
  // window, of one founder's rows, the takings are the same ones).
+ // (`stands`: the moments the typed balances an account stands on were typed - what a taking of a balance's day is known by)
+ const stands=M=>M.accounts.filter(a=>a.anchor&&!a.anchor.file).map(a=>a.key+"|"+a.anchor.asOf+"|"+a.anchor.at);
  const sees=s=>obj(s)&&Array.isArray(s.rows)&&isD(s.from)&&isD(s.to),keyOf=it=>String(it.occ?it.occ.chain:it.row||it.id)+"|"+(it.mark?it.mark.at+"|"+it.mark.on:""),ymOf=it=>it.occ?it.occ.ym:String(it.date).slice(0,7);
  const alike=(a,b)=>{const B=new Map(b.rows);return a.from===b.from&&a.to===b.to&&a.rows.every(([r,h])=>Math.abs((+h||0)-(+B.get(r)||0))<0.005);};
  // The marks of a stored row: its own, and those of its months.
@@ -4667,10 +4741,22 @@ const Live=(()=>{
    // (A withdrawal that was seen, whose mark can still count, and that is as its founder wrote it - still that
    // founder's, still of that sum: one whose account's balance the change typed is inside that balance now, and
    // one the change gave another owner or another sum is dealt by the walk: that is said of it.)
-   M.items.forEach(it=>{if(!it.wd||!sees(it.saw))return;const c=by.get(it),s=c&&sees(c.saw)&&String(c.saw.w||"")===String(it.whose||"")&&c.amt===it.amt&&c.cur===it.cur?slot(P,it):null;
-    if(!s||!obj(s.paid))return;if(!alike(c.saw,it.saw))moved=true;
-    // (what it held - and, of a taking the plan's window now reaches and did not, that it held none of it)
-    const had=new Set(c.saw.rows.map(x=>x[0]));todo.push([s.paid,Object.assign({},c.saw,{rows:c.saw.rows.concat(it.saw.rows.filter(x=>!had.has(x[0])).map(x=>[x[0],0]))})]);});
+   const ats=new Set(stands(M));
+   M.items.forEach(it=>{if(!it.wd)return;const full=sees(it.saw),now=full?it.saw:sees(it.sawDay)?it.sawDay:null;if(!now)return;
+    const c=by.get(it),s=c&&sees(c.saw)&&String(c.saw.w||"")===String(it.whose||"")&&c.amt===it.amt&&c.cur===it.cur?slot(P,it):null;
+    if(!s||!obj(s.paid)||(full&&c.day))return;const had=new Set(c.saw.rows.map(x=>x[0]));
+    if(full){if(!alike(c.saw,it.saw))moved=true;
+     // (what it held - and, of a taking the plan's window now reaches and did not, that it held none of it)
+     return void todo.push([s.paid,Object.assign({},c.saw,{rows:c.saw.rows.concat(it.saw.rows.filter(x=>!had.has(x[0])).map(x=>x.length>2?[x[0],0,x[2]]:[x[0],0]))})]);}
+    // A mark that cannot count: the takings of a balance's day alone, and only where that very balance still
+    // stands - a balance the change typed is its founder's word about the account. What it held of each (a taking
+    // its window has left is held still; one it held none of and no longer reaches is let go) - and, of one the
+    // plan's window now reaches and did not, that it held none.
+    const N=new Map(now.rows.map(x=>[x[0],x])),was=new Set(Array.isArray(c.ats)?c.ats:[]);
+    const rows=c.saw.rows.filter(x=>x.length>2&&ats.has(x[2])&&(N.has(x[0])?N.get(x[0])[2]===x[2]:(+x[1]||0)>=0.005)).concat(now.rows.filter(x=>x.length>2&&!had.has(x[0])&&was.has(x[2])).map(x=>[x[0],0,x[2]]));
+    if(!rows.length)return;
+    if(rows.some(x=>Math.abs((+x[1]||0)-(N.has(x[0])?+N.get(x[0])[1]||0:0))>=0.005))moved=true;
+    todo.push([s.paid,Object.assign(it.whose?{w:it.whose}:{},{from:now.from,to:now.to,rows})]);});
    if(moved)todo.forEach(([p,w])=>{p.saw=w;});
    return moved?todo.length:0;};
  // «Чей вывод»: said of a withdrawal, and of no other row. Like the name it is the row's, not a month's; nobody's
@@ -4724,18 +4810,22 @@ const Live=(()=>{
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
   // A change to the plan must not deal the rows of a marked withdrawal over (D2). The page makes every change
   // between these two. `see`, BEFORE it: what each withdrawal whose mark can count holds of every taking, as the
-  // table lies - nothing is written. `keep`, AFTER it: the plan is read without any memory; if every one of those
+  // table lies - and what every other marked withdrawal holds of the takings of a balance's own day (`day`) -
+  // nothing is written. `keep`, AFTER it: the plan is read without any memory; if every one of those
   // withdrawals still holds what it held, in the window it had, the plan is left with none - the change dealt
   // nothing of theirs over, and the page goes on counting as it always did; if one does not, each is given the
   // memory of what it held - and, of a taking the plan's window now reaches and did not, that it held none - and
   // holds it. A withdrawal the change itself gave to another founder, gave another sum, unmarked or switched
   // off is left to the walk: that is its founder's word; and so is one whose mark can no longer count - the
-  // change typed a balance for its account. A memory of a mark that counts no longer, or of a line that is gone, goes with
-  // the next change. A `seen` that is no list - the seeing failed - keeps nothing and takes nothing
+  // change typed a balance for its account. Of a mark that cannot count only the takings of a balance's day are
+  // kept, and only while the balance they were read against stands: what it held of each, and that it held none of
+  // one its window now reaches. Every change writes the memories anew or takes them out: one that is needed no
+  // longer - of a line that is gone, of a balance typed again - goes with the next change. A `seen` that is no list - the seeing failed - keeps nothing and takes nothing
   // out. The two hands that read more than the plan - `led` is the ledger and T the day, and each works the
   // model out - and they write nothing but memories. `keep` returns how many it wrote.
   see(P,led,T){if(!(Array.isArray(P.div)?P.div:[]).some(r=>obj(r)&&!r.ptax&&marksOf(r).length))return[];
-   return compute(led,P,T).items.filter(it=>it.wd&&sees(it.saw)).map(it=>({k:keyOf(it),ym:ymOf(it),amt:it.amt,cur:it.cur,saw:it.saw}));},
+   const M=compute(led,P,T),ats=stands(M);
+   return M.items.filter(it=>it.wd&&(sees(it.saw)||sees(it.sawDay))).map(it=>Object.assign({k:keyOf(it),ym:ymOf(it),amt:it.amt,cur:it.cur,ats},sees(it.saw)?{saw:it.saw}:{saw:it.sawDay,day:true}));},
   keep(P,led,T,seen){if(!Array.isArray(seen))return 0;const old=[];LISTS.forEach(k=>(Array.isArray(P[k])?P[k]:[]).forEach(r=>{if(obj(r))marksOf(r).forEach(p=>{if(p.saw!==undefined){old.push([p,p.saw]);delete p.saw;}});}));
    if(!seen.length)return 0;
    try{return keeping(P,compute(led,P,T),seen);}catch(e){marksAll(P).forEach(p=>{delete p.saw;});old.forEach(([p,s])=>{p.saw=s;});throw e;}},
