@@ -323,15 +323,18 @@ a deploy:
   no memory in force is read as it always was - the model differs by its
   one new field, `item.saw`, and by nothing else; a change to another line
   never moves a withdrawal whose mark counts; and no ledger row gives the
-  withdrawals more than its own sum. The first was held against the engine
-  of `develop` when the rule was made (the harness is named in
-  `docs/handoff.md`); the check `rv-wdmark` holds the other two and the
-  page's own hand. **A change the page makes to the plan sees before and
-  keeps after**: `Plan.edit` does, the keystroke in a row of «Касса» does it
-  by hand, and «Что если» does it on its copy - a new way to change the
-  plan that goes past them brings the fault back. «Отменить» and the plan
-  loaded from the old «Касса» are the exceptions: they put a whole plan in
-  the place of this one. `docs/handoff.md`, rule 4, says all of it in words.
+  withdrawals more than its own sum. The first is held against the page of
+  before the rule by the scripts in `checks/withdrawals/` (run by hand,
+  under node - its README says how); the check `rv-wdmark` holds the other
+  two and the page's own hand. **A change the page makes to the plan sees
+  before and keeps after**: `Plan.edit` does, the keystroke in a row of
+  «Касса» does it by hand, and «Что если» does it on its copy - a new way
+  to change the plan that goes past them brings the fault back. Three
+  things go past them as it is: «Отменить» and the plan loaded from the old
+  «Касса», which put a whole plan in the place of this one, and a name
+  trimmed as the cursor leaves its row, which changes no count.
+  `docs/handoff.md` says it in words: rule 4, and the entry of 13 October
+  with what is known and kept.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
   `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
   `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them
