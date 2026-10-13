@@ -308,27 +308,26 @@ a deploy:
   document, beside the typed rates `fx`, which stay as they are for the days
   before the table began). **A change to how the page counts must keep this**:
   the check `rv-rates` moves today's rate and holds every figure of the past.
-- **A mark on a withdrawal remembers its rows** (13 October 2026). Which
-  ledger rows a withdrawal holds is decided by a walk over every withdrawal
-  of the plan, so a change to another line used to deal old rows into a
-  marked withdrawal or out of it, and «Денег сейчас» moved with nothing new
-  from the bank. «Оплачено» and «Частично» on a withdrawal now store,
-  beside the mark, the takings of its window as they were dealt
-  (`paid.saw`: each by a hash of the statement's key, with what the
-  withdrawal held of it). Those stay as they lay, whatever becomes of other
-  lines; a row the mark does not remember is dealt by the walk itself,
-  against the plan as it stands, after the rows that were there. **A change
-  to how withdrawals are dealt must keep three things**: at the moment of a
-  mark the page counts exactly as it would without the memory; a change to
-  another line never moves a marked withdrawal; and no ledger row gives the
-  withdrawals more than its own sum. **Every change the page makes to the
-  plan goes through `Plan.edit`**: it has the marks look at the table
-  before the change and after it (`Live.write.look`), in the same save - a
-  writer that goes past it leaves the rows that came since to be dealt
-  over. «Что если» has its copy look first too, so a trial says what the
-  page would say of the plan written so. A mark without `paid.saw` (made by a page from before) is read as
-  marks always were. The check `rv-wdmark` holds each of these, and
-  `docs/handoff.md`, rule 4, says them in words.
+- **A change to the plan deals nothing of a marked withdrawal over**
+  (13 October 2026). Which ledger rows a withdrawal holds is decided by a
+  walk over every withdrawal of the plan, so a change to another line used
+  to deal old rows into a marked withdrawal or out of it, and «Денег сейчас»
+  moved with nothing new from the bank. The page now sees what every
+  withdrawal whose mark still waits for its statement holds before it
+  changes the plan (`Live.write.see`), and keeps it after
+  (`Live.write.keep`): where the change would have dealt those rows over,
+  each such mark is given a memory of what its withdrawal held (`paid.saw`)
+  and holds to it; where it would not, the plan holds no memory and is
+  counted exactly as before. **A change to how withdrawals are dealt must
+  keep three things**: a plan with no memory in force is read as it always
+  was, byte for byte; a change to another line never moves a withdrawal
+  whose mark waits; and no ledger row gives the withdrawals more than its
+  own sum. **Every change the page makes to the plan sees before and keeps
+  after**: `Plan.edit` does, the keystroke in a row of «Касса» does it by
+  hand, and «Что если» does it on its copy - a new way to change the plan
+  that goes past them brings the fault back. «Отменить» is the one
+  exception: it puts the plan back as it was. The check `rv-wdmark` holds
+  each of these, and `docs/handoff.md`, rule 4, says them in words.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
   `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
   `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them
