@@ -74,6 +74,12 @@ stops the run when `<checkout>/data` exists.
 
 - `data/` is in `.gitignore` on purpose. Nothing from it is ever committed,
   quoted in a commit message, pasted into a document or used as a fixture.
+- **The repository is public since 13 October 2026** (the owner's decision,
+  so that CI runs). A commit, a branch name, a commit message and a CI log
+  are read by anybody, at once and for good. Every rule here that says
+  "never enters git" now means "is never published"; what the history
+  already holds, and the owner's word about it, is in `docs/handoff.md`
+  (the entry of 13 October 2026 and decision 11).
 - **Since 8 October 2026 the test stand holds the studio's real ledger**, by
   the owner's decision, for the rehearsal before prod: the history as the
   founders' sheet has it up to 1 October 2026, and what the owner enters after

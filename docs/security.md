@@ -745,6 +745,7 @@ and a request id; the detail is in the log.
 | A protection switched off by configuration | no `off` value for the policy; `report-only` refused on prod without a dated override, at the deploy and at the boot; an override that has ended enforces; dev mode refuses a public listener; no scrypt, no boot. Residual 17 |
 | A page whose controls the policy will not run | `ctl selfcheck` fails the deploy for an inline handler under an enforced policy |
 | The record of who saved lost with a container | the request log is kept before a container is replaced or removed |
+| The repository read by a stranger | public since 13 October 2026, by the owner's decision: it holds no secret and no real figure - the stand files hold none, and the hygiene tests keep it so. Residual: this document and the server's address are part of what is read, and so is what the history held before a slip was mended (`docs/handoff.md`, decision 11) |
 | The real ledger on the wrong stand, in git or in an image | the table in "Keeping the stands and the laptop apart" |
 | A session with root ssh reading prod | a rule only: `ctl` prints counts, never contents, and writes to the security log. Residual |
 | A source of exchange rates that is wrong, or made to be | one day's file, asked by day over https, no redirect followed, 512 KiB at most, four numbers read out of it; bounds per currency and 12% a day from the day beside it; a refused answer is in the security log; a rate the owner types stands over the source's. Residual 12 |
