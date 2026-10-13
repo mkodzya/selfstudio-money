@@ -593,7 +593,10 @@ password — a session somebody walked away from must not be enough to make one.
 
 The ledger at `/api/founder/money` and the cash plan at
 `/api/founder/money/cash` are two documents with one contract. Each has its own
-revision; saving one never touches the other.
+revision; saving one never touches the other. One thing ties them: the plan
+is worked out against the ledger, so a save of the plan may name the revision
+of the ledger its page holds, and is then taken only while the ledger stands
+there ("The ledger's revision, on the plan's PUT", below).
 
 ### GET
 
@@ -621,6 +624,9 @@ The body is `{"base": N, "doc": "<the document, as a string of JSON>"}`.
   JSON object with a `tx` array; the plan a JSON object with a `banks` array.
   Nothing else in it is read.
 - Limits: 16 MiB for the ledger, 4 MiB for the plan.
+- The plan's door reads one member more when it is sent, `ledger` — see "The
+  ledger's revision, on the plan's PUT", below. The ledger's own door does not
+  read it.
 
 Answers:
 
@@ -665,10 +671,62 @@ when it has more than 20 rows and the new one has fewer than half as many
 `taxes` and `other` together). There is no door to these copies; they are
 restored on the server (`docs/deploy.md`).
 
+### The ledger's revision, on the plan's PUT
+
+<!-- Read by tests/test_routes_doc.py: the body after "may be", every status
+     named in backticks - each is a refusal the member itself brings about, so
+     name no other status in backticks here - and the members sketched after
+     the 409. This section speaks for PUT /api/founder/money/cash alone, and
+     only for what the member `ledger` adds to "### PUT" above. -->
+
+A change to the plan is worked out by the page against the ledger it holds: a
+withdrawal marked paid keeps the ledger rows it held before the change, and
+which rows those are is read off the ledger. A page whose ledger is older than
+the stored one would keep by rows it has, and deal over the rows it has never
+seen. So the page says which ledger it counted by. The body of the plan's
+`PUT` may be `{"base": N, "doc": "<the plan, as a string of JSON>", "ledger": M}`:
+
+- `ledger` is the revision the page read the ledger at — the number it would
+  send as `base` to the ledger's own door: a whole number, 0 or more, with the
+  same rules as `base`.
+- With `ledger` the plan is stored only while the ledger stands at that
+  revision. Without it the save is judged by `base` alone, as it always was:
+  a page from before 13 October 2026 sends none, and so does everything that
+  moves a document as a file (`/data`, `ctl`).
+- It is one request and no other: nothing asks for the ledger's revision by
+  itself, and nothing asks on a timer. A page learns that its ledger is behind
+  when it saves: from the refusal of its own save of the ledger, or from the
+  refusal below of its save of the plan.
+
+Answers, beside those of "PUT" above:
+
+- `400 bad_money_doc` — `ledger` is sent and is not a whole number of 0 or
+  more (`null`, `"3"`, `true`, `-1`, `2.5`).
+- `409` `{"error": "ledger_stale", "message": …, "ledger": <the ledger's stored revision>}` —
+  somebody saved the ledger after this page read it. Nothing is written: the
+  plan stays as it was, at the revision it had.
+- `503 storage_damaged` — the stored ledger cannot be trusted, so nothing can
+  be said of its revision; the plan is not written either.
+
+Where it stands among the checks: the shape of `ledger` is looked at with the
+shape of `base`; the ledger's revision right after the plan's own — of a plan
+and a ledger that are both behind, the plan's own refusal is the one given —
+and before the free space. The two revisions are looked at under the plan's
+lock and not under the ledger's: a ledger that is saved in that same moment is
+a ledger saved after this plan, and its rows are dealt by the plan as this
+save left it.
+
 ### How the page reads these answers
 
 - `409` — «данные изменились в другом окне — обновите страницу»; the page
   stops saving until it is reloaded.
+- `409 ledger_stale`, from the plan's door — «таблица изменилась в другом
+  окне — обновите страницу». The page is then what it is after a `409` on the
+  ledger itself: the band «Таблица изменилась в другом окне.» stands over
+  every tab, no file is taken, and nothing changed in that window — the plan
+  no more than the table — is saved until it is reloaded. A page that already
+  knows its table is behind (its own save of the ledger was answered `409`)
+  refuses a change to the plan where it is made, and sends none.
 - `403 read_only` — the owner has made this person a reader while their page
   stood open. The page says «Теперь у вас только просмотр: сохранить нельзя»,
   becomes a reader's page — nothing on it changes anything any more — and
@@ -691,6 +749,7 @@ differences:
 - before the first save `updatedAt` is `null` (the platform answers the moment
   its migration ran);
 - `503 storage_damaged` and `507 storage_failed` exist here only;
+- so do the member `ledger` of the plan's `PUT` and its `409 ledger_stale`;
 - a caller is somebody the stand knows or nobody: there is no
   `403 founder_tier_required`. Who may save is the stand's own matter
   (`403 read_only`, above).

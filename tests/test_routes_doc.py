@@ -98,6 +98,8 @@ DOORS = (
 TABLE_ONLY = (("GET", "/robots.txt"), ("GET", "/favicon.ico"), ("GET", "/healthz"))
 #: The sections that speak for every request, whatever the door.
 GENERIC = ("Conventions", "Every other request", "What every request passes first")
+#: The section that speaks for what the member ``ledger`` adds to the plan's PUT, and for nothing else of that door.
+BESIDE = "The ledger's revision, on the plan's PUT"
 
 #: Refusals of the code that belong to ``ctl`` and have no door (the document: "What has no door").
 NO_DOOR = {"no_such_snapshot", "bad_snapshot", "refused"}
@@ -939,6 +941,24 @@ def refusals_of_a_document_put(path: str, kind: str) -> Callable[[unittest.TestC
     return provoke
 
 
+def refusals_of_the_ledgers_revision(case: unittest.TestCase) -> Dict[str, Any]:
+    """What the plan's door says to a save that names the ledger's revision, and would have taken without it."""
+    out = {}    # type: Dict[str, Any]
+    with _harness.Stand() as stand:
+        cookie = stand.session("mika")
+        case.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).status, 200)
+        good = {"base": 0, "doc": plan(), "ledger": 1}
+        out["a revision that is not one"] = stand.put(PLAN, dict(good, ledger="1"), cookie=cookie)
+        out["a ledger saved since"] = stand.put(PLAN, dict(good, ledger=0), cookie=cookie)
+        with open(os.path.join(stand.data_dir, "ledger", "current.json"), "wb") as handle:
+            handle.write(b'{"rev":1,"doc":{')
+        out["the stored ledger is cut short"] = stand.put(PLAN, good, cookie=cookie)
+        # None of the three wrote anything, and each is the member's own doing: the same save without it is taken.
+        case.assertEqual(stand.get(PLAN, cookie=cookie).json()["rev"], 0)
+        case.assertEqual(stand.put(PLAN, {"base": 0, "doc": plan()}, cookie=cookie).status, 200)
+    return out
+
+
 def refusals_of_password(case: unittest.TestCase) -> Dict[str, Any]:
     out = {}    # type: Dict[str, Any]
     with _harness.Stand() as stand:
@@ -1125,6 +1145,35 @@ class DoorAnswersTests(unittest.TestCase):
         self.assertIsNone(met["the accounts file is damaged"].header("Retry-After"))
         damaged = self.seen("GET")["the stored file is cut short"]
         self.assertEqual((pair(damaged), damaged.header("Retry-After")), ((503, "storage_damaged"), None))
+
+    def test_the_ledgers_revision_on_the_plans_put_is_refused_as_its_section_lists_and_no_other_way(self):
+        text = section(self.text, BESIDE, 3)
+        listed = {named for named in answers(text) if named[0] >= 400}
+        met = {}    # type: Dict[Tuple[int, Optional[str]], str]
+        for label, answer in refusals_of_the_ledgers_revision(self).items():
+            self.assertGreaterEqual(answer.status, 400, label)
+            met.setdefault(pair(answer), label)
+        self.assertEqual(sorted(met, key=str), sorted(listed, key=str),
+                         "'### %s' lists what the member makes the door say, and the door says nothing else for it" % BESIDE)
+        # The refusal that is the member's alone is named nowhere under "PUT": the ledger's door never gives it.
+        self.assertIn((409, "ledger_stale"), listed)
+        self.assertNotIn((409, "ledger_stale"), self.listed["PUT"])
+        self.assertNotIn((409, "ledger_stale"), set(self.refusals("PUT")))
+        # The body and the answer, member for member.
+        sent = re.search(r"may be `([^`]+)`", " ".join(text.split()))
+        self.assertIsNotNone(sent, "the section says what the body may be")
+        self.assertEqual(members(sent.group(1)), ["base", "doc", "ledger"])
+        with _harness.Stand() as stand:
+            cookie = stand.session("mika")
+            self.assertEqual(stand.put(LEDGER, {"base": 0, "doc": ledger()}, cookie=cookie).status, 200)
+            body = dict(zip(members(sent.group(1)), (0, plan(), 1)))
+            self.assertEqual(stand.put(PLAN, body, cookie=cookie).json(), {"rev": 1})
+            self.assertEqual(stand.put(LEDGER, {"base": 1, "doc": ledger()}, cookie=cookie).json(), {"rev": 2})
+            late = stand.put(PLAN, dict(body, base=1), cookie=cookie)
+            self.assertEqual(sorted(late.json()), sorted(sketches(text, 409)[0]))
+            self.assertEqual((late.status, late.json()["error"], late.json()["ledger"]), (409, "ledger_stale", 2))
+            # ... and the ledger's own door does not read the member.
+            self.assertEqual(stand.put(LEDGER, {"base": 2, "doc": ledger(), "ledger": 99}, cookie=cookie).json(), {"rev": 3})
 
     def test_a_refusal_carries_what_the_document_says_goes_with_it(self):
         # 409 names the stored revision; 429 says how long to wait, twice; weak_password says the minimum.

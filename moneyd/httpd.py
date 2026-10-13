@@ -1219,8 +1219,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             del raw                         # sixteen megabytes at the limit: nothing needs them any more
             base, doc = store.fields_of(parsed)
+            # A plan is worked out against the ledger, and a page says against which revision of it:
+            # the plan is then taken only while the ledger stands there (docs/api.md, "The ledger's
+            # revision, on the plan's PUT"). The ledger's own door reads no such member.
+            held = store.ledger_of(parsed) if route.doc == "plan" else store.NOT_SENT
             del parsed
-            saved = document.save(base, doc, self._identity.login)
+            beside = None if held is store.NOT_SENT else (server.stores["ledger"], held)
+            saved = document.save(base, doc, self._identity.login, beside=beside)
         finally:
             if heavy:
                 server.heavy.release()

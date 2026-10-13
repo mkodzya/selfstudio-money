@@ -444,6 +444,126 @@ class IndependenceTests(DoorCase):
 
 
 # ---------------------------------------------------------------------------
+# The plan names the ledger it was worked out against (docs/api.md, "The ledger's revision, on the plan's PUT")
+# ---------------------------------------------------------------------------
+
+class LedgerBesideTests(DoorCase):
+    """A page changes the plan by the ledger it holds. One that holds an older ledger must not save the plan."""
+
+    def setUp(self):
+        super().setUp()
+        self.assertSaved(self.put(LEDGER, 0, ledger(3, "as the page read it")), 1)
+        self.assertSaved(self.put(PLAN, 0, plan(banks=2)), 1)
+
+    def put_beside(self, base, doc, held):
+        return self.stand.put(PLAN, {"base": base, "doc": doc, "ledger": held}, cookie=self.cookie)
+
+    def test_a_plan_is_saved_while_the_ledger_stands_where_the_page_read_it(self):
+        self.assertSaved(self.put_beside(1, plan(banks=2, team=1), 1), 2)
+        self.assertSaved(self.put_beside(2, plan(banks=2, team=2), 1.0), 3)     # JSON has one kind of number
+        self.assertEqual(self.get(PLAN).json()["doc"]["team"], [{"id": "team-0"}, {"id": "team-1"}])
+        self.assertEqual(self.get(LEDGER).json()["rev"], 1, "looking at the ledger's revision moves nothing of the ledger")
+
+    def test_a_plan_worked_out_against_an_older_ledger_is_409_ledger_stale_and_writes_nothing(self):
+        # Another founder's page saves the ledger: a statement is uploaded.
+        self.assertSaved(self.put(LEDGER, 1, ledger(5, "with a statement this page has not seen")), 2)
+        before, copies, ledger_file = self.stored("plan"), self.copies("plan"), self.stored("ledger")
+        self.stand.clock.tick(days=1)       # the copy of a new day is due: a refused save must not take it
+        for held in (1, 0, 3, 99, 2 ** 53 - 1):
+            late = self.put_beside(1, plan(banks=2, team=1), held)
+            self.assertRefused(late, 409, "ledger_stale")
+            said = late.json()
+            self.assertEqual(sorted(said), ["error", "ledger", "message"])
+            self.assertEqual(said["ledger"], 2, "the ledger's stored revision, not the plan's")
+            self.assertTrue(said["message"])
+        self.assertEqual((self.stored("plan"), self.copies("plan"), self.stored("ledger")), (before, copies, ledger_file))
+        self.assertEqual(self.get(PLAN).json()["rev"], 1, "the plan stays at the revision it had: the page that reloads saves from it")
+        # ... and the page that has read the ledger again saves.
+        self.assertSaved(self.put_beside(1, plan(banks=2, team=1), 2), 2)
+
+    def test_a_page_from_before_the_rule_names_no_ledger_and_is_judged_by_the_plan_alone(self):
+        self.assertSaved(self.put(LEDGER, 1, ledger(5)), 2)
+        self.assertSaved(self.put(PLAN, 1, plan(banks=2, team=1)), 2)
+
+    def test_the_ledgers_own_door_does_not_read_the_member(self):
+        answer = self.stand.put(LEDGER, {"base": 1, "doc": ledger(4), "ledger": 99}, cookie=self.cookie)
+        self.assertSaved(answer, 2)
+
+    def test_a_ledger_nobody_has_saved_stands_at_0(self):
+        with _harness.Stand() as stand:
+            cookie = stand.session("mika")
+            taken = stand.put(PLAN, {"base": 0, "doc": plan(banks=1), "ledger": 0}, cookie=cookie)
+            self.assertEqual((taken.status, taken.json()), (200, {"rev": 1}))
+            late = stand.put(PLAN, {"base": 1, "doc": plan(banks=1), "ledger": 1}, cookie=cookie)
+            self.assertEqual((late.status, late.json()["error"], late.json()["ledger"]), (409, "ledger_stale", 0))
+
+    def test_what_is_sent_as_the_ledgers_revision_is_a_revision_or_400(self):
+        before = self.stored("plan")
+        for raw in (b'null', b'"1"', b'true', b'-1', b'1.5', b'[1]'):
+            with self.subTest(ledger=raw):
+                answer = self.put_raw(PLAN, b'{"base":1,"doc":%s,"ledger":%s}' % (json.dumps(plan(banks=2)).encode("ascii"), raw))
+                self.assertRefused(answer, 400, "bad_money_doc")
+        self.assertEqual(self.stored("plan"), before)
+        # ... and it is looked at with the body, before the stored state: a stale base does not hide it.
+        self.assertRefused(self.put_raw(PLAN, b'{"base":7,"doc":"{}","ledger":"1"}'), 400, "bad_money_doc")
+
+    def test_of_a_plan_and_a_ledger_that_are_both_behind_the_plans_own_revision_is_named(self):
+        self.assertSaved(self.put(LEDGER, 1, ledger(5)), 2)
+        self.assertSaved(self.put(PLAN, 1, plan(banks=3)), 2)
+        late = self.put_beside(1, plan(banks=2), 1)
+        self.assertRefused(late, 409, "money_stale")
+        self.assertEqual(late.json()["rev"], 2)
+
+    def test_a_ledger_that_cannot_be_trusted_vouches_for_no_plan(self):
+        before = self.stored("plan")
+        write_new(self.file("ledger"), b'{"rev":1,"doc":{')
+        self.assertRefused(self.put_beside(1, plan(banks=2, team=1), 1), 503, "storage_damaged")
+        self.assertEqual(self.stored("plan"), before)
+        self.assertSaved(self.put(PLAN, 1, plan(banks=2, team=1)), 2)       # without the member: as it always was
+        os.unlink(self.file("ledger"))
+        self.assertRefused(self.put_beside(2, plan(banks=2), 1), 503, "storage_damaged")    # lost is not revision 0
+
+    def test_a_restored_ledger_is_another_ledger_to_every_open_page(self):
+        self.stand.clock.tick(days=1)
+        self.assertSaved(self.put(LEDGER, 1, ledger(6, "the day after")), 2)
+        name = self.copies("ledger")[0]
+        self.assertEqual(self.stand.stores["ledger"].restore(name, "ctl").rev, 3)
+        for held in (1, 2):
+            self.assertRefused(self.put_beside(1, plan(banks=2), held), 409, "ledger_stale")
+        self.assertSaved(self.put_beside(1, plan(banks=2), 3), 2)
+
+    def test_the_store_itself_refuses_in_the_same_words(self):
+        stores = self.stand.stores
+        self.assertSaved(self.put(LEDGER, 1, ledger(5)), 2)
+        with self.assertRaises(store.LedgerStale) as late:
+            stores["plan"].save(1, plan(banks=2), "mika", beside=(stores["ledger"], 1))
+        refusal = late.exception
+        self.assertEqual((refusal.status, refusal.code, refusal.ledger, refusal.extra()), (409, "ledger_stale", 2, {"ledger": 2}))
+        self.assertEqual(refusal.message, "The ledger was saved from somewhere else since this page read it; "
+                                          "the cash plan was worked out against the older copy.")
+        with self.assertRaises(store.BadDoc) as odd:
+            stores["plan"].save(1, plan(banks=2), "mika", beside=(stores["ledger"], "2"))
+        self.assertEqual(odd.exception.message, "ledger is the revision the ledger was read at — a whole number, 0 or more.")
+        self.assertEqual(stores["plan"].save(1, plan(banks=2), "mika", beside=(stores["ledger"], 2)).rev, 2)
+        self.assertIs(store.ledger_of({"base": 1, "doc": "{}"}), store.NOT_SENT)
+        self.assertIs(store.ledger_of([1, 2]), store.NOT_SENT)
+        self.assertIsNone(store.ledger_of({"ledger": None}), "sent as null is sent")
+
+    def test_the_revision_is_read_off_the_file_as_it_is_now(self):
+        # revision() reads the first bytes only of a file it knows; a file put there by another hand is read whole.
+        document = self.stand.stores["ledger"]
+        self.assertEqual(document.revision(), 1)
+        write_new(self.file("ledger"), envelope(7, ledger(2, "put back from a backup")))
+        self.assertEqual((document.revision(), document.read().rev), (7, 7))
+        self.assertRefused(self.put_beside(1, plan(banks=2), 1), 409, "ledger_stale")
+        self.assertSaved(self.put_beside(1, plan(banks=2), 7), 2)
+        second = store.DocStore(self.stand.data_dir, "ledger", self.stand.clock)       # ctl is a second process
+        self.assertEqual(second.save(7, ledger(3), "ctl").rev, 8)
+        self.assertEqual(document.revision(), 8)
+        self.assertRefused(self.put_beside(2, plan(banks=2), 7), 409, "ledger_stale")
+
+
+# ---------------------------------------------------------------------------
 # Text for text (design 1.4 "stored verbatim"; docs/api.md "text for text")
 # ---------------------------------------------------------------------------
 

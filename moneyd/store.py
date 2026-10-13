@@ -14,20 +14,27 @@ and ``ctl`` (another process) may work on the same directory at the same time::
         ``body`` is the GET answer byte for byte: ``{"rev":N,"doc":{...},"updatedAt":"...Z"}``.
         Never saved: ``{"rev":0,"doc":{},"updatedAt":null}``. Raises ``Damaged``.
 
-    store.save(base, doc, who) -> SaveResult(rev, rows, bytes, updated_at, snapshot)
+    store.save(base, doc, who, beside=None) -> SaveResult(rev, rows, bytes, updated_at, snapshot)
         ``base`` and ``doc`` are the two members of the PUT body exactly as the
         JSON parser returned them (``fields_of(body)`` picks them out of
         whatever the body was). ``rev`` is ``base + 1`` - or one above the
         floor, when ``raise_floor`` lifted that over the stored revision.
+        ``beside`` is for the plan: ``(the ledger's DocStore, the revision of the
+        ledger the page holds)`` - what ``ledger_of(body)`` found in the body, when
+        it found something. The plan is then stored only while the ledger stands
+        at that revision.
         What it raises, in the order it is checked -
         the body first, as in the platform's route file, then the stored state:
           BadDoc      400 bad_money_doc     base not a whole number >= 0; doc not a string;
                                             doc not JSON / NaN / too deep / not UTF-8;
-                                            not an object; no ``tx`` list (ledger) / ``banks`` list (plan)
+                                            not an object; no ``tx`` list (ledger) / ``banks`` list (plan);
+                                            the ledger's revision in ``beside`` not a whole number >= 0
           TooLarge    413 body_too_large    the document is over the door's limit
           Busy        503 storage_busy      the lock could not be had in time
           Damaged     503 storage_damaged   the stored file cannot be trusted; nothing is written
           Stale       409 money_stale       ``.rev`` is the stored revision; nothing is written
+          LedgerStale 409 ledger_stale      ``.ledger`` is the ledger's stored revision, which is not the
+                                            one in ``beside``; nothing is written
           NoSpace     507 storage_failed    free space is not above 3 x the document + 64 MB
           StorageFailed 507 storage_failed  the disk refused the write (NoSpace is one of these);
                                             what was stored is untouched
@@ -52,7 +59,8 @@ and ``ctl`` (another process) may work on the same directory at the same time::
 
 Every ``StoreError`` is a ``config.Refusal``: ``status``, ``code``, ``message``
 (a fixed English sentence - for the two documents the platform's own),
-``extra()`` (``{"rev": N}`` on ``Stale``) and ``body()``, the whole JSON answer.
+``extra()`` (``{"rev": N}`` on ``Stale``, ``{"ledger": N}`` on ``LedgerStale``) and ``body()``, the whole
+JSON answer.
 
 For ``ctl``::
 
@@ -129,10 +137,10 @@ from .config import BootRefusal, Clock, Refusal, STANDS, as_utc, iso_ms, parse_i
 
 __all__ = [
     "KINDS", "DocStore", "Envelope", "SaveResult", "RestoreResult", "FloorResult", "Snapshot",
-    "StoreError", "BadDoc", "Stale", "TooLarge", "Damaged", "StorageFailed", "NoSpace", "Busy",
+    "StoreError", "BadDoc", "Stale", "LedgerStale", "TooLarge", "Damaged", "StorageFailed", "NoSpace", "Busy",
     "NoSuchSnapshot", "BadSnapshot", "Refused", "DataDirError", "LockTimeout", "Unsynced",
     "prepare_data_dir", "read_stand_marker", "has_run", "holds_real_data", "open_stores", "doctor", "verify",
-    "fields_of",
+    "fields_of", "ledger_of", "NOT_SENT",
     "parse_json", "json_depth_ok", "atomic_write", "FileLock",
 ]
 
@@ -187,6 +195,19 @@ class Stale(StoreError):
 
     def extra(self) -> Dict[str, Any]:
         return {"rev": self.rev}
+
+
+class LedgerStale(StoreError):
+    """The plan was worked out against a ledger that somebody has saved since. ``ledger`` is where the ledger is now."""
+    status = 409
+    code = "ledger_stale"
+
+    def __init__(self, message: str, ledger: int):
+        super().__init__(message)
+        self.ledger = ledger
+
+    def extra(self) -> Dict[str, Any]:
+        return {"ledger": self.ledger}
 
 
 class TooLarge(StoreError):
@@ -444,6 +465,36 @@ def fields_of(body: Any) -> Tuple[Any, Any]:
     return None, None
 
 
+#: What ``ledger_of`` answers for a body that names no revision of the ledger.
+NOT_SENT = object()
+
+
+def ledger_of(body: Any) -> Any:
+    """The ``ledger`` member of a parsed PUT body exactly as the parser returned it, or ``NOT_SENT``.
+
+    The page sends it with the plan: the revision of the ledger it holds, which is the
+    ledger the change to the plan was worked out against. A page from before 13 October
+    2026 sends none, and its save is judged by the plan's own revision alone, as ever.
+    """
+    if isinstance(body, dict) and "ledger" in body:
+        return body["ledger"]
+    return NOT_SENT
+
+
+def _whole(value: Any, refusal: str) -> int:
+    """``value`` as a revision - a whole number, 0 or more - or ``BadDoc`` in the words of ``refusal``."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BadDoc(refusal)
+    if isinstance(value, float):
+        # JSON has one kind of number: 3.0 is the whole number 3, as it is to the platform.
+        if value != value or value in (float("inf"), float("-inf")) or not value.is_integer():
+            raise BadDoc(refusal)
+        value = int(value)
+    if value < 0:
+        raise BadDoc(refusal)
+    return value
+
+
 # ---------------------------------------------------------------------------
 # What a document is
 # ---------------------------------------------------------------------------
@@ -693,8 +744,13 @@ class DocStore:
         return Envelope(parsed.rev, parsed.updated_at, body, parsed.rows)
 
     def revision(self) -> int:
-        """The stored revision; 0 when nothing was ever saved. Raises ``Damaged``."""
-        return self.read().rev
+        """The stored revision; 0 when nothing was ever saved. Raises ``Damaged``.
+
+        Takes no lock, like ``read``: a file is replaced whole. Of a file this store has
+        read before it reads the first bytes only - every save of the plan asks it of
+        the ledger (``save``, ``beside``).
+        """
+        return self._state().rev
 
     def _damaged(self, reason: str) -> str:
         return "The stored copy of %s cannot be trusted: %s. Nothing is read from it or written over it." % (
@@ -766,7 +822,8 @@ class DocStore:
 
     # -- saving --------------------------------------------------------------
 
-    def save(self, base: Any, doc: Any, who: str) -> SaveResult:
+    def save(self, base: Any, doc: Any, who: str,
+             beside: Optional[Tuple["DocStore", Any]] = None) -> SaveResult:
         """Store ``doc`` as the next revision, if ``base`` is still the stored revision.
 
         The next revision is ``base + 1`` - or, when the number in ``EVER_SAVED`` is
@@ -776,6 +833,17 @@ class DocStore:
         never find the counter standing on the number it holds, or its save would
         replace everything saved since without a 409. A ``base`` that is not the
         stored revision is ``Stale`` as ever, with the stored revision.
+
+        ``beside`` is ``(another document's store, the revision of it the page
+        holds)`` - the plan's door hands in the ledger's, when the page named one.
+        The page worked its change out against that document: a withdrawal marked
+        paid keeps the ledger rows it held, and which those are is read off the
+        ledger. So the save is taken only while that document stands at that
+        revision; at another it is ``LedgerStale``, with the revision it has. It
+        is looked at under this document's lock, after ``base``: of a plan and a
+        ledger that are both behind, the plan's own revision is the one named. A
+        ledger that is saved a moment later is a ledger saved after this plan,
+        and its rows are dealt by the plan as this save leaves it.
 
         ``doc`` is the document as a string of JSON; it is stored as it was sent
         (without the white space around it), so members this service has never
@@ -798,6 +866,10 @@ class DocStore:
         if not isinstance(who, str) or not who:
             raise ValueError("who saved it must be a login")
         base = self._base(base)
+        if beside is not None:
+            other, held = beside
+            held = _whole(held, "ledger is the revision %s was read at — a whole number, 0 or more."
+                          % other._spec.name)
         if not isinstance(doc, str):
             raise BadDoc("doc is %s as a string of JSON." % spec.name)
         try:
@@ -825,6 +897,14 @@ class DocStore:
                 # their save away without a trace, so the page is told to reload.
                 raise Stale("%s was saved from somewhere else since this copy was read."
                             % (spec.name[0].upper() + spec.name[1:]), state.rev)
+            if beside is not None:
+                stands = other.revision()
+                if stands != held:
+                    # The page counted by an older copy of the other document. What it worked out
+                    # may deal over rows it has never seen, so it is told to reload - like above.
+                    raise LedgerStale("%s was saved from somewhere else since this page read it; %s was worked "
+                                      "out against the older copy." % (other._spec.name[0].upper() + other._spec.name[1:],
+                                                                       spec.name), stands)
             self.check_space(len(raw))
             # Above the stored revision, and above every number this document has given out or was
             # told to stay clear of: the counter never comes back to a number a browser may hold.
@@ -854,17 +934,7 @@ class DocStore:
         return SaveResult(rev, rows, len(raw), updated_at, snapshot)
 
     def _base(self, base: Any) -> int:
-        refusal = "base is the revision %s was read at — a whole number, 0 or more." % self._spec.name
-        if isinstance(base, bool) or not isinstance(base, (int, float)):
-            raise BadDoc(refusal)
-        if isinstance(base, float):
-            # JSON has one kind of number: 3.0 is the whole number 3, as it is to the platform.
-            if base != base or base in (float("inf"), float("-inf")) or not base.is_integer():
-                raise BadDoc(refusal)
-            base = int(base)
-        if base < 0:
-            raise BadDoc(refusal)
-        return base
+        return _whole(base, "base is the revision %s was read at — a whole number, 0 or more." % self._spec.name)
 
     def check_space(self, nbytes: int) -> None:
         """Raise ``NoSpace`` unless free space exceeds three times ``nbytes`` plus 64 MB."""
@@ -910,7 +980,7 @@ class DocStore:
             self._thread_lock.release()
 
     def _state(self) -> _State:
-        """What is stored now. Call under the lock. Raises ``Damaged``."""
+        """What is stored now. Raises ``Damaged``. A save is judged against it under the lock."""
         try:
             handle = open(self.path, "rb")
         except FileNotFoundError:
