@@ -308,6 +308,33 @@ a deploy:
   document, beside the typed rates `fx`, which stay as they are for the days
   before the table began). **A change to how the page counts must keep this**:
   the check `rv-rates` moves today's rate and holds every figure of the past.
+- **A change to the plan deals nothing of a marked withdrawal over**
+  (13 October 2026). Which ledger rows a withdrawal holds is decided by a
+  walk over every withdrawal of the plan, so a change to another line used
+  to deal old rows into a marked withdrawal or out of it, and «Денег сейчас»
+  moved with nothing new from the bank. The page now sees what every
+  withdrawal whose mark can count in «Денег сейчас» holds before it changes
+  the plan (`Live.write.see`), and keeps it after (`Live.write.keep`):
+  where the change would have dealt those rows over, or moved the window
+  the statements close the withdrawal by, each such mark is given a memory
+  of what its withdrawal held (`paid.saw`) and holds to it; where it would
+  not, the plan holds no memory and is counted exactly as before. **A
+  change to how withdrawals are dealt must keep three things**: a plan with
+  no memory in force is read as it always was - the model differs by its
+  one new field, `item.saw`, and by nothing else; a change to another line
+  never moves a withdrawal whose mark counts; and no ledger row gives the
+  withdrawals more than its own sum. The first is held against the page of
+  before the rule by the scripts in `checks/withdrawals/` (run by hand,
+  under node - its README says how); the check `rv-wdmark` holds the other
+  two and the page's own hand. **A change the page makes to the plan sees
+  before and keeps after**: `Plan.edit` does, the keystroke in a row of
+  «Касса» does it by hand, and «Что если» does it on its copy - a new way
+  to change the plan that goes past them brings the fault back. Three
+  things go past them as it is: «Отменить» and the plan loaded from the old
+  «Касса», which put a whole plan in the place of this one, and a name
+  trimmed as the cursor leaves its row, which changes no count.
+  `docs/handoff.md` says it in words: rule 4, and the entry of 13 October
+  with what is known and kept.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
   `POST /api/people/update`, `POST /api/people/link` (the owner's alone) and
   `POST /api/auth/password`; «Выйти» is `POST /api/auth/logout`. None of them

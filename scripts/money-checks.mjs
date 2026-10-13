@@ -457,7 +457,9 @@ const held = { runs: 0, bad: [] };
 // nowhere; 7 a hand mark is inside «сейчас» only while no statement uploaded after it has reached its day and only
 // if it is later than the typed balance; 16 no total while an account in use has no balance; 18 the forecast holds
 // nothing no founder wrote; 19 one occurrence per month of a «каждый месяц» row, none outside its months; 20–21 a
-// month its label paid is never late, missed or part, and a chain carries at most one unpaid month; 22 «Можно
+// month its label paid is never late, missed or part, and a chain carries at most one unpaid month; 23 a withdrawal
+// is never late or in a card, is whose its row says, and holds no more than its rows are worth nor than its own
+// sum - nor do the withdrawals together hold more than the rows they share; 22 «Можно
 // вывести» never asks more of a day than that day holds after taxes and the cushion; 24 VAT accrued from facts is
 // the ledger's own figure; 25–27 one bill per tax period, a closed period reserves nothing, a rule that is off,
 // away or unconfirmed counts nowhere; 31 no key names a founder. And G: the month's columns add up.
@@ -566,7 +568,17 @@ function inv(M, P, L) {
   M.items.forEach((it) => { const r = (rows[it.src === 'occ' ? it.row : it.id] || {}).r || {};
     say((it.whose || '') === (it.wd && FND.includes(r.whose) ? r.whose : ''), `23: ${it.id} is not whose its row says`); });
   if (L) { const blk = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), r.c]));
-    M.items.forEach((it) => { if (it.wd && it.whose) say(it.rows.every((id) => blk[id] === it.whose || hand.has(String(id))), `23: ${it.id} is ${it.whose}'s and holds a row of another block`); }); }
+    M.items.forEach((it) => { if (it.wd && it.whose) say(it.rows.every((id) => blk[id] === it.whose || hand.has(String(id))), `23: ${it.id} is ${it.whose}'s and holds a row of another block`); });
+    // … and a row of the table is counted once (13 October 2026): a withdrawal holds no more than its rows are
+    // worth nor than its own sum, and the withdrawals together no more than the rows they hold between them -
+    // however the rows were dealt, and whatever a mark remembers. (The rows in pounds: a withdrawal in another
+    // currency is left out of that half, and one a founder gave a row by hand out of all of it.)
+    const worth = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), Math.abs(+r.a || 0)]));
+    const wds = M.items.filter((it) => it.wd && it.rows.length && !it.rows.some((id) => hand.has(String(id))));
+    const gbp = wds.filter((it) => it.cur === 'GBP'), of = (ids) => sum(ids.map((id) => worth[id] || 0));
+    gbp.forEach((it) => say(it.wd.got <= of(it.rows) + 0.011, `23: the withdrawal ${it.id} holds ${it.wd.got}, more than its rows are worth`));
+    wds.forEach((it) => say(it.wd.got <= it.amt + 0.011, `23: the withdrawal ${it.id} holds ${it.wd.got}, more than its own sum`));
+    if (gbp.length === wds.length) say(sum(gbp.map((it) => it.wd.got)) <= of([...new Set(gbp.flatMap((it) => it.rows))]) + 0.011, '23: the withdrawals hold more than the rows of the table they share are worth'); }
   // 22
   if (M.free) {
     const f = M.free;
@@ -6431,19 +6443,17 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   same(chain(R), [['2026-05', '2026-09', 'misha', 1000], ['2026-10', '2026-11', 'vanya', 1000], ['2026-12', '', 'vanya', 1500]], '«Октябрь и дальше» with Vanya: every part from October on is Vanya\'s - the December part too - and the months before stay Misha\'s');
   R = await wr(R, 'onward', await month(R, 'wR3@2026-11'), { amt: 1200 }, 'wR4', TAP, BY);
   same(chain(R).map((x) => x[2]), ['misha', 'vanya', 'vanya', 'vanya'], 'a sum changed «и дальше» moves nobody\'s owner');
-  // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is deals an old row into the marked one, and «Денег сейчас» moves with nothing new from the bank. That is how a mark on a withdrawal has always counted - a row deleted or moved does the same - and it is known and left: a mark that remembered a fixed sum was tried and withdrawn the same day, because it counted one bank row in two withdrawals. What is held here: a bank row is counted once, and - on the screen, below - the card says it when the figure moves.)
+  // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is deals an old row into the marked one, and «Денег сейчас» moves with nothing new from the bank. Since 13 October 2026 the page sees what a marked withdrawal holds before it changes the plan and keeps it after, and that no longer happens - the check rv-wdmark, and on the screen below. What is held here is the bare writer, as a page from before that day uses it: the row moves in, and a bank row is still counted once.)
   const MARK = ms('2026-10-13T10:00:00Z');
-  let Q2 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-12', { blk: 'div' })]) };
+  let Q2 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-12', { blk: 'div', paid: paid(D, MARK) })]) };
   const L2 = ledP({ tx: [filed('m1', '2026-10-09', -2000, 'mika', '', { at: AT })] });
   let Mq = await C(L2, Q2, D);
-  same([item(Mq, 'wA').state, item(Mq, 'wA').rows, item(Mq, 'wB').wd.got], ['done', ['m1'], 0], 'Mika\'s 2,000 closes the row called «Vanya»; «Вывод» is untouched');
-  Q2 = await wr(Q2, 'mark', item(Mq, 'wB'), D, MARK, BY);
-  Mq = await C(L2, Q2, D);
+  same([item(Mq, 'wA').state, item(Mq, 'wA').rows, item(Mq, 'wB').wd.got, item(Mq, 'wB').done.by], ['done', ['m1'], 0, 'mark'], 'Mika\'s 2,000 closes the row called «Vanya»; «Вывод», marked, holds nothing');
   const marked = [Mq.now, Mq.marksGbp];
   Q2 = await wr(Q2, 'set', item(Mq, 'wA'), { whose: 'vanya' }, MARK + 60000, BY);
   Mq = await C(L2, Q2, D);
   same([Object.keys(Q2.div.find((r) => r.id === 'wB').paid).sort(), item(Mq, 'wA').cash, item(Mq, 'wA').wd.got + item(Mq, 'wB').wd.got, [round2(Mq.now - marked[0]), round2(Mq.marksGbp - marked[1])]], [['at', 'by', 'on'], -2000, 2000, [2000, 2000]],
-    '«Vanya» given to Vanya with «Вывод» marked: his row is open again with its 2,000; Mika\'s 2,000 is counted once - it now stands in the marked «Вывод», whose mark is worth the 1,000 that is left - so «Денег сейчас» is 2,000 higher until a statement passes the mark; a mark stores no sum of its own');
+    '«Vanya» given to Vanya by a page from before the rule, with «Вывод» marked: his row is open again with its 2,000; Mika\'s 2,000 is counted once - it now stands in the marked «Вывод», whose mark is worth the 1,000 that is left - so «Денег сейчас» is 2,000 higher until a statement passes the mark; the bare writer gives the mark no memory');
   // (independent reading: a founder\'s row that a choice left outside the plan was taken as the payment of a marked salary of the same sum)
   let Q3 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' })]), team: P.team.concat([row('pz', 'Person Z', 2000, '2026-10-12', { blk: 'cogs', paid: paid(D, MARK) })]) };
   const L3 = ledP({ tx: [filed('m1', '2026-10-10', -2000, 'mika', '', { at: MARK + 3600e3 })] });
@@ -6540,7 +6550,7 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await shot(pg, 'rv-whose');
   await pg.context().close();
 
-  // (independent reading: with a withdrawal marked «Оплачено» the same press moved «Денег сейчас», and nothing said so)
+  // (independent reading: with a withdrawal marked «Оплачено» the same press moved «Денег сейчас», and nothing said so. Since 13 October 2026 it does not move: the page keeps what the marked withdrawal held - rv-wdmark. The mark here is one a plan from before that day holds.)
   serve(ledP({ tx: [filed('m1', '2026-10-05', -2000, 'mika', '', { at: AT2 })] }), { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод оплачен', 1500, '2026-10-06', { blk: 'div', paid: paid(T) })]) });
   const mk = await reopen('whose, a mark');
   const now0 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
@@ -6550,7 +6560,7 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await mk.click(K('row') + '[data-ed-save]');
   await puts('cash', 1);
   const now1 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
-  same([round2(now1 - now0), await toastText(mk)], [1500, `Vanya: вывод Vanya · «Денег сейчас» теперь £${Math.round(now1).toLocaleString('en-GB')}: пересчитана отметка «Оплачено» на выводе`], 'a closed row given to Vanya while another withdrawal carries «Оплачено»: Mika\'s money moves into the marked one, «Денег сейчас» is 1,500 higher, and the toast names the figure and says why');
+  same([round2(now1 - now0), await toastText(mk), await mk.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wB'), it = window.__money.model({ H: 30 }).items.find((x) => x.id === 'wB'); return [it.wd.got, it.rows, r.paid.saw ? r.paid.saw.rows.map((x) => x[1]) : null]; })], [0, 'Vanya: вывод Vanya', [0, [], [0]]], 'a closed row given to Vanya while another withdrawal carries «Оплачено»: Mika\'s money leaves the row and is not dealt into the marked withdrawal - the mark, made before the rule, is given its memory by this save - and «Денег сейчас» has not moved, so the toast has no figure to name');
   await mk.context().close();
 
   // somebody who only looks reads whose a withdrawal is, and is offered nothing
@@ -6564,6 +6574,483 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   same([await rd.$$eval('#view-cash [data-ed-card="row"] input, #view-cash [data-ed-card="row"] select', (l) => l.length), /вывод Vanya: закроется тем, что возьмёт Vanya\./.test(await text(rd, '#view-cash [data-ed-card="row"] .ed-why')), store.cash.puts], [0, true, 0], 'a reader\'s card of that withdrawal: whose it is, in words; no field, and no save');
   await rd.context().close();
   asOwner();
+});
+
+// A change to the plan deals nothing of a marked withdrawal over (13 October 2026). A marked withdrawal goes on
+// taking rows like any other and its mark is worth what they leave - and which rows are its is decided by every
+// other withdrawal of the plan. So a change to ANOTHER line - a withdrawal given to a founder, deleted, moved -
+// dealt rows the page had long shown into the marked withdrawal or out of it, and «Денег сейчас» moved with nothing
+// new from the bank. Now the page sees what each withdrawal whose mark can count holds before it changes the
+// plan, and keeps it after: where the change would have dealt those rows over, the marks are given a memory of
+// the table as it lay (paid.saw) and hold to it; where it would not, the plan holds no memory and is counted as it
+// always was. Each case below is a plan made by hand; the figures are the differences a founder would see.
+await run('rv-wdmark', 'a change to another line of the plan moves neither a marked withdrawal nor «Денег сейчас»; a plan the change dealt nothing over in holds no memory and is counted as before; what a statement brings is dealt by the walk; with no other withdrawal waiting, «Оплачено» then «Чей вывод» is «Чей вывод» then «Оплачено»', async () => {
+  const D = '2026-10-13', AT = ms('2026-10-13T08:00:00Z'), MARK = ms('2026-10-13T10:00:00Z'), LATER = ms('2026-10-13T12:00:00Z'), P = await plan2();
+  const w = (id, amt, date, more = {}) => row(id, 'Вывод ' + id, amt, date, { blk: 'div', ...more });
+  const plan = (...rows) => ({ ...P, div: P.div.concat(rows) });
+  const st = (M, id) => { const it = item(M, id); return [it.done ? it.done.by : it.state, it.wd.got, it.rows]; };
+  // what a founder sees move: «Денег сейчас», the part of it that is hand marks, the month's fact for dividends
+  const moved = (M1, M0) => [round2(M1.now - M0.now), round2(M1.marksGbp - M0.marksGbp), round2(M1.month.blocks.div.fact - M0.month.blocks.div.fact)];
+  const paidOf = (Q, id, ym) => { const r = Q.div.find((x) => x.id === id); return (ym ? r.rec.x[ym] : r).paid; };
+  const mem = (Q, id, ym) => paidOf(Q, id, ym).saw || null, held = (Q, id, ym) => (mem(Q, id, ym) ? mem(Q, id, ym).rows.map((x) => x[1]) : null);
+  const none = (Q) => !JSON.stringify(Q).includes('"saw"');
+  // (a model without what a mark would remember: the one field the rule adds to it)
+  const bare = (M) => JSON.stringify({ ...M, items: M.items.map(({ saw, ...it }) => it) });
+  // A change to the plan as the PAGE makes it (Plan.edit): what the marked withdrawals hold is seen, the change is
+  // made, and it is kept. `f` is the change itself; `tap` one of the page's verbs on a line of the model the page
+  // then shows. A bare `wr` is a page from before the rule.
+  const see = (L, Q, day = D) => page.evaluate(([p, l, d]) => window.__money.write.see(p, l, d), [Q, L, day]);
+  const keep = (L, Q, seen, day = D) => page.evaluate(([p, l, d, k]) => { window.__money.write.keep(p, l, d, k); return p; }, [Q, L, day, seen]);
+  const edit = async (L, Q, f, day = D) => { const seen = await see(L, Q, day); return keep(L, await f(Q), seen, day); };
+  const tap = async (L, Q, id, verb, ...a) => { const it = item(await C(L, Q, D), id); return edit(L, Q, (X) => wr(X, verb, it, ...a)); };
+  const press = (L, Q, id, at = MARK) => tap(L, Q, id, 'mark', D, at, BY);
+  const pick = (L, Q, id, whose, at = LATER) => tap(L, Q, id, 'set', { whose }, at, BY);
+  const mika = (id, d, amt, at = AT) => filed(id, d, -amt, 'mika', '', { at }), vanya = (id, d, amt, at = AT) => filed(id, d, -amt, 'vanya', '', { at }), misha = (id, d, amt, at = AT) => filed(id, d, -amt, 'misha', '', { at });
+
+  // ---- (a) another line of the plan changes ----
+  const mA = mika('m1', '2026-10-09', 2000), La = ledP({ tx: [mA] });
+  let Q = plan(w('wA', 2500, '2026-10-08'), w('wB', 3000, '2026-10-12'));
+  const M0 = await C(La, Q, D);
+  same([st(M0, 'wA'), st(M0, 'wB'), 'saw' in item(M0, 'wB')], [['waiting', 2000, ['m1']], ['blind', 0, []], false], 'Mika\'s 2,000 stands in the earlier withdrawal, which is still open; the later one holds nothing');
+  Q = await press(La, Q, 'wB');
+  const Ma = await C(La, Q, D), offer = item(Ma, 'wB').saw;
+  same([moved(Ma, M0), st(Ma, 'wB'), st(Ma, 'wA'), Object.keys(paidOf(Q, 'wB')).sort(), [Object.keys(offer).sort(), offer.from, offer.to, offer.rows.map((x) => x[1]), /^[0-9a-z]+$/.test(offer.rows[0][0])]], [[-3000, -3000, 3000], ['mark', 0, []], st(M0, 'wA'), ['at', 'by', 'on'], [['from', 'rows', 'to'], '2026-10-02', '2026-11-01', [0], true]],
+    '«Оплачено» on the later one: its 3,000 leaves «Денег сейчас» and is the month\'s fact; the mark is the three words it always was - no memory is written by the press; the model says what a memory would hold: the window, and the one taking of its days - by a hash - as not its own');
+  for (const [how, kept, f] of [
+    ['is given to Vanya', true, (X) => pick(La, X, 'wA', 'vanya')],
+    ['is deleted', true, (X) => tap(La, X, 'wA', 'del')],
+    ['is switched off', true, (X) => tap(La, X, 'wA', 'off')],
+    ['is moved to December', true, (X) => tap(La, X, 'wA', 'set', { date: '2026-12-08' }, LATER, BY)],
+    ['is made 500', true, (X) => tap(La, X, 'wA', 'set', { amt: 500 }, LATER, BY)],
+    ['is made «каждый месяц»', false, (X) => tap(La, X, 'wA', 'tick')],
+    ['is renamed', false, (X) => tap(La, X, 'wA', 'set', { name: 'Другое имя' }, LATER, BY)],
+  ]) { const X = await f(Q), M1 = await C(La, X, D); same([moved(M1, Ma), st(M1, 'wB'), !none(X), held(X, 'wB')], [[0, 0, 0], ['mark', 0, []], kept, kept ? [0] : null], `the other withdrawal ${how}: «Денег сейчас», the month's fact and the mark are what they were` + (kept ? ' - Mika\'s row, which the walk would now put into the marked withdrawal, is not what «Оплачено» was said of, and the mark is given the memory that says so' : '; no row of the marked withdrawal would have been dealt over, and the plan holds no memory')); }
+  { const X = await tap(La, Q, 'wA', 'partial', 2200, 'restA', LATER, BY, D, '2026-10-20'), M1 = await C(La, X, D); same([round2(M1.marksGbp - Ma.marksGbp), st(M1, 'wB'), none(X)], [-200, ['mark', 0, []], true], 'the other withdrawal marked «Частично», 2,200 of which rows show 2,000: its own mark is worth 200, and the first mark is as it was'); }
+  { const X = await edit(La, Q, (Y) => ({ ...Y, div: Y.div.concat([w('wN', 5000, '2026-10-05')]) })), M1 = await C(La, X, D);
+    same([moved(M1, Ma), st(M1, 'wB'), st(M1, 'wN'), st(M1, 'wA'), none(X)], [[0, 0, 0], ['mark', 0, []], ['waiting', 2000, ['m1']], ['waiting', 0, []], true], 'a withdrawal added to the plan, dated before both and stamped as written before the statement was read: Mika\'s row is its now, by the walk - the marked one held none of it, and the plan needs no memory'); }
+  { const X = await wr(Q, 'del', item(Ma, 'wA')), M1 = await C(La, X, D); same([moved(M1, Ma), st(M1, 'wB')], [[2000, 2000, -2000], ['mark', 2000, ['m1']]], '(the same delete by a page from before the rule, which neither sees nor keeps: Mika\'s row is dealt into the marked withdrawal, and «Денег сейчас» is 2,000 higher with nothing new from the bank - the fault itself)'); }
+  // … and a row must not LEAVE a marked withdrawal either, when an earlier one opens up for it
+  const Qb = await press(La, plan(w('w0', 2000, '2026-10-08', { whose: 'vanya' }), w('wB', 3000, '2026-10-12')), 'wB');
+  const Mb = await C(La, Qb, D);
+  same([st(Mb, 'w0'), st(Mb, 'wB'), Mb.marksGbp, none(Qb)], [['waiting', 0, []], ['mark', 2000, ['m1']], -1000, true], 'the earlier withdrawal is Vanya\'s, so Mika\'s 2,000 stands in the shared one; marked, its mark is worth the 1,000 that is left');
+  const Qb1 = await pick(La, Qb, 'w0', ''), Mb1 = await C(La, Qb1, D);
+  same([moved(Mb1, Mb), st(Mb1, 'w0'), st(Mb1, 'wB'), Object.keys(mem(Qb1, 'wB')).sort(), held(Qb1, 'wB')], [[0, 0, 0], ['waiting', 0, []], ['mark', 2000, ['m1']], ['from', 'rows', 'to'], [2000]], 'the earlier one made everybody\'s: it comes before the marked one in the walk now, and Mika\'s row stays where it lay - the mark remembers the 2,000');
+  const Qb2 = await pick(La, Qb1, 'w0', 'vanya');
+  same([none(Qb2), bare(await C(La, Qb2, D)) === bare(Mb)], [true, true], '… and made Vanya\'s again: the walk gives the marked withdrawal what it holds, so the memory is taken away - the plan is counted as it always was');
+  // a marked row made «каждый месяц», and back: the mark moves into the month and out of it, and its memory with it
+  const Qt1 = await tap(La, Qb1, 'wB', 'tick'), Qt2 = await tap(La, Qt1, 'wB@2026-10', 'untick');
+  same([held(Qt1, 'wB', '2026-10'), st(await C(La, Qt1, D), 'wB@2026-10'), held(Qt2, 'wB'), st(await C(La, Qt2, D), 'wB')], [[2000], ['mark', 2000, ['m1']], [2000], ['mark', 2000, ['m1']]], 'the marked withdrawal ticked «каждый месяц» and the tick taken off again: it is the same mark, and it holds what it held');
+  // what is said of the marked withdrawal itself. Its sum made another (no control of the page says that of a marked
+  // row; «… и дальше» in an earlier month's card does - below): that is its founder's word about it, and it is dealt afresh
+  const Qs = await tap(La, Qb1, 'wB', 'set', { amt: 1500 }, LATER, BY), Ms = await C(La, Qs, D);
+  same([st(Ms, 'wB'), st(Ms, 'w0'), none(Qs)], [['mark', 0, []], ['row', 2000, ['m1']], true], 'the marked withdrawal\'s own sum made 1,500: no memory holds a withdrawal against what is said of it - the walk deals it again by the plan as it is, and Mika\'s row closes the earlier withdrawal, which is everybody\'s now');
+  // … and the same sum set by a page from before the rule, which neither sees nor keeps: the memory stays in the plan, and gives the withdrawal no more than its sum
+  const Mraw = await C(La, await wr(Qb1, 'set', item(Mb1, 'wB'), { amt: 1500 }, LATER, BY), D);
+  same([st(Mraw, 'wB'), st(Mraw, 'w0')], [['row', 1500, ['m1']], ['waiting', 500, ['m1']]], 'the marked withdrawal\'s sum made 1,500 by a bare writer: the row it remembers gives it 1,500 and no more - no withdrawal holds more than its sum - and the 500 over goes on by the walk');
+  // … its day moved (a bare hand here; on the page «… и дальше» in an earlier month's card can do it - below): it holds what it held
+  const Qday = await tap(La, Qb1, 'wB', 'set', { date: '2026-11-20' }, LATER, BY), Mday = await C(La, Qday, D);
+  same([st(Mday, 'wB'), st(Mday, 'w0'), item(Mday, 'wB').wd.from, [mem(Qday, 'wB').from, mem(Qday, 'wB').to]], [['mark', 2000, ['m1']], ['waiting', 0, []], '2026-11-10', ['2026-10-02', '2026-11-01']], 'the marked withdrawal\'s own day moved to 20 November: Mika\'s row of 9 October is outside the window that day gives - it is the same mark, and the withdrawal holds the row all the same');
+  // … and given to a founder by a page from before the rule: the memory is of a withdrawal that was everybody's, and is not in force
+  const v9 = vanya('v9', '2026-10-10', 1000), L9 = ledP({ tx: [mA, v9] });
+  const Q9 = await pick(L9, await press(L9, plan(w('w0', 2000, '2026-10-08', { whose: 'vanya' }), w('wB', 3000, '2026-10-12')), 'wB'), 'w0', ''), M9 = await C(L9, Q9, D);
+  const Q9v = await wr(Q9, 'set', item(M9, 'wB'), { whose: 'vanya' }, LATER, BY), M9v = await C(L9, Q9v, D);
+  same([st(M9, 'w0'), st(M9, 'wB'), held(Q9, 'wB'), st(M9v, 'w0'), st(M9v, 'wB'), 'w' in mem(Q9v, 'wB')], [['waiting', 1000, ['v9']], ['mark', 2000, ['m1']], [2000, 0], ['row', 2000, ['m1']], ['mark', 1000, ['v9']], false],
+    'the marked shared withdrawal remembers Mika\'s 2,000 as its own and Vanya\'s 1,000 as not; a page from before the rule then says it is Vanya\'s: the memory is of another withdrawal - everybody\'s - and is not in force; Vanya\'s row is its now, Mika\'s is not');
+  // two rows of one statement key - the upload makes none: the first is the taking the memory knows, the second is news
+  const Mdup = await C(ledP({ tx: [mA, { ...mA, id: 'm1-dup' }] }), Qb1, D);
+  same([st(Mdup, 'wB'), st(Mdup, 'w0')], [['mark', 2000, ['m1']], ['row', 2000, ['m1-dup']]], 'the remembered row twice in the table under one key: the first gives the marked withdrawal the 2,000 it gave, the second is dealt by the walk');
+  // a memory written by hand that names another founder\'s taking for a withdrawal that is somebody\'s
+  const Qhand = plan(w('wV', 3000, '2026-10-12', { whose: 'vanya', paid: { ...paid(D, MARK), saw: { w: 'vanya', from: '2026-10-02', to: '2026-11-01', rows: [[mem(Qb1, 'wB').rows[0][0], 2000]] } } }));
+  same(st(await C(La, Qhand, D), 'wV'), ['mark', 0, []], 'a memory that names Mika\'s row for Vanya\'s withdrawal gives it nothing: a withdrawal that is somebody\'s holds no other founder\'s row, whatever a document says');
+  // a month of a «каждый месяц» withdrawal - the usual form: the mark lives in the month, and the month after is another line
+  const every = (id, amt, day, from, more = {}) => row(id, 'Вывод', amt, `${from}-${String(day).padStart(2, '0')}`, { blk: 'div', rec: { day, from }, ...more });
+  const Lr0 = ledP({ tx: [mika('m1', '2026-10-09', 1000)] }), Lr = ledP({ tx: [mika('m1', '2026-10-09', 1000), mika('m2', '2026-10-11', 1500, LATER)] });
+  const Qr = await press(Lr0, plan(every('wR', 3000, 5, '2026-09'), w('wX', 2000, '2026-10-08')), 'wR@2026-10');
+  const Mr = await C(Lr, Qr, D);
+  same([Object.keys(paidOf(Qr, 'wR', '2026-10')).sort(), st(Mr, 'wR@2026-10'), item(Mr, 'wR@2026-10').wd, Mr.marksGbp], [['at', 'by', 'on'], ['mark', 2500, ['m1', 'm2']], { from: '2026-09-25', to: '2026-10-25', got: 2500 }, -500],
+    'October of a monthly withdrawal marked: the mark is stored in the month; a row of the 11th uploaded since has taken the mark\'s place, as it always would');
+  for (const [how, kept, to, f] of [['moved to 20 October', true, '2026-10-09', (X) => tap(Lr, X, 'wR@2026-11', 'set', { date: '2026-10-20' }, LATER, BY)], ['moved to December', true, '2026-11-24', (X) => tap(Lr, X, 'wR@2026-11', 'set', { date: '2026-12-20' }, LATER, BY)], ['switched off', true, '', (X) => tap(Lr, X, 'wR@2026-11', 'off')], ['ended («с ноября больше не повторяю»)', false, '2026-10-25', (X) => tap(Lr, X, 'wR@2026-11', 'end')]]) {
+    const X = await f(Qr), M1 = await C(Lr, X, D), id = item(M1, 'wR@2026-10') ? 'wR@2026-10' : 'wR', m = kept ? mem(X, 'wR', '2026-10') : null;
+    same([moved(M1, Mr), st(M1, id), !none(X), m && [m.from, m.to, m.rows.map((x) => x[1])]].concat(to ? [item(M1, id).wd.to] : []), [[0, 0, 0], ['mark', 2500, ['m1', 'm2']], kept, kept ? ['2026-09-25', '2026-10-25', [1000, 1500]] : null].concat(to ? [to] : []), `November ${how}: nothing of October moves` + (kept ? ' - its window ended ten days before November\'s day and is another now; the mark is given a memory: the rows it holds, and the window it had - by whose end the statements would close it' : '; its window is what it was, and it needs no memory')); }
+  const Qr2 = await pick(Lr, Qr, 'wR@2026-11', 'vanya'), Mr2 = await C(Lr, Qr2, D);
+  same([st(Mr2, 'wR@2026-10'), round2(Mr2.marksGbp - Mr.marksGbp), none(Qr2)], [['mark', 0, []], -2500, true], '«Vanya» said in November\'s card is said of every month, October too: it is Vanya\'s withdrawal now, Mika\'s rows are not its, and the mark covers them - the founder\'s own word about this line, which no memory holds against');
+
+  // ---- two marked withdrawals: what is done to the one does not move the other ----
+  const Lx0 = ledP({ tx: [mika('m1', '2026-10-06', 1200)] }), Lx = ledP({ tx: [mika('m1', '2026-10-06', 1200), mika('m2', '2026-10-09', 1500, LATER)] });
+  let Qx = await press(Lx0, plan(w('wX', 2000, '2026-10-05'), w('wY', 3000, '2026-10-12')), 'wX');
+  Qx = await press(Lx0, Qx, 'wY', MARK + 1000);
+  const Mx = await C(Lx, Qx, D);
+  same([st(Mx, 'wX'), st(Mx, 'wY'), Mx.marksGbp, none(Qx)], [['row', 2000, ['m1', 'm2']], ['mark', 700, ['m2']], -2300, true], 'X and Y both marked, X holding Mika\'s 1,200; his 1,500 comes in a statement: 800 fills X, which rows now carry whole, and 700 takes Y\'s place');
+  for (const [how, kept, f] of [['put back into the plan', false, (X) => tap(Lx, X, 'wX', 'unmark')], ['deleted', true, (X) => tap(Lx, X, 'wX', 'del')], ['switched off', true, (X) => tap(Lx, X, 'wX', 'off')], ['given to Vanya', true, (X) => pick(Lx, X, 'wX', 'vanya')], ['made «каждый месяц»', false, (X) => tap(Lx, X, 'wX', 'tick')]]) {
+    const X = await f(Qx), M1 = await C(Lx, X, D); same([st(M1, 'wY'), item(M1, 'wY').mark.counts, !none(X), held(X, 'wY')], [['mark', 700, ['m2']], true, kept, kept ? [0, 700] : null], `X ${how}: Y holds the 700 it held` + (kept ? ', by the memory its mark is given' : '')); }
+  // the choice made on a marked row frees rows; another marked withdrawal does not take them
+  const Lz = ledP({ tx: [mika('f', '2026-10-12', 2000, LATER)] });
+  let Qz = await press(ledP(), plan(w('wX', 1500, '2026-10-10', { whose: 'mika' }), w('wY', 3000, '2026-10-14', { whose: 'mika' })), 'wX');
+  Qz = await press(ledP(), Qz, 'wY', MARK + 1000);
+  const Mz = await C(Lz, Qz, D), Qz1 = await pick(Lz, Qz, 'wX', 'vanya'), Mz1 = await C(Lz, Qz1, D);
+  same([st(Mz, 'wX'), st(Mz, 'wY'), st(Mz1, 'wX'), st(Mz1, 'wY'), moved(Mz1, Mz), held(Qz1, 'wY'), mem(Qz1, 'wX')], [['row', 1500, ['f']], ['mark', 500, ['f']], ['mark', 0, []], ['mark', 500, ['f']], [-1500, -1500, 1500], [500], null],
+    'X and Y, both Mika\'s and both marked; his 2,000 fills X and gives Y 500. X is then said to be Vanya\'s: Mika\'s row leaves it and its mark covers the 1,500 - the founder\'s word about X - while Y, which is another line, holds the 500 it held; the 1,500 is no line\'s until a statement passes the marks');
+
+  // ---- the rows that have come since the mark, and then a change to another line ----
+  const Ln0 = ledP({ tx: [mika('m1', '2026-10-09', 1000)] }), Ln = ledP({ tx: [mika('m1', '2026-10-09', 1000), mika('n1', '2026-10-11', 2500, LATER)] });
+  const Qn = await press(Ln0, plan(w('wA', 2500, '2026-10-08'), w('wB', 3000, '2026-10-12')), 'wB');
+  const Mn = await C(Ln, Qn, D);
+  same([st(Mn, 'wA'), st(Mn, 'wB'), Mn.marksGbp, none(Qn)], [['row', 2500, ['m1', 'n1']], ['mark', 1000, ['n1']], -2000, true], 'a statement after the mark: 1,500 of the new row closes the earlier withdrawal, which was open, and the 1,000 it has over takes the mark\'s place');
+  const Qn1 = await tap(Ln, Qn, 'wA', 'del'), Mn1 = await C(Ln, Qn1, D);
+  same([moved(Mn1, Mn), st(Mn1, 'wB'), held(Qn1, 'wB')], [[0, 0, 0], ['mark', 1000, ['n1']], [0, 1000]], 'the earlier withdrawal deleted on the page: the rows lie where they lay - 1,000 of the new one in the marked withdrawal, the rest in no line - and «Денег сейчас» does not move');
+  const Mn2 = await C(ledP({ tx: Ln.tx.concat([mika('n2', '2026-10-12', 700, LATER + 5)]) }), Qn1, D);
+  same([st(Mn2, 'wB'), round2(Mn2.marksGbp - Mn1.marksGbp)], [['mark', 1700, ['n1', 'n2']], 700], '… and a row that comes after that is news to the mark: the walk deals it, and it takes the mark\'s place');
+  // a line deleted BEFORE the statement comes: the row is dealt against the plan as it is
+  const Qd = await tap(ledP(), await press(ledP(), plan(w('wA', 2000, '2026-10-05'), w('wY', 3000, '2026-10-12')), 'wY'), 'wA', 'del');
+  const Md = await C(ledP({ tx: [mika('m1', '2026-10-12', 3000, LATER), reach('Wise', '2026-10-12', 'GBP', LATER)] }), Qd, D);
+  same([none(Qd), st(Md, 'wY'), Md.marksGbp], [true, ['row', 3000, ['m1']], 0], 'an open earlier withdrawal deleted after the mark, and then the 3,000 comes: all of it is the marked withdrawal\'s - no line that is gone takes a row');
+  // a founder's own withdrawal written after the mark takes its own row
+  const Qo = await edit(ledP(), await press(ledP(), plan(w('wY', 3000, '2026-10-12')), 'wY'), (X) => ({ ...X, div: X.div.concat([w('wV', 2000, '2026-10-12', { whose: 'vanya', c0: LATER })]) }));
+  const Mo2 = await C(ledP({ tx: [vanya('v1', '2026-10-12', 2000, LATER + 5), mika('m1', '2026-10-13', 3000, LATER + 5), reach('Wise', '2026-10-13', 'GBP', LATER + 5)] }), Qo, '2026-10-14');
+  same([st(Mo2, 'wY'), st(Mo2, 'wV')], [['row', 3000, ['m1']], ['row', 2000, ['v1']]], 'Vanya writes his own withdrawal the day after the shared one was marked; the statement shows his 2,000 and Mika\'s 3,000: each closes its own');
+  // a statement that comes later with a taking of an earlier day does not eat the newest mark
+  const w5 = w('w5', 2000, '2026-10-05'), Lh0 = ledP({ tx: [mika('a', '2026-10-10', 2000)] }), Lh = ledP({ tx: [mika('a', '2026-10-10', 2000), vanya('b', '2026-10-08', 2000, LATER)] });
+  const Qh0 = await press(Lh0, plan(w5, w('w13', 3000, '2026-10-13', { c0: MARK - 60000 })), 'w13');
+  const Mh0 = await C(Lh, Qh0, D);
+  same([st(await C(Lh0, Qh0, D), 'w5'), st(Mh0, 'w5'), st(Mh0, 'w13'), Mh0.marksGbp], [['row', 2000, ['a']], ['row', 2000, ['b']], ['mark', 0, []], -3000], 'a withdrawal written and marked on the 13th, after Mika\'s 2,000 had closed the line of the 5th; then a statement that comes later shows Vanya\'s 2,000 of the 8th: it takes the line of the 5th, Mika\'s row - on the page before the new line was written - is no line\'s, and the 3,000 sent on the 13th is still not seen: the mark stands whole');
+
+  // ---- (b) the same row: the two orders of «Оплачено» and «Чей вывод» ----
+  const txC = [mika('m1', '2026-10-09', 2000), vanya('v1', '2026-10-10', 1500), vanya('v2', '2026-10-11', 700)];
+  const Lc = ledP({ tx: txC }), Ld = ledP({ tx: txC.concat([vanya('v3', '2026-10-13', 900, LATER + 1), mika('m2', '2026-10-13', 400, LATER + 1), reach('Wise', '2026-10-14', 'GBP', LATER + 1)]) });
+  const Qc = plan(w('w0', 1000, '2026-10-07'), w('wB', 6000, '2026-10-12'), w('wC', 4000, '2026-10-14'));
+  const marked = await press(Lc, Qc, 'wB'), Mc1 = await C(Lc, marked, D);
+  same([st(Mc1, 'w0'), st(Mc1, 'wB'), st(Mc1, 'wC'), Mc1.marksGbp], [['row', 1000, ['m1']], ['mark', 3200, ['m1', 'v1', 'v2']], ['due', 0, []], -2800], 'three withdrawals, everybody\'s: the middle one holds 1,000 of Mika\'s and Vanya\'s 2,200, and marked it is worth 2,800');
+  const P1 = await pick(Lc, marked, 'wB', 'vanya', MARK), P2 = await press(Lc, await pick(Lc, Qc, 'wB', 'vanya', MARK), 'wB');
+  const A1 = await C(Lc, P1, D);
+  same([P1, none(P1), JSON.stringify(A1) === JSON.stringify(await C(Lc, P2, D))], [P2, true, true], '«Оплачено» and then «Чей вывод» is the plan that «Чей вывод» and then «Оплачено» writes - with no memory in either - and the model is the same');
+  same([moved(A1, Mc1), st(A1, 'wB'), st(A1, 'wC')], [[-1000, -1000, 1000], ['mark', 2200, ['v1', 'v2']], ['due', 1000, ['m1']]], '… Mika\'s 1,000 leaves the marked row for the next one and the mark covers it: «Денег сейчас» is 1,000 lower, by the founder\'s own word about this row');
+  // … with a statement between the two presses
+  const P3 = await tap(Ld, marked, 'wB', 'set', { whose: 'vanya' }, MARK, BY), B1 = await C(Ld, P3, '2026-10-14');
+  same([P3, st(B1, 'w0'), st(B1, 'wB'), st(B1, 'wC'), round2(item(B1, 'w0').wd.got + item(B1, 'wB').wd.got + item(B1, 'wC').wd.got)], [P2, ['row', 1000, ['m1']], ['row', 3100, ['v1', 'v2', 'v3']], ['due', 1400, ['m1', 'm2']], 5500],
+    '«Оплачено», a statement, «Чей вывод»: the same plan again; Vanya\'s new 900 has taken the mark\'s place, Mika\'s 400 has gone to the next withdrawal, and the five rows, 5,500, are counted once');
+  const back = await tap(Ld, P3, 'wB', 'set', { whose: '' }, MARK, BY);
+  same([paidOf(back, 'wB'), 'whose' in back.div.find((r) => r.id === 'wB'), bare(await C(Ld, back, '2026-10-14')) === bare(await C(Ld, marked, '2026-10-14'))], [paidOf(marked, 'wB'), false, true], 'the choice taken back: the plan and the model are the ones they were');
+  // … and said of a marked row that holds to a memory, the choice deals its rows afresh, against the plan as it is
+  const Lk = ledP({ tx: [mika('a', '2026-10-10', 2000, LATER)] });
+  let Qk0 = await press(ledP(), plan(w('w1', 2000, '2026-10-05'), w('wX', 3000, '2026-10-12')), 'wX');
+  Qk0 = await tap(Lk, Qk0, 'w1', 'del');
+  const Mk0 = await C(Lk, Qk0, D), Qk1 = await pick(Lk, await pick(Lk, Qk0, 'wX', 'vanya'), 'wX', ''), Mk1 = await C(Lk, Qk1, D);
+  same([st(Mk0, 'wX'), held(Qk0, 'wX'), st(Mk1, 'wX'), moved(Mk1, Mk0), none(Qk1)], [['mark', 0, []], [0], ['mark', 2000, ['a']], [2000, 2000, -2000], true],
+    'Mika\'s 2,000 stood in an earlier withdrawal that was then deleted, and the marked one holds to its memory: none of the row. «Чей вывод» said of the marked row and taken back is the founder\'s word about that row: it is dealt afresh, by the plan as it now is, and takes the 2,000 (on the screen, below, the card says the new figure; «Отменить» is the way back)');
+
+  // ---- (c) a payment that sat unsorted in «Разбор» when the mark was made ----
+  const txE = [mika('m1', '2026-10-09', 1000)];
+  const Le = ledP({ tx: txE, inb: [inbox('u1', '2026-10-12', -1500, '', 'TRANSFER 123', { at: AT })] });
+  const Qe = await press(Le, plan(w('wB', 3000, '2026-10-12'), w('wC', 2000, '2026-10-20')), 'wB');
+  const Me = await C(Le, Qe, D);
+  same([st(Me, 'wB'), Me.marksGbp], [['mark', 1000, ['m1']], -2000], 'marked with 1,000 seen and a transfer of 1,500 still unsorted in «Разбор»: the mark is worth 2,000');
+  const Me1 = await C(ledP({ tx: txE.concat([filed('u1', '2026-10-12', -1500, 'vanya', '', { at: AT })]) }), Qe, D);
+  same([moved(Me1, Me), st(Me1, 'wB'), st(Me1, 'wC')], [[1500, 1500, 0], ['mark', 2500, ['m1', 'u1']], ['due', 0, []]], 'sorted into Vanya\'s block: it takes the mark\'s place; the later withdrawal gets none of it');
+  // … an earlier withdrawal that is still open takes it first, as the walk has it
+  const Lg0 = ledP({ inb: [inbox('u2', '2026-10-08', -1500, '', 'TRANSFER 77', { at: AT })] }), Lg1 = ledP({ tx: [filed('u2', '2026-10-08', -1500, 'misha', '', { at: AT })] });
+  const Qg = await press(Lg0, plan(w('wM', 1500, '2026-10-06'), w('wB', 3000, '2026-10-12')), 'wB');
+  same([st(await C(Lg1, Qg, D), 'wM'), st(await C(Lg1, Qg, D), 'wB'), moved(await C(Lg1, Qg, D), await C(Lg0, Qg, D))], [['row', 1500, ['u2']], ['mark', 0, []], [0, 0, 1500]], 'an earlier withdrawal stood open when the mark was made: the transfer, sorted, is that one\'s - a marked withdrawal has no first claim, and «Денег сейчас» does not move');
+  // … and a transfer uploaded before the withdrawal was written is no line's, marked or not - as for every line of the plan
+  const Lf0 = ledP({ inb: [inbox('u0', '2026-10-05', -1500, '', 'TRANSFER 9', { at: AT1 })] }), Lf1 = ledP({ tx: [filed('u0', '2026-10-05', -1500, 'vanya', '', { at: AT1 })] });
+  const Qf0 = plan(w('wB', 3000, '2026-10-12')), Qf = await press(Lf0, Qf0, 'wB');
+  same([st(await C(Lf1, Qf0, D), 'wB'), st(await C(Lf1, Qf, D), 'wB'), round2((await C(Lf1, Qf, D)).marksGbp - (await C(Lf0, Qf, D)).marksGbp)], [['blind', 0, []], ['mark', 0, []], 0], 'a statement that was on the page before the withdrawal was written: its transfer, sorted, is not this withdrawal\'s - unmarked or marked alike; the rule changes nothing here');
+  // … to a mark that holds to a memory a sorted transfer is news: the walk deals it
+  const Lq = ledP({ tx: La.tx, inb: [inbox('u3', '2026-10-10', -900, '', 'TRANSFER 5', { at: AT })] }), Lq1 = ledP({ tx: La.tx.concat([filed('u3', '2026-10-10', -900, 'mika', '', { at: AT })]) });
+  const Mq1 = await C(Lq1, Qb1, D);
+  same([st(Mq1, 'w0'), st(Mq1, 'wB'), moved(Mq1, await C(Lq, Qb1, D))], [['waiting', 900, ['u3']], ['mark', 2000, ['m1']], [0, 0, 900]], 'the marked withdrawal holds to its memory, and a transfer is sorted out of «Разбор»: it is news, and the open earlier withdrawal takes it - «Денег сейчас» does not move, and the month\'s fact has a taking more');
+
+  // ---- (d) a row of the marked withdrawal goes, comes back, is filed elsewhere ----
+  const m1 = mika('m1', '2026-10-09', 1000), v1 = vanya('v1', '2026-10-10', 1200);
+  const Lf = ledP({ tx: [m1, v1] });
+  const Qf2 = await press(Lf, plan(w('wB', 3000, '2026-10-12'), w('wC', 2000, '2026-10-20')), 'wB');
+  const Mf = await C(Lf, Qf2, D);
+  same([st(Mf, 'wB'), Mf.marksGbp], [['mark', 2200, ['m1', 'v1']], -800], 'marked with 2,200 seen: the mark is worth 800');
+  const Mgone = await C(ledP({ tx: [m1] }), Qf2, D);
+  same([moved(Mgone, Mf), st(Mgone, 'wB'), item(Mgone, 'wB').part], [[0, -1200, 0], ['mark', 1000, ['m1']], null], 'Vanya\'s row deleted from the table: the mark covers what no row holds - «Денег сейчас» and the month\'s fact are what they were, and the line holds 1,000, not a sum no row carries');
+  const Magain = await C(ledP({ tx: [m1, { ...v1, id: 'v1-again', at: LATER + 5 }] }), Qf2, D);
+  same([moved(Magain, Mf), st(Magain, 'wB'), st(Magain, 'wC')], [[0, 0, 0], ['mark', 2200, ['m1', 'v1-again']], ['due', 0, []]], 'the statement read in again - another id, another moment, the same key: every figure as before the delete');
+  const Mfiled = await C(ledP({ tx: [m1, { ...v1, c: 'other', l: 'Something' }] }), Qf2, D);
+  same([[round2(Mfiled.now - Mf.now), round2(Mfiled.marksGbp - Mf.marksGbp)], st(Mfiled, 'wB')], [[-1200, -1200], ['mark', 1000, ['m1']]], 're-filed to «Прочие расходы»: the money left the bank all the same and is no longer a taking, so the mark covers its 1,200 - «Денег сейчас» is 1,200 lower');
+  // a withdrawal that is somebody's holds no other founder's row: a held row put under another founder leaves it
+  const Lv = ledP({ tx: [v1] }), Qv = await press(Lv, plan(w('wV', 3000, '2026-10-12', { whose: 'vanya' })), 'wV');
+  const Mv = await C(Lv, Qv, D), Mv1 = await C(ledP({ tx: [{ ...v1, c: 'mika' }] }), Qv, D);
+  same([st(Mv, 'wV'), st(Mv1, 'wV'), round2(Mv1.marksGbp - Mv.marksGbp)], [['mark', 1200, ['v1']], ['mark', 0, []], -1200], 'Vanya\'s marked withdrawal held his 1,200; the row filed under Mika instead is not Vanya\'s taking, and the mark covers it');
+  // … the same things done to a row that a memory holds (Qb1: the shared marked withdrawal remembers Mika's 2,000; the earlier one is everybody's and open)
+  const Mp = await C(La, Qb1, D);
+  const Mp1 = await C(ledP(), Qb1, D), Mp2 = await C(ledP({ tx: [{ ...mA, id: 'm1-again', at: LATER + 5 }] }), Qb1, D);
+  same([moved(Mp1, Mp), st(Mp1, 'wB'), moved(Mp2, Mp), st(Mp2, 'wB'), st(Mp2, 'w0')], [[0, -2000, 0], ['mark', 0, []], [0, 0, 0], ['mark', 2000, ['m1-again']], ['waiting', 0, []]], 'the remembered row deleted: the mark covers its 2,000 and «Денег сейчас» is what it was; read in again under another id: it gives the marked withdrawal the 2,000 it gave, and the earlier one - which the walk would give it to - gets none');
+  const Qp1 = await edit(ledP(), Qb1, (X) => ({ ...X, cushion: 6000 }));
+  same([held(Qp1, 'wB'), st(await C(ledP({ tx: [{ ...mA, id: 'm1-again', at: LATER + 5 }] }), Qp1, D), 'wB')], [[2000], ['mark', 2000, ['m1-again']]], '… and when the plan was changed while the row was out of the table: the memory keeps the taking it cannot see, and gives it its place when it is read in again');
+  const Mp3 = await C(ledP({ tx: [{ ...mA, c: 'vanya' }] }), Qb1, D);
+  same([st(Mp3, 'w0'), st(Mp3, 'wB'), round2(Mp3.marksGbp - Mp.marksGbp)], [['row', 2000, ['m1']], ['mark', 0, []], -2000], 'the remembered row filed under Vanya instead: it is another taking - news - and the walk gives it to the earlier withdrawal; the mark covers what it no longer holds');
+
+  // ---- (e) the rows that come after the mark ----
+  const Qh = await press(ledP({ tx: [m1] }), plan(w('wB', 3000, '2026-10-12')), 'wB');
+  const Mh = await C(ledP({ tx: [m1] }), Qh, D);
+  const Mh1 = await C(ledP({ tx: [m1, mika('m2', '2026-10-12', 1500, LATER)] }), Qh, D);
+  same([moved(Mh1, Mh), st(Mh1, 'wB')], [[0, 1500, 0], ['mark', 2500, ['m1', 'm2']]], 'a statement uploaded after the mark shows 1,500 of it: the row takes the mark\'s place - the money is in the table now, the mark is worth 500, «Денег сейчас» does not move');
+  const Mh2 = await C(ledP({ tx: [m1, mika('m2', '2026-10-12', 1500, LATER), mika('m3', '2026-10-14', 700, LATER + 9)] }), Qh, '2026-10-15');
+  same([st(Mh2, 'wB'), item(Mh2, 'wB').mark.counts, Mh2.marksGbp, 'saw' in item(Mh2, 'wB')], [['row', 3000, ['m1', 'm2', 'm3']], false, 0, false], '… and once the statements pass the mark\'s day the rows carry all of it, and the mark waits for nothing');
+  // an earlier withdrawal that is open takes a new row before the marked one
+  const Qm = await press(ledP(), plan(w('wM', 2000, '2026-10-05', { whose: 'misha' }), w('wB', 3000, '2026-10-12')), 'wB');
+  const Mm = await C(ledP(), Qm, D), Mm1 = await C(ledP({ tx: [misha('mi1', '2026-10-06', 2000, LATER), reach('Wise', '2026-10-12', 'GBP', LATER)] }), Qm, D);
+  same([moved(Mm1, Mm), st(Mm1, 'wM'), st(Mm1, 'wB')], [[-2000, 0, 2000], ['row', 2000, ['mi1']], ['mark', 0, []]], 'Misha\'s 2,000 comes in a statement that stops the evening before the mark\'s day: it is his own open withdrawal\'s - the 3,000 somebody said was taken has still not been seen, and «Денег сейчас» is 2,000 lower');
+  // the statement passes the day of a mark that holds to a memory: the memory is in force no longer
+  const Lpass = ledP({ tx: [mA, reach('Wise', '2026-10-13', 'GBP', LATER)] }), Mpass = await C(Lpass, Qb1, '2026-10-14');
+  same([st(Mpass, 'w0'), st(Mpass, 'wB'), Mpass.marksGbp, 'saw' in item(Mpass, 'wB'), none(await edit(Lpass, Qb1, (X) => ({ ...X, cushion: 6000 }), '2026-10-14'))], [['row', 2000, ['m1']], ['ok', 0, []], 0, false, true],
+    'a statement uploaded after the mark reaches the mark\'s day: the mark counts for nothing, its memory is in force no longer, and the rows are dealt by the walk again - Mika\'s 2,000 closes the earlier withdrawal; the next change to the plan takes the memory out of it');
+
+  // ---- «Частично», a memory that is not one, a mark on the founder's word, a line switched off ----
+  const Lj = ledP({ tx: [m1] });
+  const Qj = await tap(Lj, plan(w('wA', 1500, '2026-10-08', { whose: 'vanya' }), w('wB', 3000, '2026-10-12')), 'wB', 'partial', 1800, 'rest1', MARK, BY, D, '2026-10-20');
+  const Mj = await C(Lj, Qj, D), Qj1 = await pick(Lj, Qj, 'wA', ''), Mj1 = await C(Lj, Qj1, D);
+  same([st(Mj, 'wB'), Mj.marksGbp, Object.keys(paidOf(Qj, 'wB')).sort(), moved(Mj1, Mj), held(Qj1, 'wB')], [['mark', 1000, ['m1']], -800, ['amt', 'at', 'by', 'on'], [0, 0, 0], [1000]], '«Частично», 1,800 of 3,000, with 1,000 seen: the mark is worth 800; another withdrawal made everybody\'s moves nothing - the mark is given its memory');
+  const bad = plan(w('wA', 2000, '2026-10-08'), w('wB', 3000, '2026-10-12', { paid: { ...paid(D, MARK), saw: null } }), row('wR', 'Вывод', 1000, '2023-01-20', { blk: 'div', rec: { day: 20, from: '2023-01', to: '2023-02', x: { '2023-01': { paid: { ...paid('2023-01-20', ms('2023-01-20T10:00:00Z')), saw: { from: 'x', rows: 7 } } } } } }));
+  const good = { ...bad, div: bad.div.map((r) => JSON.parse(JSON.stringify(r, (k, v) => (k === 'saw' ? undefined : v)))) };
+  same([bare(await C(La, bad, D)) === bare(await C(La, good, D)), none(await edit(La, bad, (X) => ({ ...X, cushion: 6000 })))], [true, true], 'a memory that is not one - null, or of another shape - is no memory: the plan is read as without it, and the next change takes it out, also from a month further back than the page writes months out');
+  const word = plan(w('wA', 2000, '2026-10-08', { paid: { ...paid(D, MARK), ok: true } }), w('wB', 3000, '2026-10-12'));
+  same([st(await C(La, word, D), 'wA'), st(await C(La, word, D), 'wB')], [['ok', 0, []], ['blind', 2000, ['m1']]], 'a withdrawal closed on the founder\'s word alone takes no row, as before: Mika\'s 2,000 goes to the next');
+  const Qoff = await tap(La, Qb1, 'wB', 'off'), Moff = await C(La, Qoff, D);
+  same([item(Moff, 'wB').state, item(Moff, 'wB').wd.got, Moff.marksGbp, st(Moff, 'w0'), none(Qoff)], ['off', 0, 0, ['row', 2000, ['m1']], true], 'a marked withdrawal that holds to a memory, switched off: it holds no row and counts no mark, the row goes where the walk has it, and the memory goes with the change');
+
+  // ---- what the fourth independent reading asked for ----
+  // each of the withdrawals that wait is given its memory, not only the one whose rows would move
+  const Lw = ledP({ tx: [mika('r1', '2026-10-06', 1000)] });
+  let Qw = await press(Lw, plan(w('wA', 1000, '2026-10-05'), w('wX', 1000, '2026-10-08'), w('wY', 3000, '2026-10-12')), 'wX');
+  Qw = await press(Lw, Qw, 'wY', MARK + 1);
+  const Mw = await C(Lw, Qw, D), Qw1 = await tap(Lw, Qw, 'wA', 'del'), Mw1 = await C(Lw, Qw1, D);
+  same([st(Mw, 'wA'), moved(Mw1, Mw), st(Mw1, 'wX'), st(Mw1, 'wY'), held(Qw1, 'wX'), held(Qw1, 'wY')], [['row', 1000, ['r1']], [0, 0, 0], ['mark', 0, []], ['mark', 0, []], [0], [0]], 'two marked withdrawals and a third line that holds Mika\'s 1,000, deleted: the walk would give the row to the first marked one - and, were only that one held, to the second; each is given its memory, and neither takes it');
+  // a window that grows over a row: the month after is switched off, and a row of the 28th would be October's
+  const T2 = '2026-10-29', AT9 = ms('2026-10-29T08:00:00Z'), Lgr = ledP({ tx: [mika('m1', '2026-10-09', 1000, AT9), mika('r2', '2026-10-28', 800, AT9)] });
+  const Qgr = await edit(Lgr, plan(every('wR', 3000, 5, '2026-09')), async (X) => wr(X, 'mark', item(await C(Lgr, X, T2), 'wR@2026-10'), T2, ms('2026-10-29T10:00:00Z'), BY), T2), Mgr = await C(Lgr, Qgr, T2);
+  const Qgr1 = await edit(Lgr, Qgr, (X) => wr(X, 'off', item(Mgr, 'wR@2026-11')), T2), Mgr1 = await C(Lgr, Qgr1, T2);
+  same([[item(Mgr, 'wR@2026-10').wd.got, item(Mgr, 'wR@2026-10').done.note, item(Mgr, 'wR@2026-10').wd.to, item(Mgr, 'wR@2026-11').wd.got], [item(Mgr1, 'wR@2026-10').wd.got, item(Mgr1, 'wR@2026-10').done.note, item(Mgr1, 'wR@2026-10').wd.to], round2(Mgr1.now - Mgr.now), mem(Qgr1, 'wR', '2026-10').to], [[1000, 'taken', '2026-10-25', 800], [1800, 'taken', '2026-11-24'], 0, '2026-10-25'],
+    'October marked on the 29th, when the statements had passed the end of its window: «взято 1,000 из 3,000», and the mark counts for nothing. November switched off: October\'s window would now reach 24 November, it would be open again and its mark worth 1,200 - the memory keeps the end the window had, and it stays closed; the row of the 28th is the walk\'s, and «Денег сейчас» does not move');
+  // … and a month that is open takes no row it did not hold when its window grows over one (the row is another bank\'s: this bank\'s statements stop on the 9th)
+  const Lgo = ledP({ tx: [mika('m1', '2026-10-09', 1000, AT9), filed('r2', '2026-10-28', -800, 'mika', '', { at: AT9, b: 'Barclays' })] });
+  const Qgo = await edit(Lgo, plan(every('wR', 3000, 5, '2026-09')), async (X) => wr(X, 'mark', item(await C(Lgo, X, T2), 'wR@2026-10'), T2, ms('2026-10-29T10:00:00Z'), BY), T2), Mgo = await C(Lgo, Qgo, T2);
+  const Qgo1 = await edit(Lgo, Qgo, (X) => wr(X, 'off', item(Mgo, 'wR@2026-11')), T2), Mgo1 = await C(Lgo, Qgo1, T2);
+  same([st(Mgo, 'wR@2026-10'), item(Mgo, 'wR@2026-11').wd.got, st(Mgo1, 'wR@2026-10'), moved(Mgo1, Mgo), held(Qgo1, 'wR', '2026-10')], [['mark', 1000, ['m1']], 800, ['mark', 1000, ['m1']], [0, 0, 0], [1000, 0]],
+    'October marked and open, holding 1,000; a row of the 28th stands in November. November switched off: October\'s window would reach the 28th and take the 800 - a row the page has long shown; the memory says it held 1,000 of the one and none of the other, and «Денег сейчас» does not move');
+  // a remembered row made smaller in «Таблица» gives no more than it now has
+  const Mless = await C(ledP({ tx: [{ ...mA, a: 1500, o: { ...mA.o, a: -1500 } }] }), Qb1, D);
+  same([st(Mless, 'wB'), st(Mless, 'w0')], [['mark', 1500, ['m1']], ['waiting', 0, []]], 'the remembered row of 2,000 made 1,500 by hand: it gives the marked withdrawal the 1,500 it has, and no line gets a pound that no row carries');
+  // a memory lists the takings of the withdrawal's days - not every taking of the table - and to the last digit
+  const olds = Array.from({ length: 10 }, (_, i) => mika('o' + i, '2026-07-' + (10 + i), 300 + i)), Lold = ledP({ tx: [mA].concat(olds) });
+  const Qold = await pick(Lold, await press(Lold, plan(w('w0', 2000, '2026-10-08', { whose: 'vanya' }), w('wB', 3000, '2026-10-12')), 'wB'), 'w0', '');
+  const Lpn = ledP({ tx: [mika('m1', '2026-10-09', 2000.4)] }), Qpn0 = await press(Lpn, plan(w('w0', 2000, '2026-10-08', { whose: 'vanya' }), w('wB', 3000, '2026-10-12')), 'wB'), Qpn = await pick(Lpn, Qpn0, 'w0', '');
+  same([held(Qold, 'wB'), held(Qpn, 'wB'), moved(await C(Lpn, Qpn, D), await C(Lpn, Qpn0, D)), st(await C(Lpn, Qpn, D), 'wB')], [[2000], [2000.4], [0, 0, 0], ['mark', 2000.4, ['m1']]], 'ten takings of July in the table are no part of a memory of October; a taking of 2,000.40 is remembered with its pence, and held with them');
+  // … and sixty pence dealt over are dealt over: the memory is written
+  const Lsx = ledP({ tx: [mika('r1', '2026-10-06', 1000.6)] }), Qsx0 = await press(Lsx, plan(w('wA', 1000.6, '2026-10-05'), w('wB', 3000, '2026-10-12')), 'wB');
+  const Qsx = await tap(Lsx, Qsx0, 'wA', 'set', { amt: 1000 }, LATER, BY);
+  same([moved(await C(Lsx, Qsx, D), await C(Lsx, Qsx0, D)), held(Qsx, 'wB')], [[0, 0, 0], [0]], 'the other withdrawal made sixty pence smaller than the row it holds: the sixty pence are not dealt into the marked withdrawal');
+  // the name a marked month goes by is its chain's: «Сентябрь и дальше» puts it into another stored row, and it holds to its memory
+  const Lch = ledP({ tx: [mika('r1', '2026-09-27', 2000)] }), wRx = every('wR', 2500, 5, '2026-08');
+  wRx.rec.x = { '2026-10': { amt: 3000 } };
+  let Qch = await press(Lch, plan(wRx, w('wE', 2500, '2026-10-01', { whose: 'vanya' })), 'wR@2026-10');
+  Qch = await pick(Lch, Qch, 'wE', '');
+  const Mch = await C(Lch, Qch, D), Qch1 = await tap(Lch, Qch, 'wR@2026-09', 'onward', { amt: 1000 }, 'wR2', LATER + 1, BY), Mch1 = await C(Lch, Qch1, D), oct = Mch1.items.find((it) => it.wd && it.date === '2026-10-05');
+  same([st(Mch, 'wR@2026-10'), st(Mch, 'wE'), [oct.id, oct.wd.got, oct.rows], moved(Mch1, Mch), !none(Qch1)], [['mark', 2000, ['r1']], ['blind', 0, []], ['wR2@2026-10', 2000, ['r1']], [0, 0, 0], true], 'October of a monthly withdrawal holds Mika\'s 2,000 by its memory; «Сентябрь и дальше» with another sum splits the stored row, and October is a month of the new one: the same mark, the same 2,000');
+  // … and with another DAY: the marked month's own day moves with it, and it holds what it held
+  const Ldy = ledP({ tx: [mika('r1', '2026-09-27', 1000)] }), Qdy = await press(Ldy, plan(every('wR', 3000, 5, '2026-08')), 'wR@2026-10'), Mdy = await C(Ldy, Qdy, D);
+  const Qdy1 = await tap(Ldy, Qdy, 'wR@2026-09', 'onward', { date: '2026-09-20' }, 'wR2', LATER, BY), Mdy1 = await C(Ldy, Qdy1, D), oct2 = Mdy1.items.find((it) => it.wd && it.occ && it.occ.ym === '2026-10');
+  const mdy = Qdy1.div.map((r) => r.rec && r.rec.x && r.rec.x['2026-10'] && r.rec.x['2026-10'].paid).find(Boolean).saw;
+  same([st(Mdy, 'wR@2026-10'), [oct2.date, oct2.wd.got, oct2.rows, oct2.wd.from, oct2.wd.to], [mdy.from, mdy.to], moved(Mdy1, Mdy)], [['mark', 1000, ['r1']], ['2026-10-20', 1000, ['r1'], '2026-10-10', '2026-11-09'], ['2026-09-25', '2026-10-25'], [0, 0, 0]], '«Сентябрь и дальше» with the 20th for a day: marked October moves to the 20th with it, and Mika\'s row of 27 September is outside the window that day gives - it holds the row all the same, and «Денег сейчас» does not move');
+  // a withdrawal closed on the founder\'s word waits for nothing and is given no memory
+  const Qwd = await press(La, plan(w('wW', 500, '2026-10-06', { paid: { ...paid(D, MARK - 5), ok: true } }), w('wA', 2500, '2026-10-08'), w('wB', 3000, '2026-10-12')), 'wB'), Qwd1 = await tap(La, Qwd, 'wA', 'del');
+  same(['saw' in paidOf(Qwd1, 'wW'), held(Qwd1, 'wB'), moved(await C(La, Qwd1, D), await C(La, Qwd, D))], [false, [0], [0, 0, 0]], 'a withdrawal closed on the founder\'s word beside the marked one: the memory is written for the mark that waits and for no other');
+  // A mark that cannot count in «Денег сейчас» holds to no memory. A balance typed after the mark has the mark inside it …
+  const Qbal = { ...Qb1, banks: Qb1.banks.map((b) => (b.bank === 'Wise' && b.cur === 'GBP' ? { ...b, asOf: D, at: LATER } : b)) }, Mbal = await C(La, Qbal, D);
+  same([st(Mbal, 'w0'), st(Mbal, 'wB'), Mbal.marksGbp, 'saw' in item(Mbal, 'wB'), !none(Qbal), none(await edit(La, Qbal, (X) => ({ ...X, cushion: 6000 })))], [['row', 2000, ['m1']], ['mark', 0, []], 0, false, true, true],
+    'the marked withdrawal holds Mika\'s 2,000 by its memory; then the account\'s balance is typed: the mark is inside it and counts for nothing, the memory is in force no longer, and the row is dealt by the walk - it closes the earlier withdrawal, as it would have before the rule; the next change takes the memory out of the plan');
+  // … and a line ticked in «Что из этого уже прошло?» never was outside one: a change to another line gives it no memory
+  const Qtk0 = plan(w('wA', 2500, '2026-10-08'), w('wT', 3000, '2026-10-12', { paid: { on: D, at: LATER - 1, by: BY } })), Qtk = { ...Qtk0, banks: Qtk0.banks.map((b) => (b.bank === 'Wise' && b.cur === 'GBP' ? { ...b, asOf: D, at: LATER } : b)) };
+  const Mtk = await C(La, Qtk, D), Qtk1 = await tap(La, Qtk, 'wA', 'del'), Mtk1 = await C(La, Qtk1, D);
+  same([st(Mtk, 'wT'), item(Mtk, 'wT').mark.counts, 'saw' in item(Mtk, 'wT'), st(Mtk1, 'wT'), none(Qtk1), bare(Mtk1) === bare(await C(La, await wr(Qtk, 'del', item(Mtk, 'wA')), D))], [['mark', 0, []], false, false, ['mark', 2000, ['m1']], true, true],
+    'a withdrawal ticked as already inside the balance - no statement has come since, so its mark still waits, and counts for nothing - and the other one deleted: Mika\'s row is dealt into the ticked one, as before the rule; no figure of «Денег сейчас» is its, and it is given no memory');
+  // A change to another month of the same row that would CLOSE the marked month: its window would end where the statements have already reached
+  const T4 = '2026-10-14', AT4 = ms('2026-10-13T18:00:00Z'), Lcl = ledP({ tx: [vanya('r1', '2026-10-02', 1000, AT4), reach('Wise', '2026-10-13', 'GBP', AT4)] });
+  const Qcl = await edit(Lcl, plan(every('wV', 3000, 25, '2026-08', { whose: 'vanya' })), async (X) => wr(X, 'mark', item(await C(Lcl, X, T4), 'wV@2026-09'), T4, ms('2026-10-14T10:00:00Z'), BY), T4), Mcl = await C(Lcl, Qcl, T4);
+  const Qcl1 = await edit(Lcl, Qcl, (X) => wr(X, 'set', item(Mcl, 'wV@2026-10'), { date: '2026-10-20' }, ms('2026-10-14T11:00:00Z'), BY), T4), Mcl1 = await C(Lcl, Qcl1, T4);
+  const Mcl0 = await C(Lcl, await wr(Qcl, 'set', item(Mcl, 'wV@2026-10'), { date: '2026-10-20' }, ms('2026-10-14T11:00:00Z'), BY), T4);
+  same([st(Mcl, 'wV@2026-09'), item(Mcl, 'wV@2026-09').wd.to, st(Mcl1, 'wV@2026-09'), item(Mcl1, 'wV@2026-09').wd.to, moved(Mcl1, Mcl), mem(Qcl1, 'wV', '2026-09').to, [st(Mcl0, 'wV@2026-09')[0], round2(Mcl0.now - Mcl.now)]], [['mark', 1000, ['r1']], '2026-10-14', ['mark', 1000, ['r1']], '2026-10-09', [0, 0, 0], '2026-10-14', ['row', 2000]],
+    'September of Vanya\'s monthly withdrawal marked, 1,000 of it seen, the statements at the 13th. October\'s day moved from the 25th to the 20th: September\'s window would end on the 9th, which the statements have passed - it would be closed as «взято 1,000 из 3,000» and «Денег сейчас» 2,000 higher (the bare writer shows it); the memory keeps the end the window had, the mark goes on waiting, and nothing moves');
+  // With a memory in force what the bank brings next is dealt by the plan as it now is - also where the next month's window has moved
+  const C8 = ms('2026-08-01T08:00:00Z'), r1b = filed('r1', '2026-10-06', -1000, 'mika', '', { b: 'Barclays', at: ms('2026-10-07T18:00:00Z') });
+  const Lnw = ledP({ tx: [r1b, reach('Wise', '2026-10-01', 'GBP', ms('2026-10-02T18:00:00Z')), reach('Barclays', '2026-10-06', 'GBP', ms('2026-10-07T18:00:00Z'))] });
+  const Lnw1 = ledP({ tx: Lnw.tx.slice(-3).concat([filed('r2', '2026-10-12', -1500, 'mika', '', { b: 'Barclays', at: ms('2026-10-13T18:00:00Z') }), reach('Barclays', '2026-10-12', 'GBP', ms('2026-10-13T18:00:00Z'))]) });
+  let Qnw = await press(Lnw, plan(every('wS', 3000, 28, '2026-08', { c0: C8 })), 'wS@2026-09');
+  const Mnw = await C(Lnw, Qnw, D);
+  Qnw = await tap(Lnw, Qnw, 'wS@2026-10', 'set', { date: '2026-10-14' }, LATER, BY);
+  const Mnw1 = await C(Lnw, Qnw, D), Mnw2 = await C(Lnw1, Qnw, D);
+  same([st(Mnw, 'wS@2026-09'), moved(Mnw1, Mnw), st(Mnw1, 'wS@2026-09'), st(Mnw2, 'wS@2026-09'), st(Mnw2, 'wS@2026-10'), round2(Mnw2.marksGbp - Mnw1.marksGbp)], [['mark', 1000, ['r1']], [0, 0, 0], ['mark', 1000, ['r1']], ['mark', 1000, ['r1']], ['due', 1500, ['r2']], 0],
+    'September of a monthly withdrawal marked, holding a row of 6 October; October\'s day moved from the 28th to the 14th, so that the row would be October\'s: September holds it. A statement then brings a taking of the 12th: by the plan as it now is that is October\'s early taking, and October takes it - the marked month\'s memory holds what it held, and claims nothing new');
+  // ---- the fifth independent reading ----
+  // A repeat left with one month is a row again, and the month of a mark that was moved into the next calendar month
+  // is another: it is still that mark. October's month, moved to 2 November and marked, holds a row of the 5th; a row
+  // of the 19th stands in November's. «Удалить … и дальше» said of November leaves a plain row with a wider window.
+  const T5 = '2026-11-20', Lfl = ledP({ tx: [filed('r1', '2026-11-05', -1000, 'mika', '', { b: 'Barclays', at: ms('2026-11-06T18:00:00Z') }), filed('r2', '2026-11-19', -2500, 'mika', '', { b: 'Barclays', at: ms('2026-11-19T18:00:00Z') }), reach('Wise', '2026-11-01', 'GBP', ms('2026-11-02T18:00:00Z'))] });
+  const wFl = every('wF', 5000, 28, '2026-10', { c0: C8 });
+  wFl.rec.x = { '2026-10': { date: '2026-11-02' } };
+  const Qfl = await edit(Lfl, plan(wFl), async (X) => wr(X, 'mark', item(await C(Lfl, X, T5), 'wF@2026-10'), T5, ms('2026-11-20T10:00:00Z'), BY), T5), Mfl = await C(Lfl, Qfl, T5);
+  for (const [how, f] of [['«Удалить … и дальше» said of November', (X) => wr(X, 'end', item(Mfl, 'wF@2026-11'))], ['«каждый месяц» taken off October', (X) => wr(X, 'untick', item(Mfl, 'wF@2026-10'))]]) {
+    const X = await edit(Lfl, Qfl, f, T5), M1 = await C(Lfl, X, T5), one = M1.items.find((it) => it.wd && it.date === '2026-11-02');
+    same([st(Mfl, 'wF@2026-10'), st(Mfl, 'wF@2026-11'), [one.id, one.done.by, one.wd.got, one.rows, one.wd.to], moved(M1, Mfl), !none(X)], [['mark', 1000, ['r1']], ['due', 2500, ['r2']], ['wF', 'mark', 1000, ['r1'], '2026-11-22'], [0, 0, 0], true],
+      `a marked month of a repeat, moved into November; ${how}: the repeat is a row again, with a window that reaches the row of the 19th - it is the same mark, it holds the 1,000 it held, and «Денег сейчас» does not move`); }
+  // The marked month's own sum made smaller from an earlier month's card, and put back: that is said of the marked
+  // month too, so it is dealt by the walk both times - it holds less while the sum is smaller, and what it held
+  // when the sum is back.
+  const T6 = '2026-10-20', Lsm = ledP({ tx: [filed('r1', '2026-10-19', -3000, 'mika', '', { b: 'Barclays', at: ms('2026-10-19T18:00:00Z') }), reach('Wise', '2026-10-10', 'GBP', ms('2026-10-10T18:00:00Z'))] });
+  const Qsm = await edit(Lsm, plan(every('wQ', 5000, 28, '2026-09', { c0: C8 })), async (X) => wr(X, 'mark', item(await C(Lsm, X, T6), 'wQ@2026-10'), T6, ms('2026-10-20T10:00:00Z'), BY), T6), Msm = await C(Lsm, Qsm, T6);
+  const octOf = (M) => { const it = M.items.find((x) => x.wd && x.occ && x.occ.ym === '2026-10'); return [it.done.by, it.wd.got, it.rows, it.amt]; }, sepOf = (M) => M.items.find((x) => x.wd && x.occ && x.occ.ym === '2026-09');
+  const Qsm1 = await edit(Lsm, Qsm, (X) => wr(X, 'onward', sepOf(Msm), { amt: 2000 }, 'wQ2', ms('2026-10-20T11:00:00Z'), BY), T6), Msm1 = await C(Lsm, Qsm1, T6);
+  const Qsm2 = await edit(Lsm, Qsm1, (X) => wr(X, 'onward', sepOf(Msm1), { amt: 5000 }, 'wQ3', ms('2026-10-20T11:05:00Z'), BY), T6), Msm2 = await C(Lsm, Qsm2, T6);
+  same([octOf(Msm), octOf(Msm1), round2(Msm1.now - Msm.now), octOf(Msm2), moved(Msm2, Msm), none(Qsm2)], [['mark', 3000, ['r1'], 5000], ['row', 2000, ['r1'], 2000], 2000, ['mark', 3000, ['r1'], 5000], [0, 0, 0], true],
+    'October of a monthly 5,000 marked, holding a row of 3,000. «Сентябрь и дальше: 2,000» makes October 2,000 too: rows carry it whole, and the mark is worth nothing. «Сентябрь и дальше: 5,000»: October holds the 3,000 again and its mark is worth 2,000 - every figure as before the two changes, and no memory left');
+  // A change that puts one mark inside its account's balance deals nothing over: it asks no memory of the others
+  let Qtw = await press(La, plan(w('wB', 3000, '2026-10-12'), w('wK', 2000, '2026-10-14', { bank: 'Barclays' })), 'wB');
+  Qtw = await press(La, Qtw, 'wK', MARK + 1);
+  const Mtw = await C(La, Qtw, D), Qtw1 = await edit(La, Qtw, (X) => ({ ...X, banks: X.banks.map((b) => (b.bank === 'Barclays' && b.cur === 'GBP' ? { ...b, asOf: D, at: LATER } : b)) })), Mtw1 = await C(La, Qtw1, D);
+  same([st(Mtw, 'wB'), [item(Mtw, 'wK').mark.counts, 'saw' in item(Mtw, 'wK')], st(Mtw1, 'wB'), [item(Mtw1, 'wK').mark.counts, 'saw' in item(Mtw1, 'wK')], none(Qtw1)], [['mark', 2000, ['m1']], [true, true], ['mark', 2000, ['m1']], [false, false], true],
+    'two marked withdrawals on two banks; the balance of the second one\'s account is typed: its mark is inside the balance now and counts for nothing - no row was dealt over, no window moved, and the plan is left without a memory: the first mark is counted as it always was');
+  // seeing that failed (no list) keeps nothing and takes nothing out; a list that is empty takes the memories out
+  same([await keep(La, Qb1, null), none(await keep(La, Qb1, []))], [Qb1, true], 'a seeing that failed leaves the plan\'s memories as they are; one that saw no withdrawal waiting takes them out');
+
+  // ---- on the screen ----
+  // Mika took 2,000 and 500 today. The first closes the row called «Вывод Vanya», the 500 stands in October of «Вывод».
+  const LS = ledP({ tx: [filed('m1', '2026-10-06', -2000, 'mika', '', { at: AT2 }), filed('m2', '2026-10-06', -500, 'mika', '', { at: AT2 })] });
+  const PS = { ...P, div: P.div.concat([row('wA', 'Вывод Vanya', 2000, '2026-10-06', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-07', { blk: 'div', rec: { day: 7, from: '2026-10' } })]) };
+  let pg = await scene('wdmark', LS, PS);
+  const now = () => pg.evaluate(() => window.__money.model({ H: 30 }).now);
+  const kept = () => pg.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wB'), p = r.rec.x && r.rec.x['2026-10'] && r.rec.x['2026-10'].paid; return [r.whose || '', p ? Object.keys(p).sort() : null, p && p.saw ? [p.saw.w || '', p.saw.from, p.saw.to, p.saw.rows.map((x) => x[1])] : null]; });
+  const rowsOf = (id) => pg.evaluate((id) => { const it = window.__money.model({ H: 30 }).items.find((x) => x.id === id); return it ? [it.done ? it.done.by : it.state, it.wd.got, it.rows] : null; }, id);
+  const choose = async (kind, id, v, k) => { await rowCard(pg, kind, id); await pg.selectOption(K('row') + '[data-ed-f="whose"]', v); await pg.click(K('row') + '[data-ed-save]'); await puts('cash', k); };
+  const n0 = await now();
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wB@2026-10', 'paid');
+  await puts('cash', 1);
+  const n1 = await now();
+  same([round2(n1 - n0), await kept(), await rowsOf('wB@2026-10'), await toastText(pg)], [-2500, ['', ['at', 'by', 'on'], null], ['mark', 500, ['m2']], 'Оплачено: Вывод'], '«Оплачено» pressed on October of «Вывод»: the 2,500 nobody has seen leaves «Денег сейчас»; the mark stored in the month is the three words it always was');
+  await choose('div', 'wA', 'vanya', 2);
+  same([round2((await now()) - n1), await toastText(pg), await rowsOf('wA'), await rowsOf('wB@2026-10'), await kept()], [0, 'Вывод Vanya: вывод Vanya', ['due', 0, []], ['mark', 500, ['m2']], ['', ['at', 'by', 'on', 'saw'], ['', '2026-09-27', '2026-10-27', [0, 500]]]], 'the closed row «Вывод Vanya» given to Vanya: Mika\'s 2,000 leaves it and goes nowhere near the marked month - the save gave the mark its memory: 0 of the first taking, 500 of the second; «Денег сейчас» has not moved, and the toast has nothing to say of it');
+  await holds(pg, 'with a marked withdrawal beside one that changed hands', 'cash');
+  // a reload reads the memory back as it was stored - in a month of a repeating row - and saves nothing
+  await pg.context().close();
+  pg = await reopen('wdmark, again');
+  same([await now(), (await kept())[2], await rowsOf('wB@2026-10'), store.cash.puts], [n1, ['', '2026-09-27', '2026-10-27', [0, 500]], ['mark', 500, ['m2']], 2], 'the page opened again: the same «Денег сейчас», the same memory, and no save of its own');
+  await goCash(pg);
+  await choose('div', 'wA', '', 3);
+  same([round2((await now()) - n1), await rowsOf('wA'), await kept()], [0, ['row', 2000, ['m1']], ['', ['at', 'by', 'on'], null]], 'the row made everybody\'s again: Mika\'s 2,000 closes it as before, the walk gives the marked month what it holds, and the save takes the memory out of the plan');
+  await pg.click('#cs-undo [data-cs-undo]');
+  await puts('cash', 4);
+  same([round2((await now()) - n1), await rowsOf('wA'), await rowsOf('wB@2026-10'), (await kept())[2]], [0, ['due', 0, []], ['mark', 500, ['m2']], ['', '2026-09-27', '2026-10-27', [0, 500]]], '«Отменить»: the plan is the one it was before that save - the row is Vanya\'s, and the mark has its memory back');
+  await choose('div', 'wB@2026-10', 'misha', 5);
+  const n3 = await now();
+  same([round2(n3 - n1), await toastText(pg), await kept(), await rowsOf('wB@2026-10')], [-500, `Вывод: вывод Misha — для всех месяцев · «Денег сейчас» теперь £${Math.round(n3).toLocaleString('en-GB')}: пересчитана отметка «Оплачено» на выводе`, ['misha', ['at', 'by', 'on'], null], ['mark', 0, []]],
+    'the marked month itself given to Misha: that is the founder\'s word about this line - Mika\'s 500 is not Misha\'s, the mark covers it, «Денег сейчас» is 500 lower, and the toast names the figure and says why; no memory holds against it');
+  ok(await saved(pg), 'what the page holds is what was saved');
+  await pg.context().close();
+  pg = await scene('wdmark, next month', LS, PS);
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wB@2026-10', 'paid');
+  await puts('cash', 1);
+  const o1 = await now();
+  await pg.click('#cs-month [data-cs-mon="1"]');
+  await rowCard(pg, 'div', 'wB@2026-11');
+  await pg.selectOption(K('row') + '[data-ed-f="whose"]', 'misha');
+  await pg.click(K('row') + '[data-ed-save="only"]');
+  await puts('cash', 2);
+  const o2 = await now();
+  same([round2(o2 - o1), (await toastText(pg)).includes(`«Денег сейчас» теперь £${Math.round(o2).toLocaleString('en-GB')}: пересчитана отметка «Оплачено» на выводе`)], [-500, true], '«Чей вывод» said in November\'s card gives every month to Misha, the marked October too: «Денег сейчас» is 500 lower, and the toast of that card names the figure');
+  await pg.context().close();
+
+  // The page's own hand (Plan.edit, and a keystroke in a row of «Касса»), with news in the table: «Вывод A» 4,000
+  // on the 5th holds Mika's 1,000 and - uploaded an hour after «Вывод B» was marked - his 2,500.
+  const NEWS = AT2 + 3600e3, a1 = filed('m1', '2026-10-05', -1000, 'mika', '', { at: AT2 }), a2 = filed('n1', '2026-10-06', -2500, 'mika', '', { at: NEWS });
+  const L0 = ledP({ tx: [a1] }), L1 = ledP({ tx: [a1, a2] });
+  let QN = { ...P, div: P.div.concat([row('wA', 'Вывод A', 4000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод B', 3000, '2026-10-06', { blk: 'div' })]) };
+  QN = await wr(QN, 'mark', item(await C(L0, QN, T), 'wB'), T, TAP, BY);
+  const memB = () => pg.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wB'); return r && r.paid && r.paid.saw ? r.paid.saw.rows.map((x) => x[1]) : null; });
+  pg = await scene('wdmark, news', L1, QN);
+  const e0 = await now();
+  same([store.cash.puts, await rowsOf('wA'), await rowsOf('wB'), await memB()], [0, ['waiting', 3500, ['m1', 'n1']], ['mark', 0, []], null], 'opened with news in the table: nothing is saved by the opening, the news stands in the open earlier withdrawal, and the plan holds no memory');
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  await puts('cash', 1);
+  same([round2((await now()) - e0), await rowsOf('wB'), await memB(), store.cash.puts], [0, ['mark', 0, []], [0, 0], 1], '«Вывод A» deleted on the page: the rows lie where they lay - not in the marked withdrawal - and «Денег сейчас» has not moved; the one save carries the memory');
+  await pg.click('#cs-undo [data-cs-undo]');
+  await puts('cash', 2);
+  same([round2((await now()) - e0), await rowsOf('wA'), await rowsOf('wB'), await memB()], [0, ['waiting', 3500, ['m1', 'n1']], ['mark', 0, []], null], '«Отменить»: the withdrawal is back with its rows, and the plan holds no memory again');
+  await rowDo(pg, 'div', 'wA', 'del');
+  await puts('cash', 3);
+  await pg.context().close();
+  pg = await reopen('wdmark, news, again');
+  same([await memB(), round2((await now()) - e0), await rowsOf('wB'), store.cash.puts], [[0, 0], 0, ['mark', 0, []], 3], 'deleted again, and the page opened again: the memory on a row of its own is read back as it was stored, and nothing is saved by the opening');
+  await pg.context().close();
+  // The table changes under a memory - a transfer of 2,500 sorted out of «Разбор» - between two things done to the plan.
+  const Lu = ledP({ tx: [a1], inb: [inbox('u1', '2026-10-06', -2500, 'mika', '', { at: NEWS, auto: false })] });
+  const sortU = async () => { await pg.click('.nav [data-tab="inbox"]'); await pg.click('#view-inbox .op[data-id="u1"] [data-accept]'); for (let i = 0; i < 80 && !store.led.doc.tx.some((r) => r.id === 'u1'); i++) await sleep(50); };
+  const cushion = async (v) => { await pg.click('.nav [data-tab="settings"]'); await pg.waitForSelector('#ed-forecast [data-ed-set="cushion"]'); await pg.fill('#ed-forecast [data-ed-set="cushion"]', v); await pg.press('#ed-forecast [data-ed-set="cushion"]', 'Tab'); await sleep(1300); return store.cash.puts; };
+  pg = await scene('wdmark, a transfer', Lu, QN);
+  const u0 = await now(), c0 = await cushion('5000.0');
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  await puts('cash', 1);
+  const c1 = await cushion('5000.00'), uA = await now();
+  await sortU();
+  const uB = await now(), heldB = await rowsOf('wB'), c2 = await cushion('5000.000'), m2 = await memB();
+  same([c0, c1, c2, m2, round2(uA - u0), round2(uB - uA), heldB], [0, 1, 1, [0], 0, 2500, ['mark', 2500, ['u1']]], 'the cushion typed again as the same number saves nothing - with no memory in the plan, with one, and with one after the table has changed (the memory is left as it was written); the transfer, sorted, is news and takes the mark\'s place');
+  await pg.context().close();
+  pg = await scene('wdmark, undone', Lu, QN);
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  await puts('cash', 1);
+  await sortU();
+  const uC = await now();
+  await goCash(pg);
+  await pg.click('#cs-undo [data-cs-undo]');
+  await puts('cash', 2);
+  same([round2((await now()) - uC), await rowsOf('wA'), await rowsOf('wB'), await memB()], [-2500, ['waiting', 3500, ['m1', 'u1']], ['mark', 0, []], null], '«Отменить» of the delete, after the transfer was sorted: the plan is put back as it was - the withdrawal, and no memory - and what the table has brought since is dealt against that plan: the transfer is the open withdrawal\'s, and «Денег сейчас» is 2,500 lower («Отменить» neither sees nor keeps)');
+  await pg.context().close();
+  // a second typing, after the table has changed, sees the table as it then lies
+  pg = await scene('wdmark, two typings', Lu, QN);
+  await goCash(pg);
+  await pg.fill(box('div', 'wA', 'amt'), '3600');
+  await puts('cash', 1);
+  await leave(pg);
+  await sortU();
+  const y1 = await now(), ya = await rowsOf('wA');
+  await goCash(pg);
+  await pg.fill(box('div', 'wA', 'amt'), '2000');
+  await puts('cash', 2);
+  await leave(pg);
+  same([ya, round2((await now()) - y1), await rowsOf('wA'), await rowsOf('wB'), await memB()], [['waiting', 3500, ['m1', 'u1']], 0, ['row', 2000, ['m1', 'u1']], ['mark', 0, []], [0, 0]], '«Вывод A» typed to 3,600; a transfer of 2,500 sorted out of «Разбор» goes into it; typed down to 2,000: the 1,500 it no longer holds is not dealt into the marked withdrawal - the second typing saw the table as it lay then');
+  await pg.context().close();
+  pg = await scene('wdmark, a keystroke', L1, QN);
+  const t0 = await now();
+  await goCash(pg);
+  await pg.fill(box('div', 'wA', 'amt'), '2000');
+  await puts('cash', 1);
+  same([round2((await now()) - t0), await rowsOf('wA'), await rowsOf('wB'), await memB()], [0, ['row', 2000, ['m1', 'n1']], ['mark', 0, []], [0, 0]], '«Вывод A» typed down to 2,000 in its row: the 1,500 of the news it no longer holds is not dealt into the marked withdrawal, and «Денег сейчас» has not moved');
+  const shown = () => pg.evaluate((sel) => [document.querySelector('#cs-sec-div [data-cs-tot]'), document.querySelector(sel), document.querySelector('#cs-cov')].map((e) => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '')), cs('div', 'wB'));
+  const typed = await shown();
+  await leave(pg);
+  same(typed, await shown(), 'what «Касса» shows straight after the keystroke - the total of «Дивиденды», the marked row, the cover - is what it shows once the cursor has left: the screen was drawn from the plan as kept');
+  await pg.click('#cs-undo [data-cs-undo]');
+  await puts('cash', 2);
+  same([round2((await now()) - t0), await rowsOf('wA'), await memB()], [0, ['waiting', 3500, ['m1', 'n1']], null], '… and «Отменить»: the sum is 4,000 again, the rows are where the walk has them, and the memory is gone from the plan');
+  await pg.context().close();
+  // «Что если» asks of a copy of the plan, changed as the page changes the plan: a trial says what the page would
+  // say of the plan written so. Mika's 1,200 came after the mark and stands in October of the monthly withdrawal;
+  // tried at 1,500, that month has 700 of it over.
+  const LW0 = ledP({ tx: [mika('m1', '2026-10-09', 1000)] }), LW = ledP({ tx: [mika('m1', '2026-10-09', 1000), mika('n1', '2026-10-11', 1200, LATER)] });
+  const QW = await press(LW0, plan(every('wA', 2500, 8, '2026-10'), w('wB', 3000, '2026-10-12')), 'wB'), MW = await C(LW, QW, D);
+  const tried = await C(LW, await tap(LW, QW, 'wA@2026-10', 'set', { amt: 1500 }, LATER, BY), D);
+  pg = await scene('wdmark, a trial', LW, QW);
+  const t = await pg.evaluate(() => window.__money.whatIf([{ k: 'draw', row: 'wA', amt: 1500, from: '2026-10' }]));
+  same([st(MW, 'wA@2026-10'), st(MW, 'wB'), t && t.skipped.length, t && round2(t.trial.now - t.plan.now), round2(tried.now - MW.now), store.cash.puts, await memB()], [['waiting', 2200, ['m1', 'n1']], ['mark', 0, []], 0, 0, 0, 0, null],
+    'a trial of «выводим другую сумму» on the withdrawal beside a marked one: «Денег сейчас» of the trial is the plan\'s, as it is when a founder writes that sum - the 700 the smaller month no longer holds is not dealt into the marked withdrawal; nothing is saved, and the plan itself is given no memory');
+  await pg.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

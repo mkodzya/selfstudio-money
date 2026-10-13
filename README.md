@@ -177,6 +177,7 @@ name is in `docs/deploy.md`.
 | `tests/` | the Python tests of the hosted service and of the laptop tool |
 | `checks/stand-smoke.mjs` | the page against the real backend in a browser; run in CI |
 | `checks/test_deploy.py`, `checks/standins.py` | the server's commands, run against stand-ins for Docker and git |
+| `checks/withdrawals/` | the engine cut out of the page and run under node: how withdrawals are dealt, held against the page of before the rule of 13 October 2026; run by hand, its README says how |
 | `deploy/` | `Dockerfile`, `compose.yml`, `stand.sh`, the stand files, the server commands in `bin/`, timers, words at login, and a reference copy of the edge blocks |
 | `.github/workflows/ci.yml` | CI: the Python tests on 3.9 and 3.13, the image and the rehearsals of the server commands, the page checks, the browser smoke |
 | `docs/handoff.md` | the running state of the work, and what the page is and how it reckons — in Russian |
