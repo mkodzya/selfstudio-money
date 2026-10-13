@@ -1139,7 +1139,8 @@ answering on 5192 (setup steps 1–5 above).
 **Done on 8 October 2026**, on the owner's word: the platform's pull request
 #3, released as its `0.18.2`; the file validated as a copy before and after
 the merge; the proxy recreated; six names answered. The same block for the
-platform's `develop` is its pull request #4. What the change was:
+platform's `develop` is its pull request #4, merged by the owner on
+13 October 2026. What the change was:
 
 In the `finance.selfstudio.se` block the rewrite of the root
 to `/money/index.html` goes, the port becomes `127.0.0.1:5191`, `request_body`
