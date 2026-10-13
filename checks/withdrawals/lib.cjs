@@ -28,6 +28,11 @@ const wd = (id, amt, date, more = {}) => row(id, more.name || 'Вывод ' + id
 const plan3 = (parts = {}) => ({ v: 3, cushion: 5000, banks: [bal('Wise', 'GBP', 50000, '2026-10-05')], inflows: [], team: [], taxes: [], other: [], div: [], log: [], ...parts, tax: { since: '2026-10-06', rules: [], cl: {}, per: {}, ...(parts.tax || {}) } });
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const item = (M, id) => M.items.find((it) => it.id === id) || null;
+// What the model has gained since the page of before (a943def), taken out of it in place, so that the rest can be
+// compared byte for byte: what a mark would remember (item.saw, item.sawDay), whose takings a withdrawal holds
+// (item.wd.by), and what was paid outside the plan (months.by[ym].off, .wait).
+const bare = (M) => { M.items.forEach((it) => { delete it.saw; delete it.sawDay; if (it.wd) delete it.wd.by; });
+  Object.values((M.months && M.months.by) || {}).forEach((o) => { delete o.off; delete o.wait; }); return M; };
 // the page's own verbs, on a copy; the model item goes through JSON as it does in the checks
 const mk = (Live) => {
   // `wr` changes the plan as the PAGE does (Plan.edit): what the marked withdrawals hold is seen, the change is
@@ -44,4 +49,4 @@ const mk = (Live) => {
   const page = (P, f) => { const seen = see(P), Q = f(clone(P)); return same(Q, P) ? Q : keep(Q, seen); };   // a change made to the document by hand, the page's way
   return { C, wr, raw, page, see, keep };
 };
-module.exports = { ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, mk, engines, C0, AT1 };
+module.exports = { ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, bare, mk, engines, C0, AT1 };

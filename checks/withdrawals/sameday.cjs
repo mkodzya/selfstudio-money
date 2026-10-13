@@ -21,7 +21,7 @@
 // and how often the page of before (ON=dev) would have moved a figure - there S must fail.
 // usage: ENGINES=<folder> [STEPS=n] [ON=dev] node checks/withdrawals/sameday.cjs <lives>
 const SEEDS = +process.argv[2] || 400, STEPS = +process.env.STEPS || 8;
-const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines } = require('./lib.cjs');
+const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines, bare } = require('./lib.cjs');
 const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
 const { rng, FOUNDERS, day } = require('./gen.cjs');
 const { C, wr, page, see, keep } = mk(Live), d = mk(DEV);
@@ -29,8 +29,8 @@ const T = '2026-10-13', BY = 'Mika', C0 = ms('2026-10-01T08:00:00Z');
 const stat = {}, bad = {}, up = (k, n = 1) => { stat[k] = (stat[k] || 0) + n; };
 const fail = (k, seed, more) => { (bad[k] = bad[k] || []).push(seed); if (bad[k].length <= 2) console.log('FAIL', k, 'seed', seed, more || ''); };
 const wdsOf = (M) => M.items.filter((it) => it.wd && it.date);
-const strip = (M) => { const Q = clone(M); Q.items.forEach((it) => { delete it.saw; delete it.sawDay; }); return JSON.stringify(Q); };
-const flat = (M) => { const Q = clone(M); Q.items.forEach((it) => { delete it.saw; delete it.sawDay; if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Q); };
+const strip = (M) => { const Q = clone(M); bare(Q); return JSON.stringify(Q); };
+const flat = (M) => { const Q = clone(M); bare(Q).items.forEach((it) => { if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Q); };
 const hasMem = (P) => JSON.stringify(P).includes('"saw"');
 const dayMem = (P) => /"rows":\[[^\]]*\[[^\]]*,[^\]]*,[^\]]*\]/.test(JSON.stringify(P.div));   // a row of a memory written with its balance's moment
 const figs = (M) => JSON.stringify([M.now, M.marksGbp].concat(M.accounts.map((a) => [a.key, a.after, a.same])));

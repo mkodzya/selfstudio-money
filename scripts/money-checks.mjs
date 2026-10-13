@@ -1165,7 +1165,7 @@ await run('p4', 'a written withdrawal: a budget the founders\' blocks use up, ne
   let Q = wd(10000, '2026-10-10');
   M = await C(L, Q);
   figs(M, { OUT: 16980, LOW: 18000, LOWDAY: '2026-10-20', free: 7720, now: 32000 }, '10,000 on 10 Oct instead');
-  same([M.free.wd, M.outParts.div, item(M, 'wd').wd, M.cards.length], [{ gbp: 10000, n: 1, date: '2026-10-10' }, 10500, { from: '2026-09-30', to: '2026-10-30', got: 0 }, 0], '… «В плане уже выводы: £10,000 (10 окт). Сверх них сегодня можно вывести ещё £7,700»; it is in «дивиденды» of «Уйдёт»');
+  same([M.free.wd, M.outParts.div, item(M, 'wd').wd, M.cards.length], [{ gbp: 10000, n: 1, date: '2026-10-10' }, 10500, { from: '2026-09-30', to: '2026-10-30', got: 0, by: [] }, 0], '… «В плане уже выводы: £10,000 (10 окт). Сверх них сегодня можно вывести ещё £7,700»; it is in «дивиденды» of «Уйдёт»');
   // «Оплачено»
   M = await C(L, await wr(Q, 'mark', item(M, 'wd'), T, TAP, BY));
   figs(M, { now: 22000, free: 7720, OUT: 6980 }, '«Оплачено» on it: the money moves from the plan into «сейчас», the sum on offer stays');
@@ -2076,7 +2076,9 @@ const look = (pg, tab = 'today') => pg.evaluate((tab) => {
 }, tab);
 // The model's value for a key of the screen. `at` is where «Касса» stands: its month, for the keys of a month.
 function want(M, k, at) {
-  if (k.startsWith('mon.') && k !== 'mon.div.ptax' && k !== 'mon.tax.accrued') { const [, list, f] = k.split('.'); return ((M.months.by[at.month] || {})[list] || {})[{ exp: 'expected', done: 'done' }[f]]; }
+  // (what was paid outside the plan: the month's two sums, and each section's)
+  if (k === 'mon.off.out' || k === 'mon.off.in') return ((M.months.by[at.month] || {}).off || {})[k.slice(8)];
+  if (k.startsWith('mon.') && k !== 'mon.div.ptax' && k !== 'mon.tax.accrued') { const [, list, f] = k.split('.'), mo = M.months.by[at.month] || {}; return f === 'off' ? (((mo.off || {}).by || {})[list] || {}).gbp : (mo[list] || {})[{ exp: 'expected', done: 'done' }[f]]; }
   if (k === 'say') return M.v0 ? 'v0' : M.LOW < 0 ? 'minus' : M.LOW < M.cushion ? 'low' : 'fine';
   const b = M.month.blocks;
   // No figure of the forecast is shown while nothing is written ahead — with the balances typed (vE) or without (v0).
@@ -5038,12 +5040,12 @@ await run('rv-kassa2', '«Касса · По месяцам» in two columns: a 
   // «Подписки»: folded
   const subs = () => pg.evaluate(() => { const s = document.querySelector('#cs-sec-subs'), vis = (e) => !!e && e.getClientRects().length > 0, say = s.querySelector('#cs-subs-say');
     return [vis(s.querySelector('#cs-subs-fold')), vis(s.querySelector('.tbl')), say ? say.textContent : '', [...s.querySelectorAll('button')].filter((b) => vis(b) && b.textContent.trim()).map((b) => b.textContent.trim())]; });
-  same([await subs(), await text(pg, '#cs-sec-subs [data-cs-tot]'), S.fig('mon.subs.exp'), S.fig('mon.subs.done'), S.fig('mon.other.exp'), await listed(pg, 'other')], [[true, false, 'Ещё 2 на £50: Tool A, Tool B. Уже списаны: Tool C.', ['Показать 3 строки']], '£65 · из них оплачено £15', 65, 15, 600, ['o1']],
-    '«Подписки» is a section of its own, between the taxes and the other costs, and opens folded: its total, and one line of words — how many are still to be charged, for how much and which, and which are charged already');
+  same([await subs(), await text(pg, '#cs-sec-subs [data-cs-tot]'), S.fig('mon.subs.exp'), S.fig('mon.subs.done'), S.fig('mon.other.exp'), await listed(pg, 'other')], [[true, false, 'Ещё 2 на £50: Tool A, Tool B. Уже списаны: Tool C. Вне плана: Tool S.', ['Показать 4 строки']], '£65 · из них оплачено £15 · вне плана £120', 65, 15, 600, ['o1']],
+    '«Подписки» is a section of its own, between the taxes and the other costs, and opens folded: its total, and one line of words — how many are still to be charged, for how much and which, which are charged already, and which charge was outside the plan');
   await shot(pg, 'rv-kassa2');
   await pg.click('#cs-sec-subs [data-cs-fold]');
-  same([await subs(), await listed(pg, 'subs')], [[false, true, 'Ещё 2 на £50: Tool A, Tool B. Уже списаны: Tool C.', ['+ новая подписка', 'Продублировать с сентября · 1 строка', 'Свернуть']], ['s3', 's1@2026-10', 's2@2026-10']],
-    '«Показать 3 строки» unfolds it into the rows themselves, with «+ новая подписка» and «Свернуть» under them');
+  same([await subs(), await listed(pg, 'subs')], [[false, true, 'Ещё 2 на £50: Tool A, Tool B. Уже списаны: Tool C. Вне плана: Tool S.', ['+ новая подписка', 'Продублировать с сентября · 1 строка', 'Свернуть']], ['s3', 's1@2026-10', 's2@2026-10']],
+    '«Показать 4 строки» unfolds it into the rows themselves - the three of the plan and the charge of October that the plan did not hold - with «+ новая подписка» and «Свернуть» under them');
   // a subscription is added where its section is
   const n0 = S.P.other.length;
   await pg.click('#cs-sec-subs [data-ed-add]');
@@ -6679,7 +6681,7 @@ await run('rv-wdmark', 'a change to another line of the plan moves neither a mar
   const Lr0 = ledP({ tx: [mika('m1', '2026-10-09', 1000)] }), Lr = ledP({ tx: [mika('m1', '2026-10-09', 1000), mika('m2', '2026-10-11', 1500, LATER)] });
   const Qr = await press(Lr0, plan(every('wR', 3000, 5, '2026-09'), w('wX', 2000, '2026-10-08')), 'wR@2026-10');
   const Mr = await C(Lr, Qr, D);
-  same([Object.keys(paidOf(Qr, 'wR', '2026-10')).sort(), st(Mr, 'wR@2026-10'), item(Mr, 'wR@2026-10').wd, Mr.marksGbp], [['at', 'by', 'on'], ['mark', 2500, ['m1', 'm2']], { from: '2026-09-25', to: '2026-10-25', got: 2500 }, -500],
+  same([Object.keys(paidOf(Qr, 'wR', '2026-10')).sort(), st(Mr, 'wR@2026-10'), item(Mr, 'wR@2026-10').wd, Mr.marksGbp], [['at', 'by', 'on'], ['mark', 2500, ['m1', 'm2']], { from: '2026-09-25', to: '2026-10-25', got: 2500, by: [{ c: 'mika', l: '', gbp: 2500 }] }, -500],
     'October of a monthly withdrawal marked: the mark is stored in the month; a row of the 11th uploaded since has taken the mark\'s place, as it always would');
   for (const [how, kept, to, f] of [['moved to 20 October', true, '2026-10-09', (X) => tap(Lr, X, 'wR@2026-11', 'set', { date: '2026-10-20' }, LATER, BY)], ['moved to December', true, '2026-11-24', (X) => tap(Lr, X, 'wR@2026-11', 'set', { date: '2026-12-20' }, LATER, BY)], ['switched off', true, '', (X) => tap(Lr, X, 'wR@2026-11', 'off')], ['ended («с ноября больше не повторяю»)', false, '2026-10-25', (X) => tap(Lr, X, 'wR@2026-11', 'end')]]) {
     const X = await f(Qr), M1 = await C(Lr, X, D), id = item(M1, 'wR@2026-10') ? 'wR@2026-10' : 'wR', m = kept ? mem(X, 'wR', '2026-10') : null;
@@ -7329,6 +7331,72 @@ await run('rv-wdday', 'a founder\'s row dated on the very day a balance was type
   same([tr && tr.skipped.length, tr && tr.plan.now, tr && round2(tr.trial.now - tr.plan.now), store.cash.puts, await pw.evaluate(() => 'saw' in window.__cash.state().div.find((x) => x.id === 'wV').paid)], [0, 47000, 0, 0, false],
     'a trial of «выводим другую сумму» on the monthly withdrawal beside the ticked one: «Денег сейчас» of the trial is the plan\'s - the row of the day is held in the trial\'s copy too; nothing is saved, and the plan itself is given no memory');
   await pw.context().close();
+});
+
+// What was paid outside the plan (the owner's decision of 13 October 2026). The plan holds only what a founder wrote,
+// and «Касса» showed a month as its lines alone: a payment that came with a statement and closed no line was in the
+// month's fact, in «Месяцы» and «Отчёты», and nowhere on the plan's page. Now each month says it too: the rows of the
+// table that closed no line stand in the list of their block, by their date, as paid rows with the words «вне
+// плана» - shown, and counted in no figure of the plan. A founder's row is one of them only where no withdrawal had
+// room for it; a transfer to a founder's daily account is his taking and is seen inside the withdrawal that holds it.
+await run('rv-offplan', 'what the statements show that the plan did not hold stands in its month of «Касса», by its block and its date, and in no figure of the plan; a founder\'s transfer to his daily account is his taking, inside the withdrawal; a month before the plan was written, and one that has not come, show none', async () => {
+  const OCT = '2026-10', sub = row('s1', 'Tool A', 15, '2026-10-10', { blk: 'fixed', sub: true, rec: { day: 10, from: OCT } });
+  const lines = { banks: [bal('Wise', 'GBP', 50000, '2026-10-05'), bal('Barclays', 'GBP', 10000, '2026-10-05')], inflows: [row('i1', 'Client Q', 5000, '2026-10-09', { blk: 'rev' })], team: [row('t1', 'Person Z', 2000, '2026-10-07', { blk: 'cogs' }), row('t0', 'Person Y', 800, '2026-09-28', { blk: 'cogs' })],
+    other: [row('o1', 'Office', 640, '2026-10-20', { blk: 'fixed' }), sub] };
+  const P = plan3({ ...lines, div: [row('w1', 'Вывод', 3000, '2026-10-08', { blk: 'div' })] }), Pnone = plan3({ ...lines });
+  // On the page before the plan was written (AT1) and so no line's: a flight, a one-off job, a receipt, a charge of
+  // the tool that is a subscription in the plan, and a refund. After it (AT2): the salary the plan waits for, two
+  // takings, and two rows still in «Разбор» - one the page recognised, one with no block at all.
+  const out = [filed('x1', '2026-10-03', -252, 'other', 'Ryanair'), filed('x2', '2026-10-02', -420, 'cogs', 'Person K'), filed('x3', '2026-10-04', 450, 'rev', 'Harbour Co', { b: 'Barclays' }),
+    filed('x4', '2026-10-04', -9.99, 'fixed', 'Tool A'), filed('x5', '2026-10-04', 23.4, 'other', 'Uber')];
+  const tx = out.concat([filed('p1', T, -2000, 'cogs', 'Person Z', { at: AT2 }), filed('d1', T, -500, 'misha', 'daily', { at: AT2 }), filed('d2', T, -400, 'vanya', '', { at: AT2 })]);
+  const inb = [inbox('q1', '2026-10-04', -70, '', 'CARD PAYMENT 4471', { at: AT2 }), inbox('q2', '2026-10-04', -33, 'other', 'Uber', { at: AT2 })];
+  const L = ledger(tx, inb), M = await C(L, P, T), by = M.months.by[OCT];
+  const ids = (o, k) => o.off.by[k].rows.map((r) => r.id), sums = ({ in: i, out: o, nIn, nOut }) => ({ in: i, out: o, nIn, nOut });
+  same([sums(by.off), by.wait, SECS.map((k) => [k, ids(by, k), by.off.by[k].gbp])], [{ in: 450, out: 691.59, nIn: 1, nOut: 5 }, { n: 1, gbp: 70 }, [['inflows', ['x3'], 450], ['team', ['x2'], 420], ['taxes', [], 0], ['subs', ['x4'], 9.99], ['other', ['x1', 'q2', 'x5'], 261.6], ['div', [], 0]]],
+    'October: six rows of the table closed no line - each in the section of its block, the charge of a tool the plan holds as a subscription in «Подписки»; the row with no block waits in «Разбор» and is in no section');
+  same([by.off.by.other.rows.map((r) => [r.id, r.d, r.name, r.amt, r.cur, r.gbp, r.bank, r.prov, r.back]), by.off.by.inflows.rows[0].bank, Object.keys(by.team).sort()], [[['x1', '2026-10-03', 'Ryanair', 252, 'GBP', 252, 'Wise', false, false], ['q2', '2026-10-04', 'Uber', 33, 'GBP', 33, 'Wise', true, false], ['x5', '2026-10-04', 'Uber', 23.4, 'GBP', -23.4, 'Wise', false, true]], 'Barclays', ['done', 'expected', 'rows']],
+    'a row says its day, its name, its sum and its bank; one the page recognised and nobody has accepted is marked so, and a refund is a sum the other way; a section of the plan is what it was - its lines, expected and paid');
+  same([item(M, 't1').done.rows, item(M, 'w1').wd.got, item(M, 'w1').wd.by, item(M, 'w1').rows], [['p1'], 900, [{ c: 'misha', l: 'daily', gbp: 500 }, { c: 'vanya', l: '', gbp: 400 }], ['d1', 'd2']],
+    'the salary closed its line and the two takings used the withdrawal up - none of them is outside the plan; the withdrawal says whose takings it holds: Misha\'s transfer to his daily account, and Vanya\'s');
+  // … and in no figure of the plan: the same plan on a table without those rows (they are inside the balance by their dates)
+  const M0 = await C(ledger(tx.filter((r) => !out.includes(r)), []), P, T);
+  const figs = (X) => [X.now, X.IN, X.OUT, X.END, X.LOW, X.free, X.verdict.id, SECS.map((k) => [X.months.by[OCT][k].expected, X.months.by[OCT][k].done])];
+  same([figs(M), sums(M0.months.by[OCT].off), round2(M.month.blocks.other.fact - M0.month.blocks.other.fact)], [figs(M0), { in: 0, out: 0, nIn: 0, nOut: 0 }, 271.59],
+    '«Денег сейчас», what comes and goes, the end of the line, the lowest point, «Можно вывести» and every section\'s plan and paid are what they are without those rows; the month\'s FACT counted them before and counts them still');
+  same([M.months.list.includes('2026-09'), 'off' in M.months.by['2026-09'], 'wait' in M.months.by['2026-09'], 'off' in M.months.by['2026-11'], 'wait' in M.months.by['2026-11']], [true, false, false, false, false],
+    'September holds a line and was over before the plan was first written: it says nothing of what was paid outside it - every row would be; November has not come');
+  // A founder took what no withdrawal was written for: his row is outside the plan, in «Дивиденды»
+  const Mn = await C(L, Pnone, T), dn = Mn.months.by[OCT].off.by.div;
+  same([dn.rows.map((r) => [r.id, r.name, r.amt]), dn.gbp, Mn.months.by[OCT].off.nOut, [M.now, Mn.now]], [[['d1', 'Misha · daily', 500], ['d2', 'Vanya', 400]], 900, 7, [57100, 57100]],
+    'the same table and a plan with no withdrawal: Vanya\'s 400 and Misha\'s transfer to his daily account are outside the plan, under «Дивиденды» - never among the studio\'s costs - and «Денег сейчас» is the same');
+
+  // ---- on the screen ----
+  const pg = await scene('offplan', L, P);
+  await goCash(pg);
+  const outs = (k) => pg.$$eval(`#cs-sec-${k} tbody tr`, (l) => l.filter((tr) => tr.matches('.cs-r')).map((tr) => (tr.dataset.csOut ? [tr.dataset.csOut, tr.querySelector('.cs-at').textContent, tr.querySelector('.cs-rm').textContent, !!tr.querySelector('input,button')].join(' | ') : tr.dataset.csId)));
+  same([await text(pg, '#cs-off'), await text(pg, '#cs-wait'), await pg.$('#cs-past')], ['Оплачено вне плана в октябре: ушло £692 (5 платежей), пришло £450 (1 платёж). Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.', 'Ещё 1 платёж на £70 за октябрь ждёт в «Разборе»: статьи пока нет, поэтому в списках его нет. Открыть «Разбор»', null],
+    'the month says in one sentence what was paid outside the plan, and in another what still waits in «Разбор»');
+  same([await outs('inflows'), await outs('team'), await outs('other'), await text(pg, '#cs-sec-other [data-cs-tot]'), await text(pg, '#cs-sec-team [data-cs-tot]')],
+    [['x3 | 450 | вне плана | false', 'i1'], ['x2 | 420 | вне плана | false', 't1'], ['x1 | 252 | вне плана | false', 'q2 | 33 | вне плана · ждёт в «Разборе» | false', 'x5 | −23.4 | вне плана · возврат | false', 'o1'], '£640 · вне плана £262', '£2,000 · из них оплачено £2,000 · вне плана £420'],
+    'each row stands in its list before the first line dated after it, with the words «вне плана» and nothing to type or press; the head of the list says the sum beside the plan\'s own');
+  same([await text(pg, '#cs-subs-say'), await text(pg, '#cs-subs-fold [data-cs-fold]'), await pg.$eval(cs('div', 'w1') + ' [data-cs-rm]', (e) => e.textContent)], ['Ещё 1 на £15: Tool A. Вне плана: Tool A.', 'Показать 2 строки', 'взято £900 из £3,000: Misha daily £500 · Vanya £400'],
+    '«Подписки», folded, names the charge that was outside the plan; the withdrawal says whose takings it holds - the transfer to a daily account is seen there');
+  await holds(pg, 'with rows from outside the plan', 'cash');
+  await pg.click('#cs-sec-other tr[data-cs-out="x1"] .cs-nt');
+  same([await pg.$$eval('#cs-plan tr.cs-edrow', (l) => l.length), store.cash.puts], [0, 0], 'a press on such a row opens no card and saves nothing: it is no line of the plan');
+  await pg.fill(box('div', 'w1', 'amt'), '3500');
+  await puts('cash', 1);
+  same([await outs('other'), (await outs('team')).length, await text(pg, '#cs-sec-other [data-cs-tot]')], [['x1 | 252 | вне плана | false', 'q2 | 33 | вне плана · ждёт в «Разборе» | false', 'x5 | −23.4 | вне плана · возврат | false', 'o1'], 2, '£640 · вне плана £262'],
+    'a sum typed in a line of the month: the rows from outside the plan are drawn once, where they were');
+  await leave(pg);
+  await pg.click('#cs-month [data-cs-mon="-1"]');
+  same([await text(pg, '#cs-mname'), await text(pg, '#cs-past'), await pg.$('#cs-off'), await pg.$$eval('#cs-plan tr[data-cs-out]', (l) => l.length)], ['Сентябрь 2026', 'Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».', null, 0],
+    'September, a month from before the plan: its page holds the plan\'s rows alone and says so, as it always did');
+  await pg.click('#cs-month [data-cs-mon="now"]');
+  await pg.click('#cs-wait [data-tab="inbox"]');
+  same([await pg.$eval('.nav [data-tab="inbox"]', (e) => e.getAttribute('aria-current')), store.cash.puts], ['page', 1], '«Открыть „Разбор“» goes to «Разбор», where the row that waits gets its block; nothing else was saved');
+  await pg.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
