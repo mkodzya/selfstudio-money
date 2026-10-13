@@ -841,6 +841,72 @@ try {
   const afterSheet = await ledgerAt(context);
   ok(JSON.stringify(afterSheet.doc).includes(sheetMark), 'the row of the Excel file reached the ledger at the door', { rev: afterSheet.rev, page: sheetRow });
 
+  // -- the plan goes with the table's revision --
+  // A change to the plan is worked out against the table the page holds, so the page names that table's revision
+  // when it saves the plan, and the stand takes the plan only while its table stands there (docs/api.md, "The
+  // ledger's revision, on the plan's PUT"). The plan is changed here by the page's own hand - the cushion, in
+  // «Настройки» - and the table is saved "from another window" by a request the page did not make.
+  section('the plan is saved with the table\'s revision, and a table saved from elsewhere stops it');
+  {   // a block of its own: the names below are this walk's
+  const planAt = async () => {
+    const answer = await door('GET', '/api/founder/money/cash', { cookie: await cookieOf(context) });
+    return answer.status === 200 && answer.json ? answer.json : { rev: null, doc: null, status: answer.status };
+  };
+  const planPuts = (from) => responses.slice(from).filter((r) => r.method === 'PUT' && r.path === '/api/founder/money/cash');
+  const cushion = async (value) => {
+    await page.click('.nav [data-tab="settings"]');
+    const field = page.locator('#ed-forecast [data-ed-set="cushion"]');
+    await field.waitFor({ timeout: 20000 });
+    await field.fill(value);
+    await field.press('Tab');
+  };
+  const band = () => page.evaluate(() => {
+    const e = document.querySelector('#ledLost');
+    return e && !e.hidden ? document.querySelector('#ledLostHead').textContent : '';
+  });
+  must(await quiet(page), 'the page comes to rest before its plan is changed', await pill(page));
+  const plan0 = await planAt();
+  must(Number.isInteger(plan0.rev) && plan0.doc && plan0.doc.cushion !== 5100, 'the plan door answers a founder with the seeded plan', { rev: plan0.rev, status: plan0.status });
+  mark = responses.length;
+  await cushion('5100');
+  const taken = await until(async () => ((await planAt()).rev > plan0.rev ? true : null), 25000);
+  await quiet(page);
+  const plan1 = await planAt();
+  ok(taken && planPuts(mark).length === 1 && planPuts(mark)[0].status === 200 && plan1.doc.cushion === 5100 && !(await band()),
+    'a change to the plan made on the page is saved: the stand takes a plan that names the table as it stands', { saves: planPuts(mark).map((r) => r.status), rev: plan1.rev, pill: await pill(page) });
+  // The table is saved from somewhere else: the same document, one revision on. The page is not told.
+  const elsewhere = await page.evaluate(async () => {
+    const read = await (await fetch('/api/founder/money', { credentials: 'same-origin', cache: 'no-store' })).json();
+    const sent = await fetch('/api/founder/money', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base: read.rev, doc: JSON.stringify(read.doc) }) });
+    return { status: sent.status, was: read.rev, rev: (await sent.json()).rev };
+  });
+  must(elsewhere.status === 200 && elsewhere.rev === elsewhere.was + 1, 'the table is saved from elsewhere, and stands one revision on', elsewhere);
+  mark = responses.length;
+  await expecting([/409/], async () => {
+    await cushion('5200');
+    const told = await until(async () => ((await band()) ? true : null), 25000);
+    if (!told) await picture(page, 'older-table');
+    const refusedPuts = planPuts(mark);
+    const plan2 = await planAt();
+    ok(!!told && refusedPuts.length === 1 && refusedPuts[0].status === 409 && plan2.rev === plan1.rev && plan2.doc.cushion === 5100,
+      'the next change to the plan names the older table and is refused: 409, and the plan at the door is what it was', { saves: refusedPuts.map((r) => r.status), rev: [plan1.rev, plan2.rev], cushion: plan2.doc && plan2.doc.cushion });
+    const said = await pill(page);
+    ok(/Таблица изменилась в другом окне/.test(await band()) && said && /таблица изменилась в другом окне/.test(said.text),
+      'the page says «Таблица изменилась в другом окне» in the band over every tab, and in the pill', { band: await band(), pill: said });
+  });
+  // Read again, the page holds the table as it stands, and the same change is taken.
+  await page.reload();
+  await pageIsUp(page, 'after the page is read again');
+  must(await quiet(page), 'the page, read again, comes to rest', await pill(page));
+  mark = responses.length;
+  await cushion('5200');
+  const again = await until(async () => ((await planAt()).rev > plan1.rev ? true : null), 25000);
+  await quiet(page);
+  const plan3 = await planAt();
+  ok(again && planPuts(mark).length === 1 && planPuts(mark)[0].status === 200 && plan3.doc.cushion === 5200 && !(await band()),
+    'the page, read again, saves the same change: no band, and the plan at the door has it', { saves: planPuts(mark).map((r) => r.status), rev: plan3.rev });
+  }
+
   // -- who may do what --
   // The owner lets somebody in from the page; that somebody only looks. The link and the password never leave this
   // process: what is shown of them is whether they are there.

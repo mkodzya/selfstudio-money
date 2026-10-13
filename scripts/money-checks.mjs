@@ -308,7 +308,7 @@ const planW = (parts = {}) => plan3({
 // ---- the server: the page, and the two documents of the founder API, in memory ----
 const store = {
   led: { rev: 3, doc: demoLedger(T), puts: 0 },
-  cash: { rev: 2, doc: demoPlan(T), puts: 0, clash: null, bases: [], fail: false },
+  cash: { rev: 2, doc: demoPlan(T), puts: 0, clash: null, bases: [], fail: false, named: [], behind: 0, got: 0, holdFor: 0 },
 };
 // Who the stand says is signed in. Without a role - a server of before there were readers, and every check but the
 // last few - the page offers everything, as it always did. `people` is the owner's list, `asked` what the page sent
@@ -327,8 +327,8 @@ let gen = 100;
 const serve = (led, cash) => {
   gen += 100;
   Object.assign(store.led, { rev: gen + 1, doc: JSON.parse(JSON.stringify(led)), puts: 0 });
-  Object.assign(store.cash, { rev: gen, rev0: gen, doc: JSON.parse(JSON.stringify(cash)), puts: 0, clash: null, bases: [], fail: false, putFail: false, failed: 0, deny: false });
-  Object.assign(store.led, { deny: false });
+  Object.assign(store.cash, { rev: gen, rev0: gen, doc: JSON.parse(JSON.stringify(cash)), puts: 0, clash: null, bases: [], fail: false, putFail: false, failed: 0, deny: false, named: [], behind: 0, got: 0, holdFor: 0 });
+  Object.assign(store.led, { deny: false, slow: 0 });
   Object.assign(store, { me: ME0, people: null, asked: [], pass: PASS, rates: NO_RATES });
 };
 // The doors of «Люди», as docs/api.md has them: the owner's four, one's own password, and the way out.
@@ -390,6 +390,9 @@ http
       // The plan's server can be made to fail, for the check of a plan that does not load.
       if (req.method === 'GET') return doc.fail ? send(500, { error: 'boom' }) : send(200, { rev: doc.rev, doc: doc.doc, updatedAt: null });
       const b = JSON.parse(await body());
+      // The plan's save can be kept waiting until the table has reached a revision, for the check of a save of the
+      // table that overtakes a save of the plan sent before it. `got` counts the saves that have arrived.
+      if (doc === store.cash) { doc.got++; for (let i = 0; i < 200 && doc.holdFor && store.led.rev < doc.holdFor; i++) await new Promise((r) => setTimeout(r, 50)); }
       // The owner has made the person a reader since the page was opened: the server takes no save from them.
       if (doc.deny) { doc.denied = (doc.denied || 0) + 1; return send(403, { error: 'read_only', message: 'This sign-in can look, not change.' }); }
       // A page that has been closed may still be heard from; what it sends is not this check's.
@@ -401,8 +404,17 @@ http
       // Another founder's page saved a moment earlier: what it wrote is the document now.
       if (doc.clash) { doc.doc = doc.clash; doc.clash = null; doc.rev++; }
       if (b.base !== doc.rev) return send(409, { error: 'money_stale', rev: doc.rev });
+      // The plan names the table it was worked out against, and the stand takes it only while the table stands there
+      // (docs/api.md, "The ledger's revision, on the plan's PUT"). `named` is what each save of the plan named - null
+      // from a page of before the rule, which names none and is judged by the plan's own revision alone.
+      if (doc === store.cash) {
+        doc.named.push('ledger' in b ? b.ledger : null);
+        if ('ledger' in b && b.ledger !== store.led.rev) { doc.behind++; return send(409, { error: 'ledger_stale', message: 'The ledger was saved from somewhere else since this page read it.', ledger: store.led.rev }); }
+      }
       doc.doc = JSON.parse(b.doc);
       doc.rev++;
+      // The table's save can be answered late, for the check of a plan changed while that answer is on its way.
+      if (doc === store.led && doc.slow) await new Promise((r) => setTimeout(r, doc.slow));
       return send(200, { rev: doc.rev });
     }
     if (url === '/favicon.ico') { res.writeHead(204); return res.end(); }
@@ -7051,6 +7063,137 @@ await run('rv-wdmark', 'a change to another line of the plan moves neither a mar
   same([st(MW, 'wA@2026-10'), st(MW, 'wB'), t && t.skipped.length, t && round2(t.trial.now - t.plan.now), round2(tried.now - MW.now), store.cash.puts, await memB()], [['waiting', 2200, ['m1', 'n1']], ['mark', 0, []], 0, 0, 0, 0, null],
     'a trial of «выводим другую сумму» on the withdrawal beside a marked one: «Денег сейчас» of the trial is the plan\'s, as it is when a founder writes that sum - the 700 the smaller month no longer holds is not dealt into the marked withdrawal; nothing is saved, and the plan itself is given no memory');
   await pg.context().close();
+});
+
+await run('rv-oldtable', 'a window whose table is older than the stand\'s does not change the plan: the stand refuses the save, the window says so, and neither a marked withdrawal nor «Денег сейчас» moves', async () => {
+  // 13 October 2026, the limit the rule of that day left («Страница с устаревшей таблицей»): the plan is changed by
+  // the table - what a marked withdrawal holds is seen before a change and kept after it - and the table and the
+  // plan are two documents with two revisions. A window opened before another founder sorted a transfer saw and kept
+  // by the table it had: the transfer, which it did not know, was dealt over by its change, and «Денег сейчас» moved
+  // for everybody with nothing new from the bank. Here: «Вывод A» 4,000 on the 5th holds Mika's 1,000; «Вывод B»
+  // 3,000 on the 6th is marked «Оплачено»; a transfer of Mika's 2,500 waits in «Разбор».
+  const P = await plan2(), NEWS = AT2 + 3600e3, a1 = filed('m1', '2026-10-05', -1000, 'mika', '', { at: AT2 });
+  const Lu = ledP({ tx: [a1], inb: [inbox('u1', '2026-10-06', -2500, 'mika', '', { at: NEWS, auto: false })] });
+  let QN = { ...P, div: P.div.concat([row('wA', 'Вывод A', 4000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод B', 3000, '2026-10-06', { blk: 'div' })]) };
+  QN = await wr(QN, 'mark', item(await C(ledP({ tx: [a1] }), QN, T), 'wB'), T, TAP, BY);
+  const now = (pg) => pg.evaluate(() => window.__money.model({ H: 30 }).now);
+  const rowsOf = (pg, id) => pg.evaluate((id) => { const it = window.__money.model({ H: 30 }).items.find((x) => x.id === id); return it ? [it.done ? it.done.by : it.state, it.wd.got, it.rows] : null; }, id);
+  const mem = (D) => { const r = D.div.find((x) => x.id === 'wB'); return r && r.paid && r.paid.saw ? r.paid.saw.rows.map((x) => x[1]) : null; };
+  const divs = (D) => D.div.filter((r) => /^w[AB]$/.test(r.id)).map((r) => r.id);
+  const said = async (pg) => [await pg.isVisible('#ledLost'), (await pg.isVisible('#ledLost')) ? await text(pg, '#ledLostHead') : '', await toastText(pg), await text(pg, '#sync')];
+  const BEHIND = 'Не сохранено: таблица изменилась в другом окне — обновите страницу';
+  const sort = async (pg) => { await pg.click('.nav [data-tab="inbox"]'); await pg.click('#view-inbox .op[data-id="u1"] [data-accept]'); };
+  // The page read again, whichever tab its address names.
+  const read = (pg) => pg.waitForFunction(() => !document.querySelector('#sync').textContent.includes('загружаю') && window.__cash && window.__cash.state() && window.__money.by === 'Mika');
+
+  // two founders open the page on the same pair of documents (the browser itself reports the refusal to come)
+  serve(Lu, QN);
+  const mine = await open('an older table', undefined, { quiet: /409/ });
+  await mine.waitForSelector('#view-today [data-live="verdict"]');
+  const theirs = await reopen('the other founder');
+  const led0 = store.led.rev, plan0 = store.cash.rev;
+  // … and the other one sorts the transfer out of «Разбор»: the table on the stand moves on (the row filed, then
+  // «Разбор» without it - two saves of the table)
+  await sort(theirs);
+  const ledPuts = await puts('led', 2), led1 = store.led.rev;
+  const Lnew = JSON.parse(JSON.stringify(store.led.doc)), n0 = await now(theirs);
+  same([ledPuts, led1 - led0, Lnew.tx.some((r) => r.id === 'u1'), await rowsOf(theirs, 'wA'), await rowsOf(theirs, 'wB'), await rowsOf(mine, 'wA'), await mine.isHidden('#ledLost')], [2, 2, true, ['waiting', 3500, ['m1', 'u1']], ['mark', 0, []], ['waiting', 1000, ['m1']], true],
+    'the other founder sorts the transfer: in their window it stands in the open withdrawal; the first window still holds the table as it was, and nothing has told it so');
+  // the first window deletes «Вывод A» - by the table it holds, which knows nothing of the transfer
+  await goCash(mine);
+  await rowDo(mine, 'div', 'wA', 'del');
+  await puts('cash', 1);
+  await mine.waitForSelector('#ledLost:not([hidden])');
+  const refused = await mine.evaluate(() => JSON.parse(JSON.stringify(window.__cash.state())));
+  same([store.cash.puts, store.cash.behind, store.cash.named, store.cash.rev - plan0, divs(store.cash.doc), mem(store.cash.doc)], [1, 1, [led0], 0, ['wA', 'wB'], null],
+    'its save of the plan names the table it was worked out against - the older revision - and the stand does not take it: the plan there is what it was, «Вывод A» and all, at the revision it had');
+  same(await said(mine), [true, 'Таблица изменилась в другом окне.', BEHIND, 'таблица изменилась в другом окне — обновите страницу'],
+    'the window says so where it cannot be missed: the band over every tab, «Не сохранено: …» in place of the «Удалено» it had just answered, and the pill');
+  await shot(mine, 'rv-oldtable');
+  // what that save would have done, had the stand taken it (a page from before the rule names no table, and is taken)
+  const kept = await C(Lnew, QN, T), dealt = await C(Lnew, refused, T);
+  same([divs(refused), mem(refused), round2(dealt.now - kept.now), [(item(dealt, 'wB').done || {}).by, item(dealt, 'wB').wd.got, item(dealt, 'wB').rows]], [['wB'], [0], 2500, ['mark', 2500, ['u1']]],
+    '(the plan it would have saved keeps by the one row that window knew; against the table as the stand has it the transfer is dealt into the marked withdrawal, and «Денег сейчас» is 2,500 higher with nothing new from the bank - the fault this refusal stops)');
+  // nothing more is changed in that window: a press is refused where it is made, and sends nothing
+  const typedInto = (await listed(mine, 'team'))[0];
+  await mine.fill(box('team', typedInto, 'amt'), '6100');
+  await sleep(900);
+  same([await toastText(mine), store.cash.puts, store.led.puts], [BEHIND, 1, 2], 'a sum typed into a row of that window afterwards is refused in the same words, and no save is sent - of the plan or of the table');
+  // the other founder's window, read again, is what it was
+  await theirs.reload();
+  await read(theirs);
+  same([round2((await now(theirs)) - n0), await rowsOf(theirs, 'wA'), await rowsOf(theirs, 'wB'), await theirs.isHidden('#ledLost')], [0, ['waiting', 3500, ['m1', 'u1']], ['mark', 0, []], true],
+    'the other founder\'s window, opened again: «Денег сейчас», the open withdrawal with the transfer in it and the marked one are what they were');
+  // [Обновить страницу] reads the table again; the same delete is then worked out against it, and is taken
+  const loaded = mine.waitForEvent('load');
+  await mine.click('#ledReload');
+  await loaded;
+  await read(mine);
+  const m0 = await now(mine);
+  same([await mine.isHidden('#ledLost'), round2(m0 - n0), await rowsOf(mine, 'wA')], [true, 0, ['waiting', 3500, ['m1', 'u1']]], '[Обновить страницу]: the band is gone, and the first window holds the table and the plan as the stand has them');
+  await goCash(mine);
+  await rowDo(mine, 'div', 'wA', 'del');
+  await puts('cash', 2);
+  same([store.cash.behind, store.cash.named, store.cash.rev - plan0, divs(store.cash.doc), mem(store.cash.doc), round2((await now(mine)) - m0), await rowsOf(mine, 'wB'), await toastText(mine)], [1, [led0, led1], 1, ['wB'], [0, 0], 0, ['mark', 0, []], 'Удалено: Вывод A'],
+    '«Вывод A» deleted again: the save names the table of today and is taken; the mark remembers that neither row was its own, and «Денег сейчас» has not moved');
+  await theirs.reload();
+  await read(theirs);
+  same([round2((await now(theirs)) - n0), await rowsOf(theirs, 'wB')], [0, ['mark', 0, []]], '… nor has it for the other founder, who reads the plan again: the marked withdrawal holds what it held');
+  await theirs.context().close();
+  await finish(mine);
+
+  // A window that saves the table itself is not behind: the plan waits for the answer to that save, and names the
+  // revision the answer brings. The stand answers the table's save late here, so the plan's half second runs out first.
+  let pg = await scene('the table and the plan in one breath', Lu, QN, { H: 30 });
+  const led2 = store.led.rev;
+  store.led.slow = 900;
+  await sort(pg);
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  await puts('led', 2);
+  await puts('cash', 1);
+  same([store.led.puts, store.led.rev - led2, store.cash.puts, store.cash.named, store.cash.behind, await pg.isHidden('#ledLost'), divs(store.cash.doc), await toastText(pg)], [2, 2, 1, [led2 + 2], 0, true, ['wB'], 'Удалено: Вывод A'],
+    'a transfer sorted and a withdrawal deleted in one breath, the table\'s saves answered late: the plan is sent once, after those answers, names the revision they brought, and is taken');
+  store.led.slow = 0;
+  await finish(pg);
+  // … and the other way about: the plan's save is on its way when the window saves its table, and the table's save
+  // reaches the stand first. The stand refuses the plan - the number it names is old - and the window, which knows
+  // the save that moved the table for its own, sends the plan again and says nothing.
+  serve(Lu, QN);
+  pg = await open('the table overtakes the plan', undefined, { quiet: /409/ });
+  await read(pg);
+  const led3 = store.led.rev;
+  store.cash.holdFor = led3 + 2;
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  for (let i = 0; i < 80 && !store.cash.got; i++) await sleep(50);
+  await sort(pg);
+  await puts('cash', 2);
+  same([store.cash.got, store.cash.named, store.cash.behind, store.led.rev - led3, await pg.isHidden('#ledLost'), divs(store.cash.doc), await text(pg, '#sync')], [2, [led3, led3 + 2], 1, 2, true, ['wB'], 'сохранено'],
+    'a withdrawal deleted, and a transfer sorted while that save is on its way: the stand refuses the plan once, the window sends it again with the table\'s new revision, and no band says that anybody else changed anything');
+  store.cash.holdFor = 0;
+  await finish(pg);
+
+  // A window that has learnt it from its own save of the table - the save was refused - changes no plan either: the
+  // band it shows says «больше не сохраняется», and until 13 October 2026 that was not true of the plan.
+  serve(Lu, QN);
+  pg = await open('a window told by its table', undefined, { quiet: /409/ });
+  await read(pg);
+  store.led.rev++;
+  await sort(pg);
+  await pg.waitForSelector('#ledLost:not([hidden])');
+  await goCash(pg);
+  await rowDo(pg, 'div', 'wA', 'del');
+  await sleep(900);
+  same([await toastText(pg), store.cash.puts, divs(store.cash.doc), await pg.evaluate(() => window.__cash.state().div.some((r) => r.id === 'wA'))], [BEHIND, 0, ['wA', 'wB'], true],
+    'a window whose own save of the table was refused: «Удалить» on a withdrawal is refused where it is pressed, in the band\'s own words - the plan in the window is not changed, and no save of it is sent');
+  await pg.context().close();
+
+  // A reader's window sends no save at all, so it names nothing; and the laptop's little server is sent no such member
+  // (that page is not on a `finance.` host, and this file has no stand-in for it: the body is read off the page).
+  const src = fs.readFileSync(PUB + '/money/index.html', 'utf8');
+  const disk = /fetch\("\/api\/cash",\{method:"PUT"[^\n]*?body:JSON\.stringify\(Object\.assign\(docOf\(\),\{base:rev\}\)\)\}\)/.test(src), beacon = /sendBeacon\("\/api\/cash",new Blob\(\[JSON\.stringify\(Object\.assign\(docOf\(\),\{base:rev\}\)\)\]/.test(src);
+  same([disk, beacon, (src.match(/ledger:S\.rev/g) || []).length], [true, true, 1], 'the plan as the laptop tool is sent it - the document with `base` in it, and nothing else - is what it was: the table\'s revision is named in one place, the body for the stand');
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

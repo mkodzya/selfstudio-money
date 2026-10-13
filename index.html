@@ -939,7 +939,17 @@ let putT=null,putBusy=false,putAgain=false,stale=false;
 const LEDLOST={rev:["Таблица изменилась в другом окне.","Всё, что вы загружаете, разбираете и правите в этом окне, больше не сохраняется. Обновите страницу — последние файлы придётся загрузить заново.","таблица изменилась в другом окне"],
  auth:["Вход закончился.","Всё, что вы загружаете, разбираете и правите в этом окне, больше не сохраняется. Обновите страницу и войдите заново.","вход закончился"]};
 let staleWhy="";
-function ledLost(why){const first=!stale;stale=true;staleWhy=why;$("#ledLostHead").textContent=LEDLOST[why][0];$("#ledLostText").textContent=LEDLOST[why][1];$("#ledLost").hidden=false;if(first)toast(`Не сохранено: ${LEDLOST[why][2]} — обновите страницу`);}
+const ledLostSay=why=>`Не сохранено: ${LEDLOST[why][2]} — обновите страницу`;
+function ledLost(why){const first=!stale;stale=true;staleWhy=why;$("#ledLostHead").textContent=LEDLOST[why][0];$("#ledLostText").textContent=LEDLOST[why][1];$("#ledLost").hidden=false;if(first)toast(ledLostSay(why));}
+// The plan is changed by the table: a withdrawal marked «Оплачено» keeps the rows it held (Live.write.see, .keep),
+// and which rows those are is read off the table this window holds. A window whose table is older than the stand's
+// would keep by the rows it has and deal over the ones it has never seen - so it does not change the plan at all.
+// ledOld(): this window knows its table is behind - its own save of the table was refused for that, or its save of
+// the plan was (the plan goes to the stand with the table's revision: Cash, push). ledSaving(): a save of the table
+// from this very window is not answered yet, and the revision it holds is about to move.
+const ledOld=()=>stale&&staleWhy==="rev";
+const ledSaving=()=>!stale&&!RO&&(!!putT||putBusy||putAgain);
+function ledBehind(){ledLost("rev");sync("данные изменились в другом окне — обновите страницу","bad");}
 async function put(){
  if(RO)return;
  if(putBusy){putAgain=true;return;}putBusy=true;putT=null;
@@ -2032,16 +2042,42 @@ const Cash=(()=>{
   if(RO)return;
   const g=sig();if(g===lastSig)return;lastSig=g;
   if(home==="local"){try{localStorage.setItem(STORE,JSON.stringify(docOf()));}catch(e){}return;}
-  if(stale)return;
+  if(stale||ledOld())return;
   sync("сохраняю","wait","cash");clearTimeout(saveT);saveT=setTimeout(push,500);
  }
+ // What goes to the stand: the plan, the revision it was read at, and the revision of the TABLE this window holds
+ // (S.rev) - the table the change was worked out against. The stand takes the plan only while its table stands
+ // there (docs/api.md, «The ledger's revision, on the plan's PUT»): the save is the one moment a window learns that
+ // another founder has uploaded a statement since, and it costs no request of its own. The laptop's little server
+ // knows no such member, and is sent none.
+ const body=()=>JSON.stringify({base:rev,doc:JSON.stringify(docOf()),ledger:S.rev||0});
+ // The table is behind: nothing changed in this window is kept from here on, the plan no more than the table. The
+ // band over every tab says so (ledLost), and every hand that would change the plan says it where it is pressed
+ // (Plan.lost).
+ const tableOld=()=>{first=false;again=false;clearTimeout(saveT);saveT=null;sync("таблица изменилась в другом окне — обновите страницу","bad","cash");};
  async function push(){
   if(RO)return;
-  if(busy){again=true;return;}busy=true;saveT=null;
+  if(busy){again=true;return;}
+  if(ledOld())return tableOld();
+  // A save of the table from this window is still on its way, and its answer moves the revision the plan is about
+  // to name: the plan waits for it. (It waits for nothing else - a table that is not being saved is not asked.)
+  if(home==="api"&&ledSaving()){clearTimeout(saveT);saveT=setTimeout(push,120);return;}
+  busy=true;saveT=null;
   try{
-   const d=docOf(),sent=sig();
-   const r=home==="api"?await fetch(API+"/cash",{method:"PUT",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({base:rev,doc:JSON.stringify(d)})})
-    :await fetch("/api/cash",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign(d,{base:rev}))});
+   const sent=sig();
+   const r=home==="api"?await fetch(API+"/cash",{method:"PUT",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body()})
+    :await fetch("/api/cash",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign(docOf(),{base:rev}))});
+   // Somebody saved the TABLE since this window read it - a statement uploaded, a row sorted - and the plan here
+   // was changed by the older one. The stand did not take it. The toast on the screen at this moment is the one
+   // that answered «Сохранено» to the change just refused: it is taken back out loud.
+   // (Unless the save that moved the table was this window's own, and crossed this one on its way: the stand then
+   // stands at the revision that save's answer brings, or has brought. The window is not behind, and the plan is
+   // sent again - after that answer, with the number it gives.)
+   if(r.status===409&&await refusedAs(r,"ledger_stale")){
+    let at=-1;try{at=(await r.clone().json()).ledger;}catch(e){}
+    busy=false;
+    if(ledSaving()||at===(S.rev||0)){again=false;clearTimeout(saveT);saveT=setTimeout(push,120);return;}
+    ledBehind();tableOld();return Plan.redraw();}
    // Somebody saved the plan since this copy was read. Writing over them is the one thing this must not do, so
    // saving stops here and the tab says so where the edits are being made, not only in the pill.
    // The one save a page makes unasked is the old plan rewritten as version 3. If another founder's page got there
@@ -2063,10 +2099,10 @@ const Cash=(()=>{
  }
  // A change made in the last half second before the tab closes is still waiting for its timer.
  window.addEventListener("pagehide",()=>{
-  if(!saveT||stale||!plan||RO)return;clearTimeout(saveT);saveT=null;
+  if(!saveT||stale||ledOld()||!plan||RO)return;clearTimeout(saveT);saveT=null;
   try{
    if(home==="disk"&&navigator.sendBeacon)navigator.sendBeacon("/api/cash",new Blob([JSON.stringify(Object.assign(docOf(),{base:rev}))],{type:"application/json"}));
-   if(home==="api")fetch(API+"/cash",{method:"PUT",keepalive:true,credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({base:rev,doc:JSON.stringify(docOf())})}).catch(()=>{});
+   if(home==="api")fetch(API+"/cash",{method:"PUT",keepalive:true,credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body()}).catch(()=>{});
   }catch(e){}
  });
  async function fetchPlan(){
@@ -3354,10 +3390,12 @@ const Cash=(()=>{
 //    them as they lay (D2; write.see and write.keep, around the changes the page makes to the plan: Plan.edit, a
 //    keystroke in a row of «Касса», and «Что если» on its copy). Known, and kept. «Отменить» puts the plan back as it
 //    was, memories and all - and a plan loaded from the old «Касса» takes its place whole: what the table has brought
-//    since is dealt against the plan that is put there. A page whose table is older than the server's sees and keeps
-//    by the table it has, and a page from before the rule neither sees nor keeps: after their changes the rows they
-//    did not know are dealt over as they always were (a memory that such a page finds in the plan it leaves there, in
-//    force). Two marked withdrawals do not pass rows to one another: when one of them is given to a founder, the rows
+//    since is dealt against the plan that is put there. A page whose table is older than the stand's would see and
+//    keep by the table it has, and deal over the rows it did not know: it does not change the plan at all - its save of
+//    the plan names the revision of its table, and the stand does not take it (Cash, push; Plan.lost). A page from
+//    before the rule neither sees nor keeps: after its changes rows are dealt over as they always were (a memory that
+//    such a page finds in the plan it leaves there, in force). Two marked withdrawals do not pass rows to one
+//    another: when one of them is given to a founder, the rows
 //    it lets go are not the other's - an open line takes them, or none. A withdrawal in another currency holds to a
 //    memory in pounds: one written on a day its sum was worth fewer pounds gives no more on a later day. A marked
 //    month that a change takes out of the plan and a later one brings back («каждый месяц» taken off an earlier
@@ -4853,7 +4891,9 @@ const Plan=(()=>{
   // Once somebody else has saved the plan, nothing changed on this page is kept. A change is then refused where it
   // is made, in the same breath that used to answer «Сохранено»: lost() says so and is true. Every hand that
   // changes the plan asks it first, and answers in its own words only after edit() has returned true.
-  lost(){if(RO){toast(RO_SAY);return true;}if(Cash.status()!=="stale")return false;toast(LOST);return true;},
+  // The same once somebody else has saved the TABLE and this window knows it (ledOld): what a marked withdrawal
+  // holds is seen and kept by the table, and an older table would deal over the rows it has never seen.
+  lost(){if(RO){toast(RO_SAY);return true;}if(ledOld()){toast(ledLostSay("rev"));return true;}if(Cash.status()!=="stale")return false;toast(LOST);return true;},
   see(P){try{return Live.write.see(P,ledIn(),Live.today());}catch(e){return null;}},
   keep(P,seen){try{Live.write.keep(P,ledIn(),Live.today(),seen);}catch(e){}},
   edit(label,fn){const P=Cash.plan();if(!P||this.lost())return false;const was=JSON.stringify(P),seen=this.see(P);Cash.snap(label);fn(P,Date.now(),who);
