@@ -22,7 +22,7 @@ const keyOf = (it) => chainOf(it) + '|' + it.date + '|' + (it.mark ? it.mark.at 
 const view = (it) => JSON.stringify([it.done && it.done.by, it.wd.got, it.rows, it.mark && it.mark.counts]);
 const figs = (M) => JSON.stringify([M.now, M.marksGbp, M.month.blocks.div.fact]);
 const waiting = (M) => wdsOf(M).filter((it) => it.mark && it.saw);
-const flat = (X) => { const Z = clone(X); Z.items.forEach((it) => { delete it.saw; if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); };
+const flat = (X) => { const Z = clone(X); Z.items.forEach((it) => { delete it.saw; delete it.sawDay; if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); };
 const conserve = (M, L) => { const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), all = wdsOf(M);
   if (all.some((it) => it.wd.got > it.rows.reduce((s, id) => s + (amt[id] || 0), 0) + 0.011)) return 'a withdrawal holds more than its rows';
   if (all.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';

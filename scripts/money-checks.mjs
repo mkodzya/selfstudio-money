@@ -7196,6 +7196,119 @@ await run('rv-oldtable', 'a window whose table is older than the stand\'s does n
   same([disk, beacon, (src.match(/ledger:S\.rev/g) || []).length], [true, true, 1], 'the plan as the laptop tool is sent it - the document with `base` in it, and nothing else - is what it was: the table\'s revision is named in one place, the body for the stand');
 });
 
+// The rule of 13 October 2026 for the takings of a balance's own day. A statement row dated on the very day a
+// balance was typed for is inside that balance or after it by the mark whose place it took - for a founder's
+// taking, by the marked withdrawal that holds it; and which withdrawal holds a taking is the walk's to say, so a
+// change to ANOTHER line could move such a row to another line, and «Денег сейчас» by the whole row, with nothing
+// new from the bank. The marks that hold a memory by the rule above (rv-wdmark) are the ones that can count; these
+// rows belong to marks that cannot - a line ticked in «Что из этого уже прошло?», a mark whose day the statements
+// have passed. Now the page sees what every marked withdrawal holds of the takings of a balance's day, and keeps
+// it: a memory that is not in force holds for those takings, and for nothing else.
+await run('rv-wdday', 'a founder\'s row dated on the very day a balance was typed for stays inside that balance, or after it, through a change to another line of the plan - both ways; the founder\'s own word about the marked line, and a balance typed anew, are read by the walk; a plan with no such row holds no memory and is counted as before', async () => {
+  const D = '2026-10-13', YD = '2026-10-12', AT = ms(D + 'T08:00:00Z'), UP = ms(D + 'T16:00:00Z'), LATER = ms(D + 'T17:00:00Z');
+  const w = (id, amt, date, more = {}) => row(id, 'Вывод ' + id, amt, date, { blk: 'div', c0: AT1, ...more });
+  const plan = (amt, asOf, ...rows) => plan3({ banks: [bal('Wise', 'GBP', amt, asOf, { at: AT })], div: rows });
+  const tick = { on: D, at: AT - 1, by: BY };   // what «Что из этого уже прошло?» writes: a mark a moment before the balance
+  const vanya = (id, d, amt, at = UP) => filed(id, d, -amt, 'vanya', '', { at }), misha = (id, d, amt, at = UP) => filed(id, d, -amt, 'misha', '', { at });
+  const st = (M, id) => { const it = item(M, id); return it ? [it.done ? it.done.by : it.state, it.wd.got, it.rows] : null; };
+  const end = (M) => M.days[M.days.length - 1].e;
+  const see = (L, Q, day = D) => page.evaluate(([p, l, d]) => window.__money.write.see(p, l, d), [Q, L, day]);
+  const keep = (L, Q, seen, day = D) => page.evaluate(([p, l, d, k]) => { window.__money.write.keep(p, l, d, k); return p; }, [Q, L, day, seen]);
+  // a change as the PAGE makes it (Plan.edit: see, change, keep); a bare `wr` is a page from before the rule
+  const edit = async (L, Q, f, day = D) => { const seen = await see(L, Q, day); return keep(L, await f(Q), seen, day); };
+  const tap = async (L, Q, id, verb, ...a) => { const it = item(await C(L, Q, D), id); return edit(L, Q, (X) => wr(X, verb, it, ...a)); };
+  const memOf = (Q, id) => { const r = Q.div.find((x) => x.id === id); return r && r.paid && r.paid.saw ? r.paid.saw.rows.map((x) => [x[1], x.length > 2 ? x[2] : '']) : null; };
+  const none = (Q) => !JSON.stringify(Q).includes('"saw"');
+  const bare = (M) => JSON.stringify({ ...M, items: M.items.map(({ saw, sawDay, ...it }) => it) });
+  const STAMP = `Wise|GBP|${D}|${AT}`;
+
+  // ---- (a) too low: the ticked withdrawal holds Vanya's row, inside the balance; another line is given to Vanya ----
+  const La = ledger([vanya('r1', D, 3000)]), Qa = plan(47000, D, w('wV', 3000, D, { paid: tick }), w('wM', 3000, '2026-10-15'));
+  const Ma0 = await C(ledger([]), Qa, D), Ma = await C(La, Qa, D);
+  same([Ma0.now, st(Ma0, 'wV'), item(Ma0, 'wV').mark.counts, Ma.now, st(Ma, 'wV'), st(Ma, 'wM'), acct(Ma, 'Wise|GBP').after, 'saw' in item(Ma, 'wV'), item(Ma, 'wV').sawDay.rows.map((x) => x.slice(1))], [47000, ['mark', 0, []], false, 47000, ['row', 3000, ['r1']], ['due', 0, []], 0, false, [[3000, STAMP]]],
+    'the balance typed at 09:00 for today, Vanya\'s withdrawal ticked as already inside it; the evening\'s statement shows Vanya -3,000 dated today: the ticked line holds it, inside the balance - 47,000');
+  const Qa1 = await tap(La, Qa, 'wM', 'set', { whose: 'vanya' }, LATER, BY), Ma1 = await C(La, Qa1, D), Mold = await C(La, await wr(Qa, 'set', item(Ma, 'wM'), { whose: 'vanya' }, LATER, BY), D);
+  same([Ma1.now, end(Ma1) - end(Ma), st(Ma1, 'wV'), st(Ma1, 'wM'), memOf(Qa1, 'wV'), Mold.now, st(Mold, 'wM')], [47000, 0, ['row', 3000, ['r1']], ['due', 0, []], [[3000, STAMP]], 44000, ['row', 3000, ['r1']]],
+    'the other line is given to Vanya: the row stays in the ticked withdrawal, inside the balance - 47,000, and the line that is now Vanya\'s still waits for its 3,000; the mark remembers the row of the day and the balance it was read against. (A page from before the rule took the row off again: 44,000)');
+  const Qa2 = await tap(La, Qa1, 'wM', 'set', { whose: '' }, LATER + 1, BY), Ma2 = await C(La, Qa2, D);
+  same([none(Qa2), bare(Ma2) === bare(Ma)], [true, true], '… and made everybody\'s again: the walk gives the ticked withdrawal what it holds, the plan holds no memory, and the model is the one it was');
+  const Qa3 = await tap(La, Qa1, 'wV', 'unmark'), Ma3 = await C(La, Qa3, D), Qa4 = await tap(La, Qa1, 'wV', 'set', { whose: 'misha' }, LATER + 1, BY), Ma4 = await C(La, Qa4, D);
+  same([Ma3.now, st(Ma3, 'wV'), none(Qa3), Ma4.now, st(Ma4, 'wV'), st(Ma4, 'wM'), none(Qa4)], [44000, ['due', 0, []], true, 44000, ['ok', 0, []], ['row', 3000, ['r1']], true],
+    'the founder\'s own word about the ticked line is read by the walk: the tick taken off, or the line given to Misha - Vanya\'s row is that line\'s no longer, it is after the balance, and no memory holds against it');
+  const Qa5 = await edit(La, Qa1, (X) => ({ ...X, banks: X.banks.map((b) => ({ ...b, amt: 44000, at: LATER })) })), Ma5 = await C(La, Qa5, D);
+  same([none(Qa5), Ma5.now, acct(Ma5, 'Wise|GBP').after], [true, 44000, 0], 'the balance typed again in the evening: every row of the day is inside the new figure, and the memory of the old one goes out of the plan');
+  same([canon(await keep(La, Qa1, await see(La, Qa1))) === canon(Qa1), none(await keep(La, Qa, await see(La, Qa)))], [true, true], 'seeing and keeping around no change at all: a memory is written again as it was, and a plan without one gets none');
+
+  // ---- the mirror of (a): the row lies in Vanya's own line, after the balance; that line becomes everybody's ----
+  const Qm = plan(47000, D, w('wV', 3000, D, { paid: tick }), w('wM', 3000, '2026-10-15', { whose: 'vanya' })), Mm = await C(La, Qm, D);
+  const Qm1 = await tap(La, Qm, 'wM', 'set', { whose: '' }, LATER, BY), Mm1 = await C(La, Qm1, D), Mmold = await C(La, await wr(Qm, 'set', item(Mm, 'wM'), { whose: '' }, LATER, BY), D);
+  same([Mm.now, st(Mm, 'wV'), st(Mm, 'wM'), Mm1.now, end(Mm1) - end(Mm), st(Mm1, 'wV'), st(Mm1, 'wM'), memOf(Qm1, 'wV'), Mmold.now], [44000, ['ok', 0, []], ['row', 3000, ['r1']], 44000, 0, ['ok', 0, []], ['row', 3000, ['r1']], [[0, STAMP]], 47000],
+    'Vanya\'s row paid Vanya\'s own line and was counted after the balance - 44,000; that line made everybody\'s: the row does not go into the ticked withdrawal - the mark remembers it held none of it - and «Денег сейчас» stays. (Before the rule: 47,000)');
+
+  // ---- (b) too high, silently: Misha's afternoon taking lies in his own line; that line is deleted ----
+  const Lb = ledger([misha('r1', D, 2000)]), Qb = plan(50000, D, w('wS', 3000, D, { paid: tick }), w('wM', 2000, '2026-10-15', { whose: 'misha' })), Mb = await C(Lb, Qb, D);
+  const Qb1 = await tap(Lb, Qb, 'wM', 'del'), Mb1 = await C(Lb, Qb1, D), Mbold = await C(Lb, await wr(Qb, 'del', item(Mb, 'wM')), D);
+  same([Mb.now, st(Mb, 'wS'), st(Mb, 'wM'), acct(Mb, 'Wise|GBP').same, Mb1.now, end(Mb1) - end(Mb), st(Mb1, 'wS'), memOf(Qb1, 'wS'), Mbold.now, st(Mbold, 'wS')], [48000, ['ok', 0, []], ['row', 2000, ['r1']], -2000, 48000, 0, ['ok', 0, []], [[0, STAMP]], 50000, ['row', 2000, ['r1']]],
+    'a shared line ticked, Misha\'s own line beside it; Misha takes 2,000 in the afternoon: his line holds it, after the balance - 48,000. His line is deleted: the row is not dealt into the ticked one, and 48,000 stays. (Before the rule the row went inside the balance: 50,000, with nothing new from the bank)');
+  const Qb2 = await tap(Lb, Qb, 'wM', 'off'), Qb3 = await tap(Lb, Qb2, 'wM', 'on');
+  same([(await C(Lb, Qb2, D)).now, memOf(Qb2, 'wS'), (await C(Lb, Qb3, D)).now, none(Qb3)], [48000, [[0, STAMP]], 48000, true], '… the same with that line switched off; switched on again, the walk gives each what it held and the memory goes');
+
+  // ---- the mirror of (b): the ticked line holds Misha's row; another line becomes Misha's own ----
+  const Qn = plan(50000, D, w('wS', 3000, D, { paid: tick }), w('wM', 2000, '2026-10-20', { whose: 'vanya' })), Mn = await C(Lb, Qn, D);
+  const Qn1 = await tap(Lb, Qn, 'wM', 'set', { whose: 'misha' }, LATER, BY), Mn1 = await C(Lb, Qn1, D), Mnold = await C(Lb, await wr(Qn, 'set', item(Mn, 'wM'), { whose: 'misha' }, LATER, BY), D);
+  same([Mn.now, st(Mn, 'wS'), Mn1.now, end(Mn1) - end(Mn), st(Mn1, 'wS'), st(Mn1, 'wM'), memOf(Qn1, 'wS'), Mnold.now], [50000, ['row', 2000, ['r1']], 50000, 0, ['row', 2000, ['r1']], ['due', 0, []], [[2000, STAMP]], 48000],
+    'the ticked line holds Misha\'s 2,000, inside the balance - 50,000; another line is given to Misha: the row stays where it lay, and so does «Денег сейчас». (Before the rule: 48,000)');
+
+  // ---- room is kept for the row of the day: an older row a change sets loose does not take its place ----
+  const Lc = ledger([vanya('r0', '2026-10-08', 3000), vanya('r1', D, 3000)]), Qc = plan(47000, D, w('w0', 3000, '2026-10-06'), w('wV', 3000, D, { paid: tick })), Mc = await C(Lc, Qc, D);
+  const Qc1 = await tap(Lc, Qc, 'w0', 'del'), Mc1 = await C(Lc, Qc1, D), Mcold = await C(Lc, await wr(Qc, 'del', item(Mc, 'w0')), D);
+  same([Mc.now, st(Mc, 'wV'), Mc1.now, st(Mc1, 'wV'), Mcold.now, st(Mcold, 'wV')], [47000, ['row', 3000, ['r1']], 47000, ['row', 3000, ['r1']], 44000, ['row', 3000, ['r0']]],
+    'an earlier withdrawal that held an earlier row is deleted: that row would fill the ticked withdrawal before the row of the day reached it - the mark keeps room for the row it held. (Before the rule the row of the day was pushed out and taken off again: 44,000)');
+
+  // ---- a balance typed for yesterday, «Оплачено» after it: the row that takes the mark's place is after the balance ----
+  const mark = { on: D, at: AT + 3600e3, by: BY }, Qd = plan(47000, YD, w('wX', 3000, D, { paid: mark }), w('wM', 3000, '2026-10-15'));
+  const Ld = ledger([vanya('r1', YD, 3000), reach('Wise', D, 'GBP', UP)]), Md0 = await C(ledger([]), Qd, D), Md = await C(Ld, Qd, D);
+  const Qd1 = await tap(Ld, Qd, 'wM', 'set', { whose: 'vanya' }, LATER, BY), Md1 = await C(Ld, Qd1, D), Mdold = await C(Ld, await wr(Qd, 'set', item(Md, 'wM'), { whose: 'vanya' }, LATER, BY), D);
+  same([Md0.now, Md.now, st(Md, 'wX'), item(Md, 'wX').mark.counts, Md1.now, st(Md1, 'wX'), memOf(Qd1, 'wX'), Mdold.now], [44000, 44000, ['row', 3000, ['r1']], false, 44000, ['row', 3000, ['r1']], [[3000, `Wise|GBP|${YD}|${AT}`]], 47000],
+    'the balance is yesterday\'s, the withdrawal was marked after it was typed, and the statement has passed the mark\'s day: Vanya\'s row of yesterday stands in the mark\'s place, after the balance - 44,000 before it came and with it. Another line given to Vanya: it stays. (Before the rule the row went to that line and into the balance: 47,000)');
+  // … and a memory written while the mark still waited holds for the row of the day when the next statement ends the wait
+  const Le1 = ledger([vanya('r1', YD, 3000)]), Le2 = ledger([vanya('r1', YD, 3000), reach('Wise', D, 'GBP', LATER + 3600e3)]), Me = await C(Le1, Qd, D);
+  const Qe1 = await tap(Le1, Qd, 'wM', 'set', { whose: 'vanya' }, LATER, BY), Me1 = await C(Le1, Qe1, D), Me2 = await C(Le2, Qe1, D);
+  same(['saw' in item(Me, 'wX'), Me.now, Me1.now, Me2.now, st(Me2, 'wX'), 'saw' in item(Me2, 'wX')], [true, 44000, 44000, 44000, ['row', 3000, ['r1']], false],
+    'the same while the mark still waits for its statement - the memory of rv-wdmark - and then the statement that ends the wait: the row of the balance\'s day is held still');
+
+  // ---- two accounts typed in one save; one of them typed again for the next day ----
+  const Qf = plan3({ banks: [bal('Wise', 'GBP', 47000, D, { at: AT }), bal('Barclays', 'GBP', 9000, D, { at: AT })], div: [w('wV', 3000, D, { paid: tick }), w('wM', 3000, '2026-10-15')] });
+  const Qf1 = await tap(La, Qf, 'wM', 'set', { whose: 'vanya' }, LATER, BY), D2 = '2026-10-14';
+  const Qf2 = await edit(La, Qf1, (X) => ({ ...X, banks: X.banks.map((b) => (b.bank === 'Wise' ? { ...b, amt: 44000, asOf: D2, at: ms(D2 + 'T08:00:00Z') } : b)) }), D2);
+  same([(await C(La, Qf1, D)).now, memOf(Qf1, 'wV'), none(Qf2), (await C(La, Qf2, D2)).now], [56000, [[3000, STAMP]], true, 53000], 'two balances typed in one save share their moment; the one whose day the row is of is typed again for the next day: that is its founder\'s word about the account, and nothing of the old day is held');
+
+  // ---- a plan with no row of a balance's day is counted as before, and is given no memory ----
+  const Lz = ledger([vanya('r1', YD, 3000)]), Mz = await C(Lz, Qa, D), Qz1 = await tap(Lz, Qa, 'wM', 'set', { whose: 'vanya' }, LATER, BY);
+  same(['sawDay' in item(Mz, 'wV'), Mz.now, none(Qz1), bare(await C(Lz, Qz1, D)) === bare(await C(Lz, await wr(Qa, 'set', item(Mz, 'wM'), { whose: 'vanya' }, LATER, BY), D))], [false, 47000, true, true],
+    'Vanya\'s row is dated the day before the balance: it is inside it by its date, whichever line holds it; the model says nothing of a balance\'s day, the change writes no memory, and the plan is read as a page from before the rule reads it');
+
+  // ---- on the screen ----
+  const SAT = ms(T + 'T07:00:00Z'), LS = ledger([filed('r1', T, -3000, 'vanya', '', { at: AT2 })]);
+  const PS = plan3({ banks: [bal('Wise', 'GBP', 47000, T, { at: SAT })], div: [w('wV', 3000, T, { paid: { on: T, at: SAT - 1, by: BY } }), w('wM', 3000, '2026-10-08')] });
+  const pg = await scene('wdday', LS, PS);
+  const now = () => pg.evaluate(() => window.__money.model({ H: 30 }).now);
+  const rowsOf = (id) => pg.evaluate((id) => { const it = window.__money.model({ H: 30 }).items.find((x) => x.id === id); return it ? [it.done ? it.done.by : it.state, it.wd.got, it.rows] : null; }, id);
+  const kept = () => pg.evaluate(() => { const p = window.__cash.state().div.find((x) => x.id === 'wV').paid; return p && p.saw ? p.saw.rows.map((x) => x[1]) : null; });
+  const choose = async (id, v, k) => { await rowCard(pg, 'div', id); await pg.selectOption(K('row') + '[data-ed-f="whose"]', v); await pg.click(K('row') + '[data-ed-save]'); await puts('cash', k); };
+  const n0 = await now();
+  await goCash(pg);
+  await choose('wM', 'vanya', 1);
+  same([n0, round2((await now()) - n0), await toastText(pg), await rowsOf('wV'), await rowsOf('wM'), await kept()], [47000, 0, 'Сохранено: Вывод wM · вывод Vanya', ['row', 3000, ['r1']], ['due', 0, []], [3000]],
+    'on the page: «Чей вывод» of the other line set to Vanya - «Денег сейчас» stays 47,000, the toast has nothing to say of it, the row is the ticked withdrawal\'s still, and the one save carries the memory');
+  await holds(pg, 'with a row of the balance\'s day held in a ticked withdrawal', 'cash');
+  await choose('wV', 'misha', 2);
+  const n2 = await now();
+  same([round2(n2 - n0), await toastText(pg), await rowsOf('wV'), await rowsOf('wM'), await kept()], [-3000, 'Вывод wV: вывод Misha · «Денег сейчас» теперь £44,000: пересчитана отметка «Оплачено» на выводе', ['ok', 0, []], ['row', 3000, ['r1']], null],
+    'the ticked line itself given to Misha: its founder\'s word - Vanya\'s row is not Misha\'s, it pays Vanya\'s line and is after the balance, and the toast names the figure');
+  await pg.context().close();
+});
+
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
 console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : '') + (SHARD ? ` (part ${SHARD.k} of ${SHARD.of})` : ''));
 await browser.close();

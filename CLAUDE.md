@@ -320,15 +320,28 @@ a deploy:
   where the change would have dealt those rows over, or moved the window
   the statements close the withdrawal by, each such mark is given a memory
   of what its withdrawal held (`paid.saw`) and holds to it; where it would
-  not, the plan holds no memory and is counted exactly as before. **A
-  change to how withdrawals are dealt must keep three things**: a plan with
-  no memory in force is read as it always was - the model differs by its
-  one new field, `item.saw`, and by nothing else; a change to another line
-  never moves a withdrawal whose mark counts; and no ledger row gives the
-  withdrawals more than its own sum. The first is held against the page of
-  before the rule by the scripts in `checks/withdrawals/` (run by hand,
-  under node - its README says how); the check `rv-wdmark` holds the other
-  two and the page's own hand. **A change the page makes to the plan sees
+  not, the plan holds no memory and is counted exactly as before. **The
+  takings of a balance's own day are held by every marked withdrawal**,
+  whether its mark can count or not: a founder's row dated on the very day
+  a balance was typed for is inside that balance or after it by the marked
+  withdrawal that holds it (a line ticked in «Что из этого уже прошло?»
+  says inside, «Оплачено» after the balance says after), so a change to
+  another line that dealt such a row over moved «Денег сейчас» by the whole
+  row. The same memory holds those rows, and no others, for a mark that
+  cannot count - while the balance they were read against stands. **A
+  change to how withdrawals are dealt, or to whether a row of a balance's
+  day is inside it, must keep four things**: a plan with no memory in force
+  is read as it always was - the model differs by the two fields the rules
+  add, `item.saw` and `item.sawDay`, and by nothing else; a change to
+  another line never moves a withdrawal whose mark counts; it never moves a
+  taking of a balance's day into the balance or out of it; and no ledger
+  row gives the withdrawals more than its own sum. The first is held
+  against the page of before the rules by the scripts in
+  `checks/withdrawals/` (run by hand, under node - its README says how);
+  the checks `rv-wdmark` and `rv-wdday` hold the others and the page's own
+  hand. What the second rule does not reach - a row that is no founder's
+  taking, a part of a marked withdrawal, a withdrawal written on another
+  bank than its row - is in `docs/handoff.md`, the entry of 13 October. **A change the page makes to the plan sees
   before and keeps after**: `Plan.edit` does, the keystroke in a row of
   «Касса» does it by hand, and «Что если» does it on its copy - a new way
   to change the plan that goes past them brings the fault back. Three
