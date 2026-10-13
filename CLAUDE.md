@@ -351,7 +351,8 @@ a deploy:
   taking, a part of a marked withdrawal, a marked withdrawal that holds a
   row of another account than its own (another bank's, or another
   currency's of its own bank) - is in `docs/handoff.md`, the entry of
-  13 October, with the question that waits for the owner. **A change the page makes to the plan sees
+  13 October; the first is not built, the other two the owner chose to
+  leave as they are (decision 13 there). **A change the page makes to the plan sees
   before and keeps after**: `Plan.edit` does, the keystroke in a row of
   «Касса» does it by hand, and «Что если» does it on its copy - a new way
   to change the plan that goes past them brings the fault back. Three
