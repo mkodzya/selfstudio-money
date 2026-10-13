@@ -2930,7 +2930,7 @@ const Cash=(()=>{
 //                                  the day the founder says it was paid: today — or, for a line older than its
 //                                  account's balance that he says is inside that balance, the line's own date.
 //  see(P, led, T)                  what each withdrawal whose mark still waits holds of every taking, as the table
-//                                  lies - [{k, d, saw}]; nothing is written. The page calls it BEFORE a change to the
+//                                  lies - [{k, saw}]; nothing is written. The page calls it BEFORE a change to the
 //                                  plan …
 //  keep(P, led, T, seen)           … and this AFTER it: the plan is read without any memory, and if one of the
 //                                  withdrawals that were seen no longer holds what it held, each is given the memory
@@ -4575,10 +4575,11 @@ const Live=(()=>{
  // «это подписка»: said of a row of «Прочие расходы», and of no other list. Like the name it is the row's, not a month's.
  const subOf=(r,v,k)=>{if(v.sub===undefined||k!=="other")return;if(v.sub)r.sub=true;else delete r.sub;};
  // A memory of a mark on a withdrawal (paid.saw), as the model writes one out (item.saw); the name a marked
- // withdrawal goes by through a change to the plan - its row, or the chain its row is a part of, and its mark's own
- // moment and day: «каждый месяц» ticked or taken off moves a mark between a row and its month, and it is still
- // that mark; and whether two memories of one withdrawal hold the same of every taking.
- const sees=s=>obj(s)&&Array.isArray(s.rows)&&isD(s.from)&&isD(s.to),keyOf=it=>String(it.occ?it.occ.chain:it.row||it.id)+"|"+(it.mark?it.mark.at+"|"+it.mark.on:"");
+ // withdrawal goes by through a change to the plan - its row, or the chain its row is a part of, its day, and its
+ // mark's own moment and day: «каждый месяц» ticked or taken off moves a mark between a row and its month, and it
+ // is still that mark - and one whose day the change moved is not; and whether two memories of one withdrawal hold
+ // the same of every taking.
+ const sees=s=>obj(s)&&Array.isArray(s.rows)&&isD(s.from)&&isD(s.to),keyOf=it=>String(it.occ?it.occ.chain:it.row||it.id)+"|"+it.date+"|"+(it.mark?it.mark.at+"|"+it.mark.on:"");
  const alike=(a,b)=>{const A=new Map(a.rows),B=new Map(b.rows);return[...A].every(([r,h])=>Math.abs((+h||0)-(+B.get(r)||0))<0.005)&&[...B].every(([r,h])=>A.has(r)||Math.abs(+h||0)<0.005);};
  // The marks of a stored row: its own, and those of its months.
  const marksOf=r=>[r.paid].concat(obj(r.rec)&&obj(r.rec.x)?Object.keys(r.rec.x).map(k=>obj(r.rec.x[k])?r.rec.x[k].paid:null):[]).filter(obj);
@@ -4642,12 +4643,12 @@ const Live=(()=>{
   // ledger and T the day, and each works the model out - and they write nothing but memories. `keep` returns how
   // many it wrote.
   see(P,led,T){if(!(Array.isArray(P.div)?P.div:[]).some(r=>obj(r)&&!r.ptax&&marksOf(r).length))return[];
-   return compute(led,P,T).items.filter(it=>it.wd&&sees(it.saw)).map(it=>({k:keyOf(it),d:it.date,saw:it.saw}));},
+   return compute(led,P,T).items.filter(it=>it.wd&&sees(it.saw)).map(it=>({k:keyOf(it),saw:it.saw}));},
   keep(P,led,T,seen){const old=[];LISTS.forEach(k=>(Array.isArray(P[k])?P[k]:[]).forEach(r=>{if(obj(r))marksOf(r).forEach(p=>{if(p.saw!==undefined){old.push([p,p.saw]);delete p.saw;}});}));
    if(!Array.isArray(seen)||!seen.length)return 0;
    let M;try{M=compute(led,P,T);}catch(e){old.forEach(([p,s])=>{p.saw=s;});throw e;}
    const by=new Map(seen.map(c=>[c.k,c])),todo=[];let moved=false;
-   M.items.forEach(it=>{if(!it.wd||!sees(it.saw))return;const c=by.get(keyOf(it)),s=c&&c.d===it.date&&String(c.saw.w||"")===String(it.saw.w||"")?slot(P,it):null;
+   M.items.forEach(it=>{if(!it.wd||!sees(it.saw))return;const c=by.get(keyOf(it)),s=c&&String(c.saw.w||"")===String(it.saw.w||"")?slot(P,it):null;
     if(!s||!obj(s.paid))return;todo.push([s.paid,c.saw]);if(!alike(c.saw,it.saw))moved=true;});
    if(moved)todo.forEach(([p,w])=>{p.saw=w;});
    return moved?todo.length:0;},
