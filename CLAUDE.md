@@ -252,7 +252,9 @@ a deploy:
   `img-src 'self' data: blob:`.
 - **A save is `PUT {"base": N, "doc": "<the document as a string of JSON>"}`**
   and nothing nested beside those two. The ledger needs a `tx` array, the plan
-  a `banks` array; nothing else in a document is read.
+  a `banks` array; nothing else in a document is read. The plan's save
+  carries one number more, `"ledger": M` - see "A window whose table is
+  older" below.
 - **Rows are counted** for the before-shrink copy and the `doc-shrunk` alarm:
   `tx` in the ledger; `banks`, `inflows`, `team`, `taxes` and `other` in the
   plan. The plan's `div` list is not counted, so rows moved out of a counted
@@ -333,6 +335,29 @@ a deploy:
   things go past them as it is: «Отменить» and the plan loaded from the old
   «Касса», which put a whole plan in the place of this one, and a name
   trimmed as the cursor leaves its row, which changes no count.
+- **A window whose table is older than the stand's does not change the
+  plan** (13 October 2026). The seeing and the keeping above go by the table
+  the window holds, and the ledger and the plan are two documents with two
+  revisions: a window opened before another founder uploaded a statement
+  would keep by the rows it has and deal over the ones it has never seen.
+  So the plan's `PUT` names the revision of the table the window holds
+  (`ledger`, beside `base` and `doc`; `S.rev`), and the stand takes the plan
+  only while its ledger stands there - otherwise `409 ledger_stale`, and
+  nothing is written. That save is the one moment the window learns of a
+  newer table: there is no request for it, and none on a timer or on open.
+  The page then is what it is after a `409` on the ledger itself: the band
+  «Таблица изменилась в другом окне» over every tab, no file taken, and
+  every hand that would change the plan refused where it is pressed
+  (`Plan.lost`, which also refuses at once in a window that already knows
+  its table is behind - `ledOld`). The window does not take its own save of
+  the table for somebody else's: the plan waits for that save's answer
+  (`ledSaving`), and a plan refused because the window's own save of the
+  table overtook it is sent again. **A new way to save the plan sends the
+  table's revision with it, and a new way to change the plan asks
+  `Plan.lost` first.** The laptop's `server.py` knows no such member and is
+  sent none; a page from before the rule, `/data` and `ctl` send none
+  either, and are judged by the plan's own revision. The check
+  `rv-oldtable` holds all of it with two windows.
   `docs/handoff.md` says it in words: rule 4, and the entry of 13 October
   with what is known and kept.
 - **«Люди» speaks five doors of its own**: `GET` and `POST /api/people`,
@@ -346,11 +371,13 @@ a deploy:
   `/money/` and `/money/index.html` lead anywhere.
 - **Refusals the platform never sent**: `storage_busy`, `storage_damaged`,
   `storage_failed`, `body_too_large`, `bad_origin`, `busy`,
-  `too_many_connections`, `auth_damaged`, `read_only`, `not_owner`; and
+  `too_many_connections`, `auth_damaged`, `read_only`, `not_owner`,
+  `ledger_stale`; and
   `updatedAt` is `null` before the first save. The page words `409` as
-  "reload", `403 read_only` as "you only look now" (and becomes a reader's
-  page), any other `401` or `403` as "sign in again", and everything else as
-  "check the connection".
+  "reload" - `409 ledger_stale`, from the plan's door, as "the table changed
+  in another window: reload" - `403 read_only` as "you only look now" (and
+  becomes a reader's page), any other `401` or `403` as "sign in again", and
+  everything else as "check the connection".
 
 If a page has to ship before it fits the policy, the policy can be sent as
 report-only for a dated while (`docs/deploy.md`, "If a page breaks under the
