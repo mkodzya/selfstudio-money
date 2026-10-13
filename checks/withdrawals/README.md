@@ -34,7 +34,9 @@ a balance typed for today or for yesterday, withdrawals ticked in «Что из 
 and founders' rows dated on the balance's day.
 
 - `engine.mjs` - the engine of a page as a node module.
-- `lib.cjs` - rows, plans and ledgers made by hand, and `mk(Live)`: `wr` and `page` change a plan the page's way
+- `lib.cjs` - rows, plans and ledgers made by hand; `bare(M)`, which takes out of a model every field the page
+  has gained since the page of before, so that the rest is compared byte for byte (a new field of the model is
+  added there, or these runs report it as a difference); and `mk(Live)`: `wr` and `page` change a plan the page's way
   (see, change, keep - `Plan.edit`), `raw` is the bare writer: a page from before the rule.
 - `gen.cjs` - seeded random plans and ledgers.
 

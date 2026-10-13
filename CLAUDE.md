@@ -339,7 +339,9 @@ a deploy:
   change to how withdrawals are dealt, or to whether a row of a balance's
   day is inside it, must keep four things**: a plan with no memory in force
   is read as it always was - the model differs by the two fields the rules
-  add, `item.saw` and `item.sawDay`, and by nothing else; a change to
+  add, `item.saw` and `item.sawDay` (and by what the page has gained since
+  for other reasons - `bare` in `checks/withdrawals/lib.cjs` names every
+  such field), and by nothing else; a change to
   another line never moves a withdrawal whose mark counts; it never moves a
   taking of a balance's day into the balance or out of it, where the
   marked withdrawal and the row are of one account; and no ledger row gives
@@ -359,6 +361,17 @@ a deploy:
   things go past them as it is: «Отменить» and the plan loaded from the old
   «Касса», which put a whole plan in the place of this one, and a name
   trimmed as the cursor leaves its row, which changes no count.
+- **What was paid outside the plan is shown, never counted** (the owner's
+  decision of 13 October 2026). A row of the table that closed no line and
+  used up no withdrawal stands in its month of «Касса», in the list of its
+  block, as a paid row with the words «вне плана» (`months.by[ym].off` in
+  the model, the rows by list). It is a fact and no line: no figure of the plan counts it,
+  nothing is written into a later month because of it, and nothing in it
+  is typed or pressed - rule 1 of the page stands, the plan holds only what
+  a founder wrote. A founder's transfer to his daily account is his taking,
+  inside the withdrawal that holds it (`wd.by`), and never a cost of the
+  studio. **A change that lets such a row into a figure of the plan, or
+  writes a line from it, breaks rule 1**; the check `rv-offplan` holds it.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two

@@ -335,6 +335,10 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 /* What the page worked out by a rule is in muted ink, what is paid is struck through, what is switched off is faint. */
 .cs-rows tr.cs-hist td,.cs-rows tr.cs-done td,.cs-rows tr.cs-gone td{color:var(--text-muted)}
 .cs-rows tr.cs-done .cs-nt,.cs-rows tr.cs-done .cs-at{text-decoration:line-through}
+/* a row of the statements that the plan did not hold: paid, and so drawn like a paid row - but it is nobody's line, and answers to no press */
+.cs-rows tr.cs-out{cursor:default}
+.cs-rows tr.cs-out:hover::before{background:none}
+.cs-rows tr.cs-out .cs-nt,.cs-rows tr.cs-out .cs-at{color:var(--text-secondary)}
 .cs-rows tr.cs-off td,.cs-rows tr.cs-gone td{opacity:.5}
 /* Under a row: what a change has just done, in a line of words, and the row's card. The open row and its card are
    one block between two dark lines. */
@@ -2149,7 +2153,13 @@ const Cash=(()=>{
  // Nothing on a row is a sticker: the one thing it may have to say is a line of small words under its name.
  // «каждый месяц» is not said on every row of a month - most rows are - but the last month of a repeat a founder
  // ended says in full what that means, and a row switched off says that it is.
- const remark=it=>it.state==="off"?"выключено — в расчёт не идёт":it.state==="undated"&&!it.carry?"без даты — в расчёт по дням не идёт":Ed.remark(it).replace(/^каждый месяц · в последний раз$/,`повтор закончится после ${monG(it.occ?it.occ.ym:it.ym)}`).replace(/^каждый месяц( · )?/,"").replace(/^(ждали|срок был) .*$/,"");
+ const said=it=>it.state==="off"?"выключено — в расчёт не идёт":it.state==="undated"&&!it.carry?"без даты — в расчёт по дням не идёт":Ed.remark(it).replace(/^каждый месяц · в последний раз$/,`повтор закончится после ${monG(it.occ?it.occ.ym:it.ym)}`).replace(/^каждый месяц( · )?/,"").replace(/^(ждали|срок был) .*$/,"");
+ // Whose takings a withdrawal holds, where that says more than its sum - more than one founder, or a label: a
+ // transfer to a founder's daily account is seen here, inside the withdrawal, and nowhere among the studio's costs.
+ // In a month's list alone: «Сегодня» names no founder beside a figure.
+ const took=it=>{const l=it.wd&&Array.isArray(it.wd.by)?it.wd.by:[];if(!l.length||(l.length===1&&!l[0].l))return "";
+  return l.slice(0,6).map(x=>`${FN[x.c]||x.c}${x.l?" "+x.l:""} ${fmt(Math.round(x.gbp))}`).join(" · ")+(l.length>6?` и ещё ${l.length-6}`:"");};
+ const remark=it=>{const t=said(it),w=it.wd?took(it):"";return !w?t:/^взято /.test(t)?t+": "+w:!t&&it.state==="done"?"взято: "+w:t;};
  const rowCls=it=>["cs-r",it.kind!=="typed"?"cs-hist":"",it.state==="done"?"cs-done":"",it.state==="missed"||it.state==="doubt"?"cs-gone":"",it.state==="off"?"cs-off":""].filter(Boolean).join(" ");
  // The row whose card stands open under it.
  const isOpen=it=>{const e=Ed.open();return !!e&&e.k==="row"&&e.id===it.id&&(e.at||"")==="plan";};
@@ -2187,6 +2197,24 @@ const Cash=(()=>{
    <td class="m r cs-gbp" data-cs-gbp>${gbpText(it)}</td>
    <td class="cs-rm" data-cs-rm>${esc(remark(it))}</td></tr>`;
  }
+ // What was paid outside the plan (the owner's choice of 13 October 2026, variant «Б» of the quick build): a row of
+ // the statements that closed no line stands in the list of its block, by its date, drawn as a paid row with the
+ // words «вне плана». It is a fact of the table and no line of the plan: nothing in it is typed, it opens no card,
+ // and no figure of the plan counts it.
+ const off=k=>{const o=(M.months.by[cu.month]||{}).off;return o?o.by[k]:null;},offRows=k=>(off(k)||{rows:[]}).rows;
+ function outHTML(r,k){
+  const sum=Math.abs(r.amt).toLocaleString("en-GB",{maximumFractionDigits:2}),say=["вне плана",r.back?"возврат":"",r.prov?"ждёт в «Разборе»":""].filter(Boolean).join(" · ");
+  return `<tr class="cs-r cs-done cs-out" data-cs-out="${esc(r.id)}" data-cs-k="${k}">
+   <td class="cs-dt"><span class="cs-dd" data-cs-d="${esc(r.d)}">${dRu(r.d)}</span></td>
+   <td class="cs-nmc"><div class="cs-nm"><i class="sw" style="background:${bcol(r.bank)}" title="${esc(r.bank)}"></i><span class="cs-nt">${esc(r.name||"(без названия)")}</span></div></td>
+   <td class="r cs-amc"><span class="cs-at">${r.back?"−":""}${sum}</span></td><td class="cs-cur"><span class="cs-ct">${esc(r.cur)}</span></td>
+   <td class="cs-mo"></td><td class="m r cs-gbp">${r.cur!=="GBP"?fmt(Math.abs(r.gbp)):""}</td>
+   <td class="cs-rm">${esc(say)}</td></tr>`;
+ }
+ // The rows of a section in the order they are read: the plan's lines as the engine has them, and each row from
+ // outside the plan before the first line dated after it.
+ const mixed=(rows,outs)=>{const l=rows.map(it=>({it})),o=outs.slice().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
+  o.forEach(r=>{let i=l.findIndex(x=>x.it&&x.it.date&&x.it.date>r.d);if(i<0){i=l.findIndex(x=>x.it&&!x.it.date);if(i<0)i=l.length;}l.splice(i,0,{r});});return l;};
  // The row somebody is typing into is not rebuilt — that would take the box out from under the cursor. Only what
  // follows from the typing is brought up to date around the boxes.
  function derive(tr,it){
@@ -2198,7 +2226,8 @@ const Cash=(()=>{
  const mon=k=>(M.months.by[cu.month]||{})[k]||{rows:[],expected:0,done:0};
  // «Дивиденды» is one line for what the founders take and for their personal taxes; its total says what part is tax.
  const ptaxOf=mo=>round2(mo.rows.reduce((a,id)=>a+(by[id]&&by[id].ptax?by[id].exp:0),0));
- const totalHTML=k=>{const mo=mon(k),pt=k==="div"?ptaxOf(mo):0;return mo.expected?lv(`mon.${k}.exp`,mo.expected,fmt(mo.expected))+(mo.done?` · из них ${SEC[k].done} ${lv(`mon.${k}.done`,mo.done,fmt(mo.done))}`:"")+(pt>0.5?` · в т.ч. личные налоги ${lv("mon.div.ptax",pt,fmt(pt))}`:""):"—";};
+ const totalHTML=k=>{const mo=mon(k),pt=k==="div"?ptaxOf(mo):0,z=off(k),o=z&&z.rows.length?`вне плана ${lv(`mon.${k}.off`,z.gbp,fmt(z.gbp))}`:"";
+  return mo.expected?lv(`mon.${k}.exp`,mo.expected,fmt(mo.expected))+(mo.done?` · из них ${SEC[k].done} ${lv(`mon.${k}.done`,mo.done,fmt(mo.done))}`:"")+(pt>0.5?` · в т.ч. личные налоги ${lv("mon.div.ptax",pt,fmt(pt))}`:"")+(o?" · "+o:""):o||"—";};
  // What a tick has just done, said under its row until the plan changes again: where the repeat was switched off
  // because the month already holds a row of the same name, that the repeat will end, that a change was this
  // month's alone — each with the one button that takes it further or back.
@@ -2221,20 +2250,20 @@ const Cash=(()=>{
  // «Подписки» is one line of words until it is asked for: how many are still to be charged this month, for how much
  // and which, and which are charged already. A dozen rows of ten pounds each are a twentieth of the month's money
  // and were a third of its page.
- const subsSay=rows=>{const gone=rows.filter(it=>it.state==="done"),todo=rows.filter(it=>it.state!=="done"&&it.exp>0),rest=rows.filter(it=>it.state!=="done"&&!(it.exp>0));
+ const subsSay=rows=>{const gone=rows.filter(it=>it.state==="done"),todo=rows.filter(it=>it.state!=="done"&&it.exp>0),rest=rows.filter(it=>it.state!=="done"&&!(it.exp>0)),out=offRows("subs");
   const names=l=>l.slice(0,12).map(it=>it.name||"(без названия)").join(", ")+(l.length>12?` и ещё ${l.length-12}`:"");
-  return [todo.length?`Ещё ${todo.length} на ${fmt(Math.round(todo.reduce((a,it)=>a+it.exp-it.expDone,0)))}: ${names(todo)}.`:"",gone.length?`${todo.length?"Уже списаны":"Все списаны"}: ${names(gone)}.`:"",rest.length?`Не в расчёте: ${names(rest)}.`:""].filter(Boolean).join(" ");};
+  return [todo.length?`Ещё ${todo.length} на ${fmt(Math.round(todo.reduce((a,it)=>a+it.exp-it.expDone,0)))}: ${names(todo)}.`:"",gone.length?`${todo.length?"Уже списаны":"Все списаны"}: ${names(gone)}.`:"",rest.length?`Не в расчёте: ${names(rest)}.`:"",out.length?`Вне плана: ${names(out)}.`:""].filter(Boolean).join(" ");};
  function section(k,adding){
-  const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k);
+  const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k),outs=offRows(k),all=rows.length+outs.length;
   // Folded: only «Подписки», only while it has rows, and never over a card or «+ новая подписка» standing open in it.
-  const fold=k==="subs"&&rows.length>0&&!cu.subs&&!adding&&!rows.some(isOpen);
-  const body=rows.map(it=>{const card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td>${card}</td></tr>`:"");}).join("")||`<tr class="cs-none"><td class="note">${k==="subs"?"В этом месяце подписок нет.":"В этом месяце строк нет."}</td></tr>`;
+  const fold=k==="subs"&&all>0&&!cu.subs&&!adding&&!rows.some(isOpen);
+  const body=mixed(rows,outs).map(x=>{if(x.r)return outHTML(x.r,k);const it=x.it,card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td>${card}</td></tr>`:"");}).join("")||`<tr class="cs-none"><td class="note">${k==="subs"?"В этом месяце подписок нет.":"В этом месяце строк нет."}</td></tr>`;
   // Under «Налоги»: what the month itself accrues, which is not what is paid in it.
   const foot=tax&&tax.gbp>0.5?`<p class="note cs-secfoot" id="cs-taxfoot">За ${monL(cu.month)} начислено ${lv("mon.tax.accrued",tax.gbp,fmt(Math.round(tax.gbp)))} — срок позже: ${esc(tax.rules.map(x=>`${x.name} ${dRu(x.due)}`).join(" · "))}.</p>`:"";
   return `<section class="card cs-rows" id="cs-sec-${k}"><h2>${SEC[k].title}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
-   ${k==="subs"&&rows.length?`<div class="cs-fold" id="cs-subs-fold"${fold?"":" hidden"}><p class="note" id="cs-subs-say">${esc(subsSay(rows))}</p><button class="sm ghost" data-cs-fold aria-expanded="false">Показать ${count(rows.length,"строку","строки","строк")}</button></div>`:""}
+   ${k==="subs"&&all?`<div class="cs-fold" id="cs-subs-fold"${fold?"":" hidden"}><p class="note" id="cs-subs-say">${esc(subsSay(rows))}</p><button class="sm ghost" data-cs-fold aria-expanded="false">Показать ${count(all,"строку","строки","строк")}</button></div>`:""}
    <div class="tbl"${fold?" hidden":""}><table><tbody>${body}</tbody></table></div>${foot}
-   <div class="row cs-addrow"${fold?" hidden":""}><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">${k==="subs"?"+ новая подписка":"+ новая строка"}</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}${k==="subs"&&rows.length?'<button class="sm ghost" data-cs-fold aria-expanded="true">Свернуть</button>':""}</div>${adding?Ed.sheet("add"):""}</section>`;
+   <div class="row cs-addrow"${fold?" hidden":""}><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">${k==="subs"?"+ новая подписка":"+ новая строка"}</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}${k==="subs"&&all?'<button class="sm ghost" data-cs-fold aria-expanded="true">Свернуть</button>':""}</div>${adding?Ed.sheet("add"):""}</section>`;
  }
  // ---- «Подставить по прошлым месяцам» ----
  // The one helper, opened by a founder and never run by the page: who was paid, or paid, in four of the last six
@@ -2345,16 +2374,21 @@ const Cash=(()=>{
   const back=left.length?`<p class="note cs-back" id="cs-back">В прошлых месяцах не закрыто: ${count(left.length,"строка","строки","строк")} на ${fmt(left.reduce((a,it)=>a+Math.abs(it.full),0))}. <button class="sm ghost" data-cs-mon="${last}">${ymFull(last)}</button></p>`:"";
   // A month gone by is the plan's page of it, not the month's accounts: what moved outside the plan is not here.
   // The page says so, and where the whole month is, rather than let its totals be read as the month's.
-  const past=m<ymT?'<p class="note cs-back" id="cs-past">Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».</p>':"";
+  // Since 13 October 2026 a month the plan was kept in says that too, row by row («вне плана»), and in one sentence
+  // at its head; an earlier month still holds the plan's rows alone, and says so.
+  const mo=M.months.by[m]||{},of=mo.off,pay=n=>count(n,"платёж","платежа","платежей");
+  const past=m<ymT&&!of?'<p class="note cs-back" id="cs-past">Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».</p>':"";
+  const outs=of&&of.nIn+of.nOut?`<p class="note cs-back" id="cs-off">Оплачено вне плана в ${monP(m)}: ${[of.nOut?`ушло ${lv("mon.off.out",of.out,fmt(of.out))} (${pay(of.nOut)})`:"",of.nIn?`пришло ${lv("mon.off.in",of.in,fmt(of.in))} (${pay(of.nIn)})`:""].filter(Boolean).join(", ")}. Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.</p>`:"";
+  const wait=mo.wait&&mo.wait.n?`<p class="note cs-back" id="cs-wait">Ещё ${pay(mo.wait.n)} на ${fmt(mo.wait.gbp)} за ${monL(m)} ${plural(mo.wait.n,"ждёт","ждут","ждут")} в «Разборе»: статьи пока нет, поэтому в списках ${mo.wait.n===1?"его":"их"} нет. <button class="sm ghost" data-tab="inbox">Открыть «Разбор»</button></p>`:"";
   // The plan holds only what a founder wrote, so a month may be empty. Thirty rows are a lot to type: the helper
   // is one press away at the head of the tab, and is offered again, in full view, by a month nobody has written.
   const written=M.items.some(it=>it.src!=="tax"&&it.ym===m),hb='<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>';
   const help=cu.helper?helperHTML():m>=ymT&&!written?`<div class="empty cs-nomonth" id="cs-nomonth"><b>В ${monP(m)} пока ничего не вписано</b>В плане только то, что вписали вы. Впишите строки ниже — или начните с тех, кому платят каждый месяц.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-cs-helper>Подставить по прошлым месяцам</button></div></div>`:`<div class="row cs-helpbar">${hb}<span class="note">список тех, кому платят каждый месяц, — отметьте, кого вписать</span></div>`;
   // What comes in on the left, what goes out on the right.
   const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)).join("")}</div>`;
-  return `<div id="cs-plan" class="stack">${sw}${back}${past}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
+  return `<div id="cs-plan" class="stack">${sw}${back}${past}${outs}${wait}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
-   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
+   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Подписки</b> — те же прочие расходы в своей графе; она свёрнута в одну строку, пока её не откроют. Строку переносит туда и обратно галочка «это подписка» в её карточке.
     <b>Даты.</b> Строка без даты остаётся в своём месяце, но в расчёт по дням не идёт.</p>
@@ -2613,6 +2647,13 @@ const Cash=(()=>{
    if(it&&it.ym===cu.month)tr.insertAdjacentHTML("afterend",rowHTML(it));
    tr.remove();});
   SECS.forEach(k=>{const sec=q("#cs-sec-"+k);if(!sec)return;sec.querySelector("[data-cs-tot]").innerHTML=totalHTML(k);});
+  // (a sum typed in a line may close it with a row that stood outside the plan, or let one go: those rows are
+  // drawn again where they belong - there is no box in them to take from under a cursor)
+  root.querySelectorAll("#cs-plan tr[data-cs-out]").forEach(tr=>tr.remove());
+  SECS.forEach(k=>{const body=q(`#cs-sec-${k} tbody`);if(!body)return;offRows(k).slice().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0).forEach(r=>{
+   const at=[...body.querySelectorAll("tr[data-cs-id]")].find(tr=>{const it=by[tr.dataset.csId];return !!it&&(!it.date||it.date>r.d);});
+   const none=body.querySelector("tr.cs-none");if(none)none.remove();
+   if(at)at.insertAdjacentHTML("beforebegin",outHTML(r,k));else body.insertAdjacentHTML("beforeend",outHTML(r,k));});});
   const f=q("#cs-subs-say");if(f)f.textContent=subsSay(mon("subs").rows.map(id=>by[id]).filter(Boolean));
   const c=q("#cs-cov");if(c)c.innerHTML=cover();
  }
@@ -2800,6 +2841,7 @@ const Cash=(()=>{
   if(c("input,button,select,textarea,label,a,summary"))return;
   // A press on a row of a month, anywhere but in its sum, opens the row's card under it - and shuts it again.
   // (The second press of a double click is not a second answer: it would shut what the first has just opened.)
+  if(c("#cs-plan tr.cs-out"))return;
   if((x=c("#cs-plan tr.cs-r")))return e.detail>1?undefined:Ed.row(x.dataset.csId,"plan");
   if((x=c("[data-cs-row]"))){const d=x.dataset.csRow,lines=()=>d==="__past"?null:q(`#cs-stmt tr[data-cs-row="${d}"] + tr.cs-items ul`);
    if(d!=="__past"&&cu.open.has(d))return fold(lines(),()=>{cu.open.delete(d);draw();});
@@ -3246,7 +3288,9 @@ const Cash=(()=>{
 //                                  on); last — this is that month
 //    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
 //                                  the plan document); dated, or — in a plan from before — without a date
-//    wd                            for a withdrawal: {from, to, got} — its window and what was taken (native)
+//    wd                            for a withdrawal: {from, to, got, by} — its window and what was taken (native);
+//                                  by[{c, l, gbp}] — whose takings it holds and under which label, in pounds, the
+//                                  largest first: a transfer to a founder's daily account is {c:"misha", l:"daily"}
 //    saw                           for a withdrawal whose mark can count in «Денег сейчас» - it waits for its
 //                                  statement, and is later than its account's balance: what it holds of every taking
 //                                  it may count, as a memory would say it (paid.saw) - {w?, from, to, rows:[[ref,
@@ -3374,7 +3418,15 @@ const Cash=(()=>{
 //                                  unless opts.months says otherwise), any earlier month that holds a line, any later
 //                                  one that holds a stored row. Rows that repeat are written out that far too. by[ym][list] = {rows[], expected, done}: line ids in date order
 //                                  (undated last), for every month that holds a line. by[ym].tax = {gbp, rules[{id,
-//                                  name, gbp, due}]}: what the month itself accrues in taxes, and when that falls due
+//                                  name, gbp, due}]}: what the month itself accrues in taxes, and when that falls due.
+//                                  What was PAID outside the plan, in every month from the one the plan was first
+//                                  written in to the running one: by[ym].off = {in, out, nIn, nOut, by{[list]}} —
+//                                  the month's sums and counts, and by[list] = {rows[{id, d, name, amt, cur, gbp,
+//                                  bank, prov, back}], gbp}: the rows of the table that closed no line and used up
+//                                  no withdrawal, by the section of their block (gbp is signed: a refund, `back`,
+//                                  is negative; prov — recognised and still in «Разбор»); by[ym].wait = {n, gbp} —
+//                                  what lies in «Разбор» with no block yet. Shown, and in no figure of the plan.
+//                                  Absent in an earlier month and in a month that has not come
 //  clients[]                       {key, name, mark:"vat"|"no", set, last, banks[{bank, vat}], show, rows[], odd} —
 //                                  every revenue label of the table and every name of a written inflow. mark is the
 //                                  founder's (set:true) or proposed; banks — the proposal per bank he has paid
@@ -4566,6 +4618,26 @@ const Live=(()=>{
   // начислено … — срок позже». The running month's is month.accrued.
   Object.keys(months).forEach(m=>{const a=m+"-01",b=mEnd(m),rs=RULES.filter(counts).map(rule=>({id:rule.id,name:rule.name,gbp:r2(factsOf(rule,a,b).g+sum(accr,c=>c.rule===rule.id&&c.day>=a&&c.day<=b?c.v:0)),due:dueOf(rule,perOf(rule.per,m))})).filter(x=>x.gbp>0.005);
    months[m].tax={gbp:r2(sum(rs,x=>x.gbp)),rules:rs};});
+  // What the statements show that the plan did not hold (the owner's decision of 13 October 2026: «чтобы я видел
+  // всю картину когда я там»). «Касса» is the plan's page, and the plan still holds only what a founder wrote; but a
+  // month is read whole there, so each month also says what was PAID in it outside the plan: the rows of the table -
+  // filed, or recognised and still in «Разбор» - that closed no line and were used by no withdrawal (`off`, with
+  // the rows by the section of their block). They are shown and counted in no figure of the plan: the line, «Можно вывести»
+  // and «Денег сейчас» are what they were - the money is in the balances already, these rows are facts. A founder's
+  // row is one of them only where no withdrawal had room for it: a transfer to a founder's daily account is his
+  // taking, like any row of his block, and never a cost of the studio (the same day's word). A row that used a
+  // withdrawal up in part is that withdrawal's, whole. Months before the plan was first written show none - there
+  // every row would be one - and neither does a month that has not come. `wait` is what still lies in «Разбор»
+  // with no block of its own: it can be shown in no section until somebody sorts it.
+  {const c0min=items.reduce((a,it)=>it.src!=="tax"&&it.c0>0&&it.c0<a?it.c0:a,Infinity),began=isFinite(c0min)?dayOf(c0min).slice(0,7):ymT;
+   const subLk=new Set(items.filter(it=>it.sub&&it.lk).map(it=>it.lk));
+   const secOfRow=r=>r.c==="rev"?"inflows":r.c==="cogs"?"team":r.c==="tax"?(r.sk?"div":"taxes"):FOUNDERS.includes(r.c)?"div":subLk.has(r.lk)?"subs":"other";
+   const nameOfRow=r=>FOUNDERS.includes(r.c)?FN[r.c]+(r.l?" · "+r.l:""):r.l;
+   Object.keys(months).forEach(m=>{if(m<began||m>ymT)return;const o=months[m];o.off={in:0,out:0,nIn:0,nOut:0,by:{}};SECS.forEach(k=>{o.off.by[k]={rows:[],gbp:0};});
+    const w=inb.filter(r=>r.d.slice(0,7)===m&&!isProv(r)&&r.c!=="skip"&&!r.maybe&&!r.twin&&!r.rep);o.wait={n:w.length,gbp:r2(sum(w,r=>Math.abs(+r.a||0)))};});
+   pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||used.has(r.id)||!KEYS.includes(r.c))return;const k=secOfRow(r),z=o.off.by[k];
+    z.rows.push({id:r.id,d:r.d,name:nameOfRow(r),amt:r2(Math.abs(r.o?r.o.a:r.a)),cur:r.o?r.o.cur:"GBP",gbp:r2(r.a),bank:r.b,prov:r.prov,back:r.ret});z.gbp=r2(z.gbp+r.a);
+    if(k==="inflows"){o.off.in=r2(o.off.in+r.a);o.off.nIn++;}else{o.off.out=r2(o.off.out+r.a);o.off.nOut++;}});}
   // R1. A row that is about to repeat must not count a later month twice: the later months that already hold a
   // one-off row of the same label are named here, for the tick to switch the repeat off in them. What is left of a
   // line paid in part (carry) is never such a row, dated or not: it is a debt beside the month's own line, not that
@@ -4660,6 +4732,9 @@ const Live=(()=>{
 
   // ---- the model, as plain data ----
   const doneDays={},since31=plus(T,-31);
+  // Whose takings a withdrawal holds, and under which label: «Mika», «Misha · daily», «Vanya · tfl» - in pounds.
+  const tookBy=it=>{const g={};(it.took||[]).forEach((v,id)=>{const r=byPool[id];if(!r||!(v>0))return;const k=r.c+"|"+r.l;(g[k]||(g[k]={c:r.c,l:r.l,gbp:0})).gbp+=v;});
+   return Object.keys(g).map(k=>({c:g[k].c,l:g[k].l,gbp:r2(g[k].gbp)})).sort((a,b)=>b.gbp-a.gbp||(a.c+"|"+a.l<b.c+"|"+b.l?-1:1));};
   const outItem=it=>{const d=it.done,p=it.paid;let done=null;
    if(d){const f=d.rows.length?anyRow[d.rows[0]]:null,day=d.by==="row"?d.on:it.date||d.on;done={by:d.by,on:d.on,day,rows:d.rows.slice(),note:d.note,label:f?alias(f.l):"",over:d.over||0,got:d.got!=null?r2(d.got):0};if(it.cur!=="GBP"&&it.dg==null){const q=doneRate(it);if(q.by){done.fx=q.r;done.fxDay=q.day;done.fxBy=q.by;}}if(day&&day>=since31)(doneDays[day]||(doneDays[day]=[])).push(it.id);}
    const dl=it.src==="occ"&&!it.sk&&DL[it.chain]?DL[it.chain]:null;
@@ -4667,7 +4742,7 @@ const Live=(()=>{
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
     mark:p?{on:isD(p.on)?p.on:"",at:+p.at||0,by:String(p.by||""),counts:!!it.counts,cov:it.markCov||"",amt:it.pamt!=null?r2(it.pamt):null}:null,part:it.got>0&&!d?{got:r2(it.got),of:r2(it.amt*it.vk)}:null,hint:it.hint,rows:it.match.slice(),fixed:it.fixed,c0:it.c0,who:it.who,
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
-    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur))}:null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
+    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur)),by:tookBy(it)}:null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
