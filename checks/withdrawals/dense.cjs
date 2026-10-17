@@ -6,10 +6,15 @@
 //       that changes nothing writes nothing): the model does not move; K-doc: a plan without a memory is given
 //       none; K-fix: a second see+keep changes nothing more
 //   U   an upload with a memory in force gives the model the walk of develop would give for rows nobody remembers?  (not held - counted only)
+//   N, D the plan and the table are read as they are with N and D written out (lib.cjs, `named`, `toOwn`), byte for byte
+//   W   what lib.cjs, `wCheck`, holds of every record and every rest (W1, W2)
+// Every other life is given what the owner decided on 17 October 2026, by a stream of its own: a withdrawal or two
+// named after a founder and nobody's by choice (N), and moves to a founder's Daily or Monthly account (D), before
+// October and in it. Records (W1) come by themselves: the marks are put on withdrawals of the past, near rows.
 // usage: ENGINES=<folder> node checks/withdrawals/dense.cjs <seeds> [steps]
 const E = __dirname;   // (written by the fourth independent reading of the rule)
 const { rng, FOUNDERS, day, T } = require(E + '/gen.cjs');
-const { ms, ledger, clone, item, mk, filed, wd, row, plan3, bal, reach, engines, bare } = require(E + '/lib.cjs');
+const { ms, ledger, clone, item, mk, filed, wd, row, plan3, bal, reach, engines, bare, named, toOwn, wCheck, FX } = require(E + '/lib.cjs');
 const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
 const { C, wr, raw, page, see, keep } = mk(Live);
 const SEEDS = +process.argv[2] || 200, STEPS = +process.argv[3] || 14, BY = 'Mika', T0 = ms('2026-10-01T08:00:00Z');
@@ -35,11 +40,19 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     else div.push(wd('w' + i, pick([1000, 1500, 2500, 4000]), day(T, int(-9, 6)), more)); }
   const allTx = []; const nR = int(8, 18);
   for (let i = 0; i < nR; i++) allTx.push(filed('f' + i, day(T, int(-14, 0)), -pick([200, 400, 500, 800, 1000, 1200]), pick(FOUNDERS), '', { at: T0 + int(0, 11) * 864e5 + i }));
+  if (seed % 2 === 0) { const X = rng(seed * 104729 + 17), xp = (a) => a[Math.floor(X() * a.length)], xi = (lo, hi) => lo + Math.floor(X() * (hi - lo + 1)), SAY = { mika: 'Mika', misha: 'Миша', vanya: 'Vanya' };
+    div.forEach((r) => { if (!r.whose && X() < 0.4) r.name = xp([SAY[xp(FOUNDERS)], ' ' + SAY[xp(FOUNDERS)].toUpperCase()]); });
+    for (let i = xi(1, 3); i > 0; i--) { const k = xp(FOUNDERS), v = xp([60, 150, 400]), r = filed('dly' + i, day(T, xi(-16, 0)), -v, k, xp(['daily', 'monthly', '']), { at: T0 + xi(0, 11) * 864e5 + i });
+      r.o.t = xp([`${v},00 GBP перемещено сюда: ${SAY[k]} Daily`, `Moved ${v}.00 GBP to ${SAY[k]} Monthly`, r.l || 'daily', `Card transaction of ${v}.00 GBP issued by Lunch Place`]); allTx.push(r); } }
   allTx.sort((a, b) => a.at - b.at);
   let shown = Math.max(2, Math.floor(nR * 0.5)), tx = allTx.slice(0, shown), now = ms(T + 'T09:00:00Z');
   let P = plan3({ banks: [bal('Wise', 'GBP', 60000, day(T, -12))], div }), L = ledger(tx, []), M = C(L, P, T);
   up('lives');
-  const check = (tag) => { M = C(L, P, T); const c = conserve(M, L); if (c) fail('D: ' + c + ' (' + tag + ')', seed); if (hasMem(P)) up('steps with a memory'); else up('steps without'); };
+  const check = (tag) => { M = C(L, P, T); const c = conserve(M, L); if (c) fail('D: ' + c + ' (' + tag + ')', seed); if (hasMem(P)) up('steps with a memory'); else up('steps without');
+    if (process.env.ON === 'dev') return;
+    const L2 = toOwn(L), P2 = named(P);
+    if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(JSON.parse(JSON.stringify(Live.compute(clone(L2), clone(P2), T, { H: 30 })))) !== JSON.stringify(M)) fail('N/D: not the model with them written out (' + tag + ')', seed); }
+    const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed); };
   for (let q = 0; q < 2; q++) { const open = wdsOf(M).filter((it) => it.open && it.on); if (!open.length) break; P = wr(P, 'mark', pick(open), T, now + q, BY); check('first marks'); }
   let lastKind = 'start', tableSince = false;
   for (let step = 0; step < STEPS; step++) {

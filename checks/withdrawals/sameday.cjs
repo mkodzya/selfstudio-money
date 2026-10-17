@@ -17,11 +17,20 @@
 //   D. No row gives the withdrawals more than its sum; none holds more than its own sum or than its rows' worth.
 //   K. The seeing and the keeping around no change at all move no figure, and write nothing into a plan without a
 //      memory.
+//   N, D. The plan and the table are read as they are with N and D written out (lib.cjs, `named`, `toOwn`), byte for
+//      byte; and F is asked of them, and only where no withdrawal is a record (W1): those are counted.
+//   W. What lib.cjs, `wCheck`, holds of every record and every rest (W1, W2).
+// Every other life is given what the owner decided on 17 October 2026, by a stream of its own (`news`): withdrawals
+// named after a founder (N); a founder's withdrawal of the balance's days written after the rows that make it and
+// marked - one of the balance's own day among them now and then (W1); a record written before its rows came, whose
+// nearer row another line holds by hand (W1 and the record's own memory of a balance's day - the review of
+// 17 October); and moves to a Daily account dated on the balance's day and before it, moves back from one, and a
+// direct debit under «daily» (D).
 // The counters at the end say how often each was looked at, how often a memory of a balance's day was in the plan,
 // and how often the page of before (ON=dev) would have moved a figure - there S must fail.
 // usage: ENGINES=<folder> [STEPS=n] [ON=dev] node checks/withdrawals/sameday.cjs <lives>
 const SEEDS = +process.argv[2] || 400, STEPS = +process.env.STEPS || 8;
-const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines, bare } = require('./lib.cjs');
+const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines, bare, named, toOwn, wCheck, FX } = require('./lib.cjs');
 const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
 const { rng, FOUNDERS, day } = require('./gen.cjs');
 const { C, wr, page, see, keep } = mk(Live), d = mk(DEV);
@@ -74,7 +83,34 @@ function make(seed) {
     tx.push(chance(0.9) ? filed('f' + i, d0, amt, pick(FOUNDERS), '', { at, b, cur }) : filed('f' + i, d0, amt, 'other', 'Thing ' + i, { at, b, cur }));
   }
   if (chance(0.6)) tx.push(reach('Wise', chance(0.7) ? T : asOf, 'GBP', UP + 50));
+  if (seed % 2 === 0) news(seed, div, tx, asOf, AT, UP);
   return { L: ledger(tx, []), P: plan3({ banks, div }), R, pick, int, chance, asOf, UP };
+}
+function news(seed, div, tx, asOf, AT, UP) {
+  const X = rng(seed * 7919 + 1017), pick = (a) => a[Math.floor(X() * a.length)], int = (lo, hi) => lo + Math.floor(X() * (hi - lo + 1)), chance = (p) => X() < p;
+  const SAY = { mika: ['Mika', 'Мика'], misha: ['Misha', 'Миша'], vanya: ['Vanya', 'Ваня'] };
+  div.forEach((r) => { if (!r.whose && chance(0.35)) r.name = pick(SAY[pick(FOUNDERS)]); });
+  for (let i = int(0, 2); i > 0; i--) {
+    const k = pick(FOUNDERS), d = chance(0.5) ? asOf : day(asOf, -int(1, 4)), amt = pick([1000, 1500, 2000]), c0 = UP + int(1, 5) * 6e5 + i;
+    // the rows that make it: on the page before it was written - this morning's, or the evening's statement
+    const at = chance(0.5) ? AT - int(1, 3) * 864e5 + i : UP - 1000 + i;
+    (chance(0.6) ? [amt] : [amt * 0.4, amt * 0.6]).forEach((v, j) => tx.push(filed('rc' + i + '-' + j, chance(0.6) ? d : day(d, -int(0, 2)), -v, k, '', { at })));
+    div.push(wd('rc' + i, amt, d, { name: chance(0.5) ? pick(SAY[k]) : 'Вывод rc' + i, ...(chance(0.5) ? { whose: k } : {}), c0, m: { t: c0, by: BY }, paid: { on: chance(0.5) ? T : d, at: c0 + 6e4, by: BY } }));
+  }
+  for (let i = int(0, 2); i > 0; i--) { const k = pick(FOUNDERS), v = pick([100, 250]), r = filed('dl' + i, chance(0.6) ? asOf : day(asOf, -int(1, 15)), -v, k, pick(['daily', 'monthly', '']), { at: chance(0.7) ? UP + i : AT - 864e5 + i });
+    r.o.t = pick([`${v},00 GBP перемещено сюда: ${SAY[k][1]} Daily`, `Moved ${v}.00 GBP to ${SAY[k][0]} Daily`, r.l || 'daily', `Card transaction of ${v}.00 GBP issued by Lunch Place`]); tx.push(r); }
+  // (drawn last, so that what is drawn above is as it was)
+  // A record written this morning and marked after the balance, whose rows come with the evening's statement: one on
+  // the balance's own day, and one of the record's own day - nearer, and so the one it would take - tied by hand to
+  // another line, «Вывод». Changing that line (deleting it, switching it off) sets the nearer row loose: the record
+  // must keep the taking of the balance's day it holds (its day memory), or that taking moves into the balance or out
+  // of it with nothing new from the bank (S).
+  if (chance(0.5)) { const k = pick(FOUNDERS), d = day(asOf, -1), amt = pick([350, 1000]), c0 = AT + 18e5;
+    tx.push(filed('tf', asOf, -(amt + 2), k, '', { at: UP + 7 }), filed('tg', d, -amt, k, '', { at: UP + 8 }));
+    div.push(wd('ta', amt, d, { name: 'Вывод', tx: ['tg'], c0, m: { t: c0, by: BY } }), wd('tb', amt, d, { name: pick(SAY[k]), c0, m: { t: c0, by: BY }, paid: { on: asOf, at: AT + 36e5, by: BY } })); }
+  // Moves back from a Daily account (internal from October, whichever way), and a direct debit under «daily» (his).
+  for (let i = int(0, 2); i > 0; i--) { const k = pick(FOUNDERS), v = pick([40, 90]), back = chance(0.6), r = filed('db' + i, chance(0.6) ? asOf : day(asOf, -int(1, 15)), back ? v : -v, k, 'daily', { at: chance(0.7) ? UP + 20 + i : AT - 864e5 + i });
+    r.o.t = back ? pick([`Moved ${v}.00 GBP from ${SAY[k][0]} Daily`, `${v},00 GBP перемещено отсюда: ${SAY[k][1]} Daily`]) : 'Direct debit to Fitness Club'; tx.push(r); }
 }
 for (let seed = 1; seed <= SEEDS; seed++) {
   const g = make(seed), { pick, int, chance } = g;
@@ -86,7 +122,13 @@ for (let seed = 1; seed <= SEEDS; seed++) {
   const check = (tag) => {
     M = C(L, P, T);
     const c = conserve(M, L); if (c) fail('D: ' + c + ' (' + tag + ')', seed);
-    if (!hasMem(P)) { up('F'); if (strip(M) !== JSON.stringify(d.C(L, P, T))) fail('F: not the model of before with no memory (' + tag + ')', seed); } else { up('steps with a memory'); if (dayMem(P)) up('steps with a memory of a balance\'s day'); }
+    let L2 = L, P2 = P;
+    if (process.env.ON !== 'dev') {
+      L2 = toOwn(L); P2 = named(P);
+      if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(JSON.parse(JSON.stringify(Live.compute(clone(L2), clone(P2), T, { H: 30 })))) !== JSON.stringify(M)) fail('N/D: not the model with them written out (' + tag + ')', seed); }
+      const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed);
+    }
+    if (!hasMem(P)) { if (M.items.some((it) => it.wd && it.wd.rec)) up('F not asked: a record'); else { up('F'); if (strip(M) !== JSON.stringify(d.C(L2, P2, T))) fail('F: not the model of before with no memory (' + tag + ')', seed); } } else { up('steps with a memory'); if (dayMem(P)) up('steps with a memory of a balance\'s day'); }
   };
   check('start');
   for (let step = 0; step < STEPS; step++) {

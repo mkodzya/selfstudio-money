@@ -177,6 +177,18 @@
 //    the `at` of the statement's rows: the engine lets a row take a mark's
 //    place only if it was uploaded after the mark was made.
 //  · A date the second design leaves open is chosen and said in the check.
+//
+// THE OWNER'S DECISIONS OF 17 OCTOBER 2026 (docs/handoff.md, the entry of that day) have three checks at the end:
+// «records» (N - a withdrawal whose whole name is a founder's is his; W1 - such a withdrawal written after its
+// statement and marked takes its founder's rows near its date; W2 - the rest of a row taken in part), «rest» (W2 in
+// another currency: what was taken and the rest make the row exactly) and «daily» (D - from October a move to a
+// founder's Daily or Monthly account is a transfer between own accounts). What they changed in older checks is
+// rewritten where it stood, with the old arithmetic in a comment: «p12» (the draw called «Mika»), «rv-whose» (rows
+// that had to stay everybody's are called «Вывод Vanya» now), «rv-offplan» (its daily transfer is October's), and
+// rule 23 of `inv` (whose a withdrawal is, by its name too). The review of that work added to them: «records» -
+// Vanya's mark live, so that its double count before W1 is seen, and a rename in the card writes no owner; «daily» -
+// a move back from a Daily account, a direct debit under «daily», and a move that «Разбор» never pairs with a
+// client's payment. What the engine alone holds of it is in checks/withdrawals/cases.cjs.
 import http from 'node:http';
 import fs from 'node:fs';
 import { chromium } from 'playwright';
@@ -575,10 +587,12 @@ function inv(M, P, L) {
   M.items.forEach((it) => { if (it.wd) say(!['late', 'missed'].includes(it.state) && !M.cards.some((cd) => cd.item === it.id), `23: the withdrawal ${it.id} is ${it.state}, or is in a card`); });
   // 23, «Чей вывод» (12 October 2026): the model says of a withdrawal what its row says - a founder, or nobody - and
   // of nothing else; and a withdrawal that is somebody's holds no row of another block, save one a founder named by
-  // hand. (The second half needs the ledger, which C() hands in and holds() does not.)
-  const FND = ['mika', 'misha', 'vanya'];
+  // hand. (The second half needs the ledger, which C() hands in and holds() does not.) Since 17 October 2026 (N) a
+  // row says it by its name too: nobody chosen (no `whose`, and not whose:"" - «общий» chosen by hand), and the whole
+  // name one founder's own, in Latin or in Russian, case and spaces aside.
+  const FND = ['mika', 'misha', 'vanya'], NM = new Map([['mika', 'mika'], ['мика', 'mika'], ['misha', 'misha'], ['миша', 'misha'], ['vanya', 'vanya'], ['ваня', 'vanya']]), byName = (n) => NM.get(String(n == null ? '' : n).trim().toLowerCase()) || '';
   M.items.forEach((it) => { const r = (rows[it.src === 'occ' ? it.row : it.id] || {}).r || {};
-    say((it.whose || '') === (it.wd && FND.includes(r.whose) ? r.whose : ''), `23: ${it.id} is not whose its row says`); });
+    say((it.whose || '') === (it.wd ? (FND.includes(r.whose) ? r.whose : r.whose === '' ? '' : byName(r.name)) : ''), `23: ${it.id} is not whose its row says`); });
   if (L) { const blk = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), r.c]));
     M.items.forEach((it) => { if (it.wd && it.whose) say(it.rows.every((id) => blk[id] === it.whose || hand.has(String(id))), `23: ${it.id} is ${it.whose}'s and holds a row of another block`); });
     // … and a row of the table is counted once (13 October 2026): a withdrawal holds no more than its rows are
@@ -1817,7 +1831,12 @@ await run('p12', 'the upgrade v2 → v3: every stored row survives; what leaves 
   same(await up(v2, L), X, '… and pure: the same documents give the same plan');
   // nothing a founder wrote changed its money
   const M = await C(L, X);
-  same([item(M, 'draw').wd !== null, item(M, 'draw').whose, 'whose' in r('draw')], [true, '', false], 'the draw that came from the old plan carries f and is everybody\'s withdrawal: f is not whose it is, and the upgrade writes no owner');
+  // (17 October 2026: the draw is called «Mika», and a withdrawal whose whole name is a founder's is his by that
+  // name - N, the check «records». Until then it was everybody's here. `f`, which the upgrade leaves on it, is read
+  // no more than before: the same draw called «Вывод», with the same f, is everybody's.)
+  const Xn = JSON.parse(JSON.stringify(X)); Xn.div.find((q) => q.id === 'draw').name = 'Вывод';
+  same([item(M, 'draw').wd !== null, item(M, 'draw').whose, 'whose' in r('draw'), item(await C(L, Xn), 'draw').whose, Xn.div.find((q) => q.id === 'draw').f], [true, 'mika', false, '', 'mika'],
+    'the draw that came from the old plan carries f: it is Mika\'s by its name «Mika» alone - called «Вывод», with the same f, it is everybody\'s - and the upgrade writes no owner');
   same(['h|rev|client a|2026-10', 'd1', 'h|rev|client d|2026-10', 'v1', 'x1', 'h|cogs|person b|2026-10', 't1', 't2', 'rent@2026-10', 'rent@2026-11', 'draw'].map((id) => item(M, id) && item(M, id).full), [8500, 850, 4150, 1200, -700, -6000, -3800, -500, -900, -900, -3000],
     '… each line is worth what A counted for it — the row with «+ VAT» too, 1,200 for its 1,000, though «Считать VAT» was off and the rule is: a rule that is off is not worked out, the client pays it all the same (§5.30)');
   same([M.taxes.rate, M.inParts.vat, per(M, 'vat|2026Q4')], [20, 200, null], '… its VAT is inside «Придёт» (£200), and nothing is accrued or reserved for a rule that is off');
@@ -6458,18 +6477,23 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   R = await wr(R, 'onward', await month(R, 'wR3@2026-11'), { amt: 1200 }, 'wR4', TAP, BY);
   same(chain(R).map((x) => x[2]), ['misha', 'vanya', 'vanya', 'vanya'], 'a sum changed «и дальше» moves nobody\'s owner');
   // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is deals an old row into the marked one, and «Денег сейчас» moves with nothing new from the bank. Since 13 October 2026 the page sees what a marked withdrawal holds before it changes the plan and keeps it after, and that no longer happens - the check rv-wdmark, and on the screen below. What is held here is the bare writer, as a page from before that day uses it: the row moves in, and a bank row is still counted once.)
+  // (17 October 2026: a row whose whole name is a founder's is his by that name - N, the check «records». The row
+  // the founder gives away below was called «Vanya» until then, and so everybody's; it is called «Вывод Vanya» now,
+  // which no founder's name is, so that it is everybody's still and the arithmetic is the same: Mika's 2,000 closes
+  // it while it is everybody's; given to Vanya it lets the 2,000 go into the marked «Вывод».)
   const MARK = ms('2026-10-13T10:00:00Z');
-  let Q2 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-12', { blk: 'div', paid: paid(D, MARK) })]) };
+  let Q2 = { ...P, div: P.div.concat([row('wA', 'Вывод Vanya', 2000, '2026-10-08', { blk: 'div' }), row('wB', 'Вывод', 3000, '2026-10-12', { blk: 'div', paid: paid(D, MARK) })]) };
   const L2 = ledP({ tx: [filed('m1', '2026-10-09', -2000, 'mika', '', { at: AT })] });
   let Mq = await C(L2, Q2, D);
-  same([item(Mq, 'wA').state, item(Mq, 'wA').rows, item(Mq, 'wB').wd.got, item(Mq, 'wB').done.by], ['done', ['m1'], 0, 'mark'], 'Mika\'s 2,000 closes the row called «Vanya»; «Вывод», marked, holds nothing');
+  same([item(Mq, 'wA').state, item(Mq, 'wA').rows, item(Mq, 'wB').wd.got, item(Mq, 'wB').done.by], ['done', ['m1'], 0, 'mark'], 'Mika\'s 2,000 closes the row called «Вывод Vanya», which is everybody\'s; «Вывод», marked, holds nothing');
   const marked = [Mq.now, Mq.marksGbp];
   Q2 = await wr(Q2, 'set', item(Mq, 'wA'), { whose: 'vanya' }, MARK + 60000, BY);
   Mq = await C(L2, Q2, D);
   same([Object.keys(Q2.div.find((r) => r.id === 'wB').paid).sort(), item(Mq, 'wA').cash, item(Mq, 'wA').wd.got + item(Mq, 'wB').wd.got, [round2(Mq.now - marked[0]), round2(Mq.marksGbp - marked[1])]], [['at', 'by', 'on'], -2000, 2000, [2000, 2000]],
-    '«Vanya» given to Vanya by a page from before the rule, with «Вывод» marked: his row is open again with its 2,000; Mika\'s 2,000 is counted once - it now stands in the marked «Вывод», whose mark is worth the 1,000 that is left - so «Денег сейчас» is 2,000 higher until a statement passes the mark; the bare writer gives the mark no memory');
+    '«Вывод Vanya» given to Vanya by a page from before the rule, with «Вывод» marked: his row is open again with its 2,000; Mika\'s 2,000 is counted once - it now stands in the marked «Вывод», whose mark is worth the 1,000 that is left - so «Денег сейчас» is 2,000 higher until a statement passes the mark; the bare writer gives the mark no memory');
   // (independent reading: a founder\'s row that a choice left outside the plan was taken as the payment of a marked salary of the same sum)
-  let Q3 = { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-08', { blk: 'div' })]), team: P.team.concat([row('pz', 'Person Z', 2000, '2026-10-12', { blk: 'cogs', paid: paid(D, MARK) })]) };
+  // (the same rename, for the same reason: Mika's 2,000 closes «Вывод Vanya» while it is everybody's, and is left over when it is Vanya's)
+  let Q3 = { ...P, div: P.div.concat([row('wA', 'Вывод Vanya', 2000, '2026-10-08', { blk: 'div' })]), team: P.team.concat([row('pz', 'Person Z', 2000, '2026-10-12', { blk: 'cogs', paid: paid(D, MARK) })]) };
   const L3 = ledP({ tx: [filed('m1', '2026-10-10', -2000, 'mika', '', { at: MARK + 3600e3 })] });
   let M3 = await C(L3, Q3, D);
   const was3 = [M3.now, item(M3, 'pz').done.by, item(M3, 'pz').rows];
@@ -6479,16 +6503,21 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
 
   // ---- on the screen ----
   // A plan with one withdrawal that Mika's money has already closed, one that is open, and a monthly one.
+  // (Until 17 October 2026 the closed one was called «Vanya», and was everybody's by that name too. A row whose
+  // whole name is a founder's is his now (N): Mika's 3,000 could not close it - his 4,000 would give September's
+  // monthly «Вывод» 1,000 and stand outside the plan with the other 3,000, and «Vanya» would wait for its own
+  // 3,000. The row Mika asked about on 12 October - closed by the others' money, given to its founder by hand - is
+  // one whose name says more than a founder's: «Вывод Vanya».)
   const PS = { ...P, div: P.div.concat([
-    row('wdC', 'Vanya', 3000, '2026-10-05', { blk: 'div' }),
+    row('wdC', 'Вывод Vanya', 3000, '2026-10-05', { blk: 'div' }),
     row('wdO', 'Вывод ноябрь', 2000, '2026-10-20', { blk: 'div' }),
     row('wdR', 'Вывод', 1000, '2026-09-25', { blk: 'div', rec: { day: 25, from: '2026-09' } }),
     row('wdR2', 'Вывод', 1500, '2026-10-26', { blk: 'div', whose: 'vanya', rec: { day: 26, from: '2026-10' } })]) };
-  // (Mika took 4,000: the first 1,000 uses up September of the monthly «Вывод», which is older, the rest closes «Vanya».)
+  // (Mika took 4,000: the first 1,000 uses up September of the monthly «Вывод», which is older, the rest closes «Вывод Vanya».)
   const LS = ledP({ tx: [filed('m1', '2026-10-05', -4000, 'mika', '', { at: AT2 })] });
   const pg = await scene('whose', LS, PS);
-  const b0 = await holds(pg, 'a plan whose row «Vanya» was closed by what Mika took');
-  same([item(b0.M, 'wdC').state, item(b0.M, 'wdC').rows, item(b0.M, 'wdC').whose], ['done', ['m1'], ''], 'the row called «Vanya» is closed by 3,000 of what Mika took: a name says nothing of whose a row is');
+  const b0 = await holds(pg, 'a plan whose row «Вывод Vanya» was closed by what Mika took');
+  same([item(b0.M, 'wdC').state, item(b0.M, 'wdC').rows, item(b0.M, 'wdC').whose], ['done', ['m1'], ''], 'the row called «Вывод Vanya» is closed by 3,000 of what Mika took: a name that is more than a founder\'s says nothing of whose a row is');
   const stored = (id) => pg.evaluate((id) => { const r = window.__cash.state().div.find((x) => String(x.id) === id); return r ? ['whose' in r, r.whose || ''] : null; }, id);
   const whoseOf = (kind) => pg.$eval(K(kind) + '[data-ed-f="whose"]', (e) => [e.value, [...e.options].map((o) => o.textContent)]);
   // «Добавить»: the form proposes what the name says, and a choice made by hand stands
@@ -6526,7 +6555,7 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   same(await stored('wdO'), [false, ''], '«общий» again: the key is gone');
   // the card of a withdrawal that is closed holds this one field
   await rowCard(pg, 'div', 'wdC');
-  same([await pg.$$eval(K('row') + '[data-ed-f]', (l) => l.map((e) => e.dataset.edF)), (await whoseOf('row'))[0], (await texts(pg, K('row') + '.ed-foot button')).includes('Сохранить')], [['whose'], '', true], 'the closed row «Vanya»: its card holds «Чей вывод» and «Сохранить», and nothing else to type');
+  same([await pg.$$eval(K('row') + '[data-ed-f]', (l) => l.map((e) => e.dataset.edF)), (await whoseOf('row'))[0], (await texts(pg, K('row') + '.ed-foot button')).includes('Сохранить')], [['whose'], '', true], 'the closed row «Вывод Vanya»: its card holds «Чей вывод» and «Сохранить», and nothing else to type');
   await pg.selectOption(K('row') + '[data-ed-f="whose"]', 'vanya');
   await pg.click(K('row') + '[data-ed-save]');
   await puts('cash', before + 3);
@@ -6565,7 +6594,8 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await pg.context().close();
 
   // (independent reading: with a withdrawal marked «Оплачено» the same press moved «Денег сейчас», and nothing said so. Since 13 October 2026 it does not move: the page keeps what the marked withdrawal held - rv-wdmark. The mark here is one a plan from before that day holds.)
-  serve(ledP({ tx: [filed('m1', '2026-10-05', -2000, 'mika', '', { at: AT2 })] }), { ...P, div: P.div.concat([row('wA', 'Vanya', 2000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод оплачен', 1500, '2026-10-06', { blk: 'div', paid: paid(T) })]) });
+  // (the row is «Вывод Vanya» since 17 October 2026, for the reason given above: «Vanya» alone would be Vanya's by its name)
+  serve(ledP({ tx: [filed('m1', '2026-10-05', -2000, 'mika', '', { at: AT2 })] }), { ...P, div: P.div.concat([row('wA', 'Вывод Vanya', 2000, '2026-10-05', { blk: 'div' }), row('wB', 'Вывод оплачен', 1500, '2026-10-06', { blk: 'div', paid: paid(T) })]) });
   const mk = await reopen('whose, a mark');
   const now0 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
   await goCash(mk);
@@ -6574,7 +6604,7 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await mk.click(K('row') + '[data-ed-save]');
   await puts('cash', 1);
   const now1 = await mk.evaluate(() => window.__money.model({ H: 30 }).now);
-  same([round2(now1 - now0), await toastText(mk), await mk.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wB'), it = window.__money.model({ H: 30 }).items.find((x) => x.id === 'wB'); return [it.wd.got, it.rows, r.paid.saw ? r.paid.saw.rows.map((x) => x[1]) : null]; })], [0, 'Vanya: вывод Vanya', [0, [], [0]]], 'a closed row given to Vanya while another withdrawal carries «Оплачено»: Mika\'s money leaves the row and is not dealt into the marked withdrawal - the mark, made before the rule, is given its memory by this save - and «Денег сейчас» has not moved, so the toast has no figure to name');
+  same([round2(now1 - now0), await toastText(mk), await mk.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wB'), it = window.__money.model({ H: 30 }).items.find((x) => x.id === 'wB'); return [it.wd.got, it.rows, r.paid.saw ? r.paid.saw.rows.map((x) => x[1]) : null]; })], [0, 'Вывод Vanya: вывод Vanya', [0, [], [0]]], 'a closed row given to Vanya while another withdrawal carries «Оплачено»: Mika\'s money leaves the row and is not dealt into the marked withdrawal - the mark, made before the rule, is given its memory by this save - and «Денег сейчас» has not moved, so the toast has no figure to name');
   await mk.context().close();
 
   // somebody who only looks reads whose a withdrawal is, and is offered nothing
@@ -7338,8 +7368,10 @@ await run('rv-wdday', 'a founder\'s row dated on the very day a balance was type
 // month's fact, in «Месяцы» and «Отчёты», and nowhere on the plan's page. Now each month says it too: the rows of the
 // table that closed no line stand in the list of their block, by their date, as paid rows with the words «вне
 // плана» - shown, and counted in no figure of the plan. A founder's row is one of them only where no withdrawal had
-// room for it; a transfer to a founder's daily account is his taking and is seen inside the withdrawal that holds it.
-await run('rv-offplan', 'what the statements show that the plan did not hold stands in its month of «Касса», by its block and its date, and in no figure of the plan; a founder\'s transfer to his daily account is his taking, inside the withdrawal; a month before the plan was written, and one that has not come, show none', async () => {
+// room for it. A transfer to a founder's daily account was his taking, seen inside the withdrawal that held it; since
+// the owner's decision of 17 October 2026 one made from October on is a transfer between own accounts - in no
+// withdrawal and in no list of the month (the check «daily»; a September one is still a taking there).
+await run('rv-offplan', 'what the statements show that the plan did not hold stands in its month of «Касса», by its block and its date, and in no figure of the plan; a founder\'s October transfer to his daily account is no taking and stands nowhere in the month; a month before the plan was written, and one that has not come, show none', async () => {
   const OCT = '2026-10', sub = row('s1', 'Tool A', 15, '2026-10-10', { blk: 'fixed', sub: true, rec: { day: 10, from: OCT } });
   const lines = { banks: [bal('Wise', 'GBP', 50000, '2026-10-05'), bal('Barclays', 'GBP', 10000, '2026-10-05')], inflows: [row('i1', 'Client Q', 5000, '2026-10-09', { blk: 'rev' })], team: [row('t1', 'Person Z', 2000, '2026-10-07', { blk: 'cogs' }), row('t0', 'Person Y', 800, '2026-09-28', { blk: 'cogs' })],
     other: [row('o1', 'Office', 640, '2026-10-20', { blk: 'fixed' }), sub] };
@@ -7357,8 +7389,11 @@ await run('rv-offplan', 'what the statements show that the plan did not hold sta
     'October: six rows of the table closed no line - each in the section of its block, the charge of a tool the plan holds as a subscription in «Подписки»; the row with no block waits in «Разбор» and is in no section');
   same([by.off.by.other.rows.map((r) => [r.id, r.d, r.name, r.amt, r.cur, r.gbp, r.bank, r.prov, r.back]), by.off.by.inflows.rows[0].bank, Object.keys(by.team).sort()], [[['x1', '2026-10-03', 'Ryanair', 252, 'GBP', 252, 'Wise', false, false], ['q2', '2026-10-04', 'Uber', 33, 'GBP', 33, 'Wise', true, false], ['x5', '2026-10-04', 'Uber', 23.4, 'GBP', -23.4, 'Wise', false, true]], 'Barclays', ['done', 'expected', 'rows']],
     'a row says its day, its name, its sum and its bank; one the page recognised and nobody has accepted is marked so, and a refund is a sum the other way; a section of the plan is what it was - its lines, expected and paid');
-  same([item(M, 't1').done.rows, item(M, 'w1').wd.got, item(M, 'w1').wd.by, item(M, 'w1').rows], [['p1'], 900, [{ c: 'misha', l: 'daily', gbp: 500 }, { c: 'vanya', l: '', gbp: 400 }], ['d1', 'd2']],
-    'the salary closed its line and the two takings used the withdrawal up - none of them is outside the plan; the withdrawal says whose takings it holds: Misha\'s transfer to his daily account, and Vanya\'s');
+  // (Until 17 October 2026 the withdrawal took both: 900 - Misha's 500 to his daily account and Vanya's 400. Misha's
+  // move of 6 October is a transfer between own accounts now (D): the withdrawal holds Vanya's 400 alone, and the
+  // move is in no list of the month either - 400 + nothing, of the 900 the two rows came to.)
+  same([item(M, 't1').done.rows, item(M, 'w1').wd.got, item(M, 'w1').wd.by, item(M, 'w1').rows, SECS.some((k) => ids(by, k).includes('d1'))], [['p1'], 400, [{ c: 'vanya', l: '', gbp: 400 }], ['d2'], false],
+    'the salary closed its line and Vanya\'s taking went into the withdrawal - neither is outside the plan; Misha\'s October move to his daily account is no taking: not in the withdrawal, not outside the plan');
   // … and in no figure of the plan: the same plan on a table without those rows (they are inside the balance by their dates)
   const M0 = await C(ledger(tx.filter((r) => !out.includes(r)), []), P, T);
   const figs = (X) => [X.now, X.IN, X.OUT, X.END, X.LOW, X.free, X.verdict.id, SECS.map((k) => [X.months.by[OCT][k].expected, X.months.by[OCT][k].done])];
@@ -7368,8 +7403,10 @@ await run('rv-offplan', 'what the statements show that the plan did not hold sta
     'September holds a line and was over before the plan was first written: it says nothing of what was paid outside it - every row would be; November has not come');
   // A founder took what no withdrawal was written for: his row is outside the plan, in «Дивиденды»
   const Mn = await C(L, Pnone, T), dn = Mn.months.by[OCT].off.by.div;
-  same([dn.rows.map((r) => [r.id, r.name, r.amt]), dn.gbp, Mn.months.by[OCT].off.nOut, [M.now, Mn.now]], [[['d1', 'Misha · daily', 500], ['d2', 'Vanya', 400]], 900, 7, [57100, 57100]],
-    'the same table and a plan with no withdrawal: Vanya\'s 400 and Misha\'s transfer to his daily account are outside the plan, under «Дивиденды» - never among the studio\'s costs - and «Денег сейчас» is the same');
+  // (Until 17 October 2026: Vanya's 400 and Misha's daily 500 here - 900, seven payments. The October move is no
+  // taking now: 400, six; and it left the bank all the same - «Денег сейчас» is 57,100 either way.)
+  same([dn.rows.map((r) => [r.id, r.name, r.amt]), dn.gbp, Mn.months.by[OCT].off.nOut, [M.now, Mn.now], SECS.map((k) => Mn.months.by[OCT].off.by[k].rows.some((r) => r.id === 'd1'))], [[['d2', 'Vanya', 400]], 400, 6, [57100, 57100], SECS.map(() => false)],
+    'the same table and a plan with no withdrawal: Vanya\'s 400 is outside the plan, under «Дивиденды»; Misha\'s October move to his daily account is in no list - not his taking, not a cost of the studio - and «Денег сейчас» is the same');
 
   // ---- on the screen ----
   const pg = await scene('offplan', L, P);
@@ -7380,8 +7417,10 @@ await run('rv-offplan', 'what the statements show that the plan did not hold sta
   same([await outs('inflows'), await outs('team'), await outs('other'), await text(pg, '#cs-sec-other [data-cs-tot]'), await text(pg, '#cs-sec-team [data-cs-tot]')],
     [['x3 | 450 | вне плана | false', 'i1'], ['x2 | 420 | вне плана | false', 't1'], ['x1 | 252 | вне плана | false', 'q2 | 33 | вне плана · ждёт в «Разборе» | false', 'x5 | −23.4 | вне плана · возврат | false', 'o1'], '£640 · вне плана £262', '£2,000 · из них оплачено £2,000 · вне плана £420'],
     'each row stands in its list before the first line dated after it, with the words «вне плана» and nothing to type or press; the head of the list says the sum beside the plan\'s own');
-  same([await text(pg, '#cs-subs-say'), await text(pg, '#cs-subs-fold [data-cs-fold]'), await pg.$eval(cs('div', 'w1') + ' [data-cs-rm]', (e) => e.textContent)], ['Ещё 1 на £15: Tool A. Вне плана: Tool A.', 'Показать 2 строки', 'взято £900 из £3,000: Misha daily £500 · Vanya £400'],
-    '«Подписки», folded, names the charge that was outside the plan; the withdrawal says whose takings it holds - the transfer to a daily account is seen there');
+  // (until 17 October 2026 the withdrawal read «взято £900 из £3,000: Misha daily £500 · Vanya £400»; Vanya's 400 is
+  // all it holds now, one founder's and with no label, so it says what it took and of what)
+  same([await text(pg, '#cs-subs-say'), await text(pg, '#cs-subs-fold [data-cs-fold]'), await pg.$eval(cs('div', 'w1') + ' [data-cs-rm]', (e) => e.textContent)], ['Ещё 1 на £15: Tool A. Вне плана: Tool A.', 'Показать 2 строки', 'взято £400 из £3,000'],
+    '«Подписки», folded, names the charge that was outside the plan; the withdrawal says what it took - Misha\'s October move to his daily account is not there');
   await holds(pg, 'with rows from outside the plan', 'cash');
   await pg.click('#cs-sec-other tr[data-cs-out="x1"] .cs-nt');
   same([await pg.$$eval('#cs-plan tr.cs-edrow', (l) => l.length), store.cash.puts], [0, 0], 'a press on such a row opens no card and saves nothing: it is no line of the plan');
@@ -7396,6 +7435,257 @@ await run('rv-offplan', 'what the statements show that the plan did not hold sta
   await pg.click('#cs-month [data-cs-mon="now"]');
   await pg.click('#cs-wait [data-tab="inbox"]');
   same([await pg.$eval('.nav [data-tab="inbox"]', (e) => e.getAttribute('aria-current')), store.cash.puts], ['page', 1], '«Открыть „Разбор“» goes to «Разбор», where the row that waits gets its block; nothing else was saved');
+  await pg.context().close();
+});
+
+// =====================================================================================================================
+// THE OWNER'S DECISIONS OF 17 OCTOBER 2026 (docs/handoff.md, the entry of that day). A founder wrote two withdrawals
+// in «Дивиденды» after the statements that held them were uploaded, named «Vanya» and «Misha», and marked both
+// «Оплачено»; the page dealt them neither statement (a row counts for a line only if it came after the line), left
+// Vanya's own transfer «вне плана» beside his row, and filled both rows days later with Misha's next transfers. «Это
+// разные выводы». Decided: N - a withdrawal whose whole name is a founder's is his («А»); W1 - such a withdrawal,
+// marked for a day that has come, takes its founder's rows near its date whatever their upload time; W2 - a row the
+// withdrawals took in part shows its rest «вне плана»; D - from 1 October 2026 a move to a founder's Daily or
+// Monthly account is a transfer between own accounts («А», «только с октября»). Every figure below is made up.
+// =====================================================================================================================
+const D17 = '2026-10-17', AT17 = '2026-10-17T19:00:00+01:00';
+const cardText = (r, t) => { r.o.t = t; return r; };
+// The October of the founder's question: the rows, and two withdrawals written on 12 October at 16:00 and marked.
+const UP7 = ms('2026-10-07T09:00:00Z'), W12 = ms('2026-10-12T16:00:00Z'), MK12 = ms('2026-10-12T16:05:00Z'), UP17 = ms('2026-10-17T10:00:00Z'), TY17 = ms('2026-10-17T18:00:00Z');
+const octTx = () => [
+  filed('v350', '2026-10-12', -350, 'vanya', '', { b: 'Barclays', at: W12 - 60000 }),     // Vanya's own, uploaded a minute before his row was written
+  filed('m80', '2026-10-04', -80, 'misha', '', { at: UP7 }),
+  filed('m154', '2026-10-05', -154.2, 'misha', '', { at: UP7 }),                            // with the fee in it
+  filed('m750', '2026-10-05', -750, 'misha', '', { at: UP7 }),
+  filed('mRub', '2026-10-15', -153400, 'misha', '', { b: 'Tochka', cur: 'RUB', at: UP17 }),  // £1,300 at 118
+  filed('mEur', '2026-10-12', -70.2, 'misha', '', { cur: 'EUR', at: UP17 }),                 // £60 at 1.17
+  cardText(filed('vc1', '2026-10-13', -12.4, 'vanya', 'tfl', { at: UP17 }), 'Card transaction of 12.40 GBP issued by Travel Charge'),
+  cardText(filed('vc2', '2026-10-14', -8.6, 'vanya', 'tfl', { at: UP17 }), 'Card transaction of 8.60 GBP issued by Travel Charge'),
+  cardText(filed('vc3', '2026-10-16', -25.3, 'vanya', '', { at: UP17 }), 'Card transaction of 25.30 GBP issued by Lunch Place'),
+  cardText(filed('dM', '2026-10-03', -200, 'mika', 'daily', { at: UP7 }), '200,00 GBP перемещено сюда: Mika Daily'),
+];
+const octBanks = () => [bal('Wise', 'GBP', 40000, D17, { at: TY17 }), bal('Barclays', 'GBP', 9000, D17, { at: TY17 }), bal('Tochka', 'RUB', 500000, D17, { at: TY17 }), bal('Wise', 'EUR', 3000, D17, { at: TY17 })];
+const wrote = (id, name, amt, date, more = {}) => row(id, name, amt, date, { blk: 'div', c0: W12, m: { t: W12, by: 'Mika' }, paid: { on: '2026-10-12', at: MK12, by: 'Mika' }, ...more });
+const octPlan = (more = {}) => plan3({ banks: octBanks(), team: [row('t1', 'Person Z', 3000, '2026-10-28', { blk: 'cogs' })],
+  div: [wrote('wV', 'Vanya', 350, '2026-10-12', { bank: 'Barclays', ...(more.V || {}) }), wrote('wM', 'Misha', 900, '2026-10-05', more.M || {})].concat(more.div || []) });
+// The page with N's switch turned off: the page as it was until 17 October 2026, but for W1, W2 and D - and W1 has no
+// withdrawal to take, for no row is anybody's.
+async function noName() {
+  const src = fs.readFileSync(PUB + '/money/index.html', 'utf8'), on = ' const BYNAME=true;';
+  ok(src.includes(on), 'N has its one-line switch in the page');
+  const ctx = await browser.newContext(CALM);
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await ctx.route('**/money/index.html', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: src.replace(on, ' const BYNAME=false;') }));
+  const pg = await ctx.newPage();
+  pg.on('pageerror', (e) => errs.push(`no name: PAGEERROR ${e.message}`));
+  await pg.goto(BASE + '/money/index.html');
+  await pg.waitForFunction(() => window.__money && window.__cash && window.__cash.state());
+  return { pg, C: async (L, P, day = D17, o = { H: 30 }) => JSON.parse(await pg.evaluate(([l, p, t, o]) => JSON.stringify(window.__money.compute(l, p, t, o)), [L, P, day, o])) };
+}
+const offOf = (M, ym = '2026-10') => ((M.months.by[ym] || {}).off || { by: {} });
+const offIds = (M, k = 'div') => (offOf(M).by[k] || { rows: [] }).rows.map((r) => r.id);
+
+await run('records', 'a withdrawal named after a founder is his (N); written as a record and marked, it takes his rows near its date whatever their upload time, before the walk (W1); the rest of a row taken in part stands «вне плана» (W2); «Денег сейчас» and «Можно вывести» are what they were', async () => {
+  const L = ledger(octTx()), P = octPlan(), M = await C(L, P, D17);
+  const st = (id) => { const it = item(M, id); return [it.whose, it.state, it.done && it.done.by, it.wd.got, it.rows, !!it.wd.rec]; };
+  // N: the whole name, case and spaces aside, in Latin or in Russian; nothing less; «общий» chosen by hand; never f
+  const names = [];
+  for (const [name, more] of [['Vanya', {}], [' ваня ', {}], ['VANYA', {}], ['Вывод Vanya', {}], ['Vanya', { whose: '' }], ['Vanya', { f: 'mika' }], ['Vanya', { whose: 'misha' }]]) names.push(item(await C(L, octPlan({ V: { name, ...more } }), D17), 'wV').whose);
+  same(names, ['vanya', 'vanya', 'vanya', '', '', 'vanya', 'misha'], 'N: «Vanya», « ваня », «VANYA» are Vanya\'s; «Вывод Vanya» and «Vanya» with «общий» chosen by hand are everybody\'s; `f` is not read; a founder chosen by hand stands over the name');
+  // W1, the two rows of the question. «Vanya» 350: his own 350 of 12 Oct is one row within the tolerance (343 … 367.50).
+  // «Misha» 900: of his rows within five days of 5 Oct (80, 154.20, 750) none alone is within 882 … 945; of the sets of
+  // two to four, 154.20 + 750 = 904.20 is, and is the only one (80 + 750 = 830, 80 + 154.20 + 750 = 984.20) - it takes
+  // 154.20 and 745.80 of the 750, up to its sum; the 4.20 the 750 has over is its rest.
+  same([st('wV'), st('wM')], [['vanya', 'done', 'row', 350, ['v350'], true], ['misha', 'done', 'row', 900, ['m154', 'm750'], true]],
+    'W1: «Vanya» is closed by his own 350, uploaded a minute before the row was written; «Misha» by his two transfers of 5 Oct - no single row fits, the set of two does');
+  // W2 and what stands «вне плана»: Misha's 80 of 4 Oct (in no set that fits), the rest 4.20 of his 750, his later
+  // transfers in full (the euro 60, the rouble 1,300), and Vanya's three card payments (12.40, 8.60, 25.30).
+  const div = offOf(M).by.div, rest = div.rows.find((r) => r.id === 'm750');
+  same([div.rows.map((r) => [r.id, r.amt, r.cur, r.gbp]), rest && rest.part, div.gbp], [[['m80', 80, 'GBP', 80], ['m750', 4.2, 'GBP', 4.2], ['mEur', 70.2, 'EUR', 60], ['vc1', 12.4, 'GBP', 12.4], ['vc2', 8.6, 'GBP', 8.6], ['mRub', 153400, 'RUB', 1300], ['vc3', 25.3, 'GBP', 25.3]], { of: 750, took: 745.8 }, 1490.5],
+    '«вне плана»: Vanya\'s 350 is not there (one line, its withdrawal\'s); Misha\'s later transfers are, in full, and so are Vanya\'s card payments; the 750 stands with its rest - 4.20 of 750');
+  // Written and «вне плана» are every founders' row of October but the move to Mika's Daily account (D):
+  // 350 + 900 + 1,490.50 = 2,740.50 = 350 + 80 + 154.20 + 750 + 1,300 + 60 + 12.40 + 8.60 + 25.30.
+  const founders = round2(sum(octTx().filter((r) => r.id !== 'dM').map((r) => r.a))), written = round2(item(M, 'wV').wd.got + item(M, 'wM').wd.got);
+  same([written, round2(written + div.gbp), founders, M.month.blocks.div.fact, M.items.some((it) => it.rows.includes('dM')), SECS.some((k) => (offOf(M).by[k] || { rows: [] }).rows.some((r) => r.id === 'dM'))], [1250, 2740.5, 2740.5, 2740.5, false, false],
+    'written (1,250) and «вне плана» (1,490.50) make every founders\' row of October, 2,740.50 - the move of 200 to Mika\'s Daily account is in neither, nor in the month\'s dividends');
+  // Before N and W1: the page with N's switch off - neither row is anybody's, so the walk deals them, oldest first,
+  // the rows uploaded after 12 Oct 16:00: «Misha» takes the euro 60, the card payments 12.40 and 8.60, and 819 of the
+  // rouble 1,300; «Vanya» the next 350 of it; the 131 left (its rest, W2) and Vanya's 25.30 find no room. Vanya's 350,
+  // Misha's 80, 154.20 and 750 were on the page before the rows were written: «вне плана».
+  const nn = await noName(), M0 = await nn.C(L, P);
+  const st0 = (id) => { const it = item(M0, id); return [it.whose, it.state, it.wd.got, it.rows, !!it.wd.rec]; };
+  same([st0('wV'), st0('wM'), offIds(M0)], [['', 'done', 350, ['mRub'], false], ['', 'done', 900, ['mEur', 'vc1', 'vc2', 'mRub'], false], ['m80', 'm154', 'm750', 'v350', 'mRub', 'vc3']],
+    'with N\'s switch off the two rows behave as before: everybody\'s, filled by the transfers that came after them, and Vanya\'s own 350 «вне плана» beside his row');
+  same([M.now, M.free && M.free.now, M.marksGbp], [M0.now, M0.free && M0.free.now, M0.marksGbp], '«Денег сейчас», «Можно вывести» and the marks are what the same documents gave before N and W1');
+  // (the review of 17 October 2026) The figures above could not differ: every balance is typed on the 17th at 18:00,
+  // after every row and every mark, so no mark counts in either page. Here Vanya's mark is live: Barclays 9,000 is
+  // typed for 11 Oct, and no Barclays statement came after the mark (12 Oct, 16:05); the rouble transfer has not come
+  // either, so nothing fills «Vanya» before N and W1. Then the mark «Оплачено» counted 350 on Barclays on top of his
+  // own 350 dated 12 Oct - after the balance by its date: 9,000 − 350 − 350 = 8,300, the 350 taken off twice. With N
+  // and W1 «Vanya» is a record of that row and its mark counts nothing: 9,000 − 350 = 8,650 - and «Денег сейчас» and
+  // «Можно вывести» are what the page gave before plus exactly those 350.
+  const Llive = ledger(octTx().filter((r) => r.id !== 'mRub')), Plive = octPlan();
+  Plive.banks = Plive.banks.map((b) => (b.bank === 'Barclays' ? bal('Barclays', 'GBP', 9000, '2026-10-11', { at: ms('2026-10-11T18:00:00Z') }) : b));
+  const Ml = await C(Llive, Plive, D17), Ml0 = await nn.C(Llive, Plive), barc = (X) => X.accounts.find((a) => a.key === 'Barclays|GBP');
+  same([[item(Ml0, 'wV').done.by, item(Ml0, 'wV').mark.counts, Ml0.marksGbp, barc(Ml0).est], [item(Ml, 'wV').done.by, item(Ml, 'wV').rows, Ml.marksGbp, barc(Ml).est], round2(Ml.now - Ml0.now), round2(Ml.free.now - Ml0.free.now)],
+    [['mark', true, -350, 8300], ['row', ['v350'], 0, 8650], 350, 350], 'Vanya\'s mark live: before N and W1 it counted 350 on top of his own 350 (Barclays 8,300); now the record holds the row and the mark counts nothing (8,650) - «Денег сейчас» and «Можно вывести» are higher by exactly that 350');
+  // a row named «Вывод» behaves as before; and so does «Vanya» with «общий» chosen by hand
+  const P3 = plan3({ banks: octBanks(), div: [wrote('wS', 'Вывод', 350, '2026-10-12', { bank: 'Barclays' })] });
+  const M3 = await C(L, P3, D17);
+  same([JSON.stringify(M3) === JSON.stringify(await nn.C(L, P3)), item(M3, 'wS').rows, !!item(M3, 'wS').wd.rec, offIds(M3).includes('v350')], [true, ['mEur', 'vc1', 'vc2', 'mRub'], false, true],
+    'a row named «Вывод», written and marked the same way: no record - the same model, byte for byte, as with N\'s switch off; Vanya\'s 350 stays «вне плана»');
+  await nn.pg.context().close();
+  const Pc = await wr(P, 'set', item(M, 'wV'), { whose: '' }, MK12 + 3600e3, BY), Mc = await C(L, Pc, D17);
+  same([Pc.div.find((r) => r.id === 'wV').whose, 'whose' in Pc.div.find((r) => r.id === 'wV'), item(Mc, 'wV').whose, !!item(Mc, 'wV').wd.rec, item(Mc, 'wV').rows, item(Mc, 'wM').rows],
+    ['', true, '', false, ['mEur', 'vc1', 'vc2', 'mRub'], ['m154', 'm750']],
+    '«общий» chosen on «Vanya»: the row says so (whose:"", the one thing that keeps a founder\'s name everybody\'s), it is no record and the walk fills it - Misha\'s record is as it was');
+
+  // ---- on the screen: «Касса» of October ----
+  const pg = await scene('records', L, P, { at: AT17 });
+  await goCash(pg);
+  await holds(pg, 'October of the founder\'s question, with N, W1 and W2', 'cash');
+  const outRow = (id) => pg.$eval(`#cs-sec-div tr[data-cs-out="${id}"]`, (tr) => [tr.querySelector('.cs-at').textContent, tr.querySelector('.cs-rm').textContent, !!tr.querySelector('input,button')].join(' | '));
+  same([await outRow('m750'), await outRow('m80'), await pg.$('#cs-sec-div tr[data-cs-out="v350"]'), await pg.$('#cs-sec-div tr[data-cs-out="dM"]')], ['4.2 | вне плана · часть £4.20 из £750 | false', '80 | вне плана | false', null, null],
+    'the rest of the 750 is a line of its own, «вне плана · часть £4.20 из £750»; Vanya\'s 350 is no line «вне плана», and the move to Mika\'s Daily account is in no list');
+  await rowCard(pg, 'div', 'wV');
+  same((await pg.$eval(K('row') + '[data-ed-f="whose"]', (e) => e.value)), 'vanya', 'the card of «Vanya» says whose it is by its name: Vanya');
+  await pg.selectOption(K('row') + '[data-ed-f="whose"]', '');
+  await pg.click(K('row') + '[data-ed-save]');
+  await puts('cash', 1);
+  same([await pg.evaluate(() => { const r = window.__cash.state().div.find((x) => x.id === 'wV'); return ['whose' in r, r.whose]; }), await toastText(pg), await pg.evaluate(() => window.__money.model({ H: 30 }).items.find((x) => x.id === 'wV').whose)], [[true, ''], 'Vanya: вывод общий', ''],
+    '«общий» chosen in the card: stored as whose:"", the toast says so, and the row is everybody\'s');
+  await pg.context().close();
+  // ---- renamed in the card (the review of 17 October 2026) ----
+  // «Чей вывод» follows the name as it is typed, and only a choice made in it is written. Before, a rename in the card
+  // wrote what the select showed when it opened: «Вывод» renamed «Vanya» was stored as whose:"" - «общий» nobody chose -
+  // and stayed everybody's, to be filled by the other founders' rows (the founder's question of that day); «Vanya»
+  // renamed «Вывод» stayed Vanya's. Now the first is Vanya's by its name, the second everybody's - each as a row
+  // written so would be - and whose:"" is stored only where «общий» was chosen.
+  const Pn = plan3({ banks: octBanks(), div: [row('wA', 'Вывод', 500, '2026-10-28', { blk: 'div', c0: W12 }), row('wB', 'Vanya', 500, '2026-10-29', { blk: 'div', c0: W12 }), row('wC', 'Вывод', 500, '2026-10-30', { blk: 'div', c0: W12 })] });
+  const pn = await scene('records-rename', ledger([]), Pn, { at: AT17 });
+  await goCash(pn);
+  const rename = async (id, name, whose) => { await rowCard(pn, 'div', id); await pn.fill(K('row') + '#ed-name', name); const shown = await pn.$eval(K('row') + '[data-ed-f="whose"]', (e) => e.value);
+    if (whose !== undefined) await pn.selectOption(K('row') + '[data-ed-f="whose"]', whose); await pn.click(K('row') + '[data-ed-save]'); return shown; };
+  const after = (id) => pn.evaluate((id) => { const r = window.__cash.state().div.find((x) => x.id === id); return [r.name, 'whose' in r ? r.whose : null, window.__money.model({ H: 30 }).items.find((x) => x.id === id).whose]; }, id);
+  const sA = await rename('wA', 'Vanya'); await puts('cash', 1); const tA = await toastText(pn);
+  const sB = await rename('wB', 'Вывод'); await puts('cash', 2); const tB = await toastText(pn);
+  const sC = await rename('wC', 'Misha', ''); await puts('cash', 3);
+  same([[sA, await after('wA'), tA], [sB, await after('wB'), tB], [sC, await after('wC')]],
+    [['vanya', ['Vanya', null, 'vanya'], 'Сохранено: Vanya · вывод Vanya'], ['', ['Вывод', null, ''], 'Сохранено: Вывод · вывод общий'], ['misha', ['Misha', '', '']]],
+    'renamed in the card: «Вывод» → «Vanya» - the select follows the name, nothing is stored of the owner, and the row is Vanya\'s by its name; «Vanya» → «Вывод» - everybody\'s; «Вывод» → «Misha» with «общий» chosen in the select - whose:"", everybody\'s');
+  await pn.context().close();
+});
+
+await run('rest', 'a row the walk takes in part shows its rest «вне плана», in the row\'s own currency, and what was taken and the rest make the row exactly; «вне плана» is in no figure of the plan', async () => {
+  // «Вывод» 1,000 written on 1 Oct; Misha's rouble transfer of 150,000 on 12 Oct (£1,271.19 at 118) uploaded after it.
+  // The withdrawal takes £1,000 of it; the rest is £271.19, and in roubles 150,000 × 271.19 / 1,271.19 = 32,000.33 -
+  // so what was taken is 150,000 − 32,000.33 = 117,999.67, never a second reckoning at the day's rate (271.19 × 118
+  // would be 32,000.42, and the two would not make the row).
+  const L = ledger([filed('r1', '2026-10-12', -150000, 'misha', '', { b: 'Tochka', cur: 'RUB', at: ms('2026-10-13T09:00:00Z') })]);
+  const P = plan3({ banks: [bal('Wise', 'GBP', 40000, D17, { at: TY17 }), bal('Tochka', 'RUB', 500000, D17, { at: TY17 })], team: [row('t1', 'Person Z', 3000, '2026-10-28', { blk: 'cogs' })], div: [row('w1', 'Вывод', 1000, '2026-10-10', { blk: 'div', c0: ms('2026-10-01T08:00:00Z') })] });
+  const M = await C(L, P, D17), z = offOf(M), r = z.by.div.rows[0] || {};
+  same([item(M, 'w1').state, item(M, 'w1').wd.got, item(M, 'w1').rows, z.by.div.rows.map((x) => [x.id, x.name, x.amt, x.cur, x.gbp, x.part]), z.by.div.gbp, [z.out, z.nOut]],
+    ['done', 1000, ['r1'], [['r1', 'Misha', 32000.33, 'RUB', 271.19, { of: 150000, took: 117999.67 }]], 271.19, [271.19, 1]],
+    'the withdrawal takes £1,000 of Misha\'s 150,000 roubles and is done; the rest stands «вне плана» as its own line - ₽32,000.33 of ₽150,000, £271.19 - and the list\'s total and the month\'s say so');
+  same([round2(r.part.took + r.amt) === r.part.of && r.part.of === 150000, round2(item(M, 'w1').wd.got + r.gbp) === L.tx[0].a], [true, true], 'what was taken and the rest make the row exactly: 117,999.67 + 32,000.33 = 150,000 roubles; £1,000 + £271.19 = £1,271.19');
+  // in no figure of the plan: the same plan on the same table, read with the rest left out of the list, counts the same
+  const M0 = await C(ledger([]), P, D17);
+  same([M.months.by['2026-10'].div.expected, M.months.by['2026-10'].div.done, M.OUT, M.free && M.free.wd], [1000, 1000, M0.OUT - 1000, M0.free && { ...M0.free.wd, gbp: 0, n: 0, date: '' }],
+    '«вне плана» is shown and counted nowhere: «Дивиденды» of October expect and have 1,000, the plan\'s own; what is still to go out is the plan\'s less the withdrawal the row closed');
+  const pg = await scene('rest', L, P, { at: AT17 });
+  await goCash(pg);
+  await holds(pg, 'a month with a rest «вне плана»', 'cash');
+  same([await pg.$eval('#cs-sec-div tr[data-cs-out="r1"]', (tr) => [tr.querySelector('.cs-at').textContent, tr.querySelector('.cs-ct').textContent, tr.querySelector('.cs-rm').textContent, !!tr.querySelector('input,button')].join(' | ')), await text(pg, '#cs-sec-div [data-cs-tot]'), await text(pg, '#cs-off')],
+    ['32,000.33 | RUB | вне плана · часть ₽32,000.33 из ₽150,000 | false', '£1,000 · из них взято £1,000 · вне плана £271', 'Оплачено вне плана в октябре: ушло £271 (1 платёж). Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.'],
+    'on «Касса»: the rest is a grey line with its remark «часть ₽32,000.33 из ₽150,000», nothing to type or press; the list\'s head and the month\'s sentence count it');
+  await pg.context().close();
+});
+
+await run('daily', 'from 1 October 2026 a move to a founder\'s Daily or Monthly account is a transfer between own accounts: in no founders\' figure, no «Дивиденды», no month\'s «Расход», no report; a September one is his taking; a card payment is his whatever its label', async () => {
+  // «Вывод» 2,000, everybody's, written on 20 Sep. Mika moves 100 to his Daily account on 30 Sep, and 150 on 3 Oct;
+  // Misha 240 to his Monthly on 4 Oct; Mika pays 25 by card under the label «daily» on 3 Oct, and 12.50 by card on
+  // 4 Oct. The withdrawal takes 100 (September: his taking, as the sheet had it) + 25 + 12.50 = 137.50. The October
+  // moves, 150 and 240, are no founder's: they leave the Wise balance (typed for 1 Oct: 20,000 − 150 − 240 − 25 −
+  // 12.50 = 19,572.50) and nothing else. Before the decision the withdrawal took them too: 527.50.
+  const C20 = ms('2026-09-20T08:00:00Z'), U = ms('2026-10-05T09:00:00Z');
+  const tx = [cardText(filed('s30', '2026-09-30', -100, 'mika', 'daily', { at: U }), '100,00 GBP перемещено сюда: Mika Daily'),
+    cardText(filed('o03', '2026-10-03', -150, 'mika', 'daily', { at: U }), 'Moved 150.00 GBP to Mika Daily'),
+    cardText(filed('m04', '2026-10-04', -240, 'misha', 'monthly', { at: U }), '240,00 GBP перемещено сюда: Misha Monthly'),
+    cardText(filed('c03', '2026-10-03', -25, 'mika', 'daily', { at: U }), 'Card transaction of 25.00 GBP issued by Lunch Place'),
+    cardText(filed('c04', '2026-10-04', -12.5, 'mika', '', { at: U }), 'Card transaction of 12.50 GBP issued by Lunch Place')];
+  const L = ledger(tx), P = plan3({ banks: [bal('Wise', 'GBP', 20000, '2026-10-01', { at: ms('2026-10-01T17:00:00Z') })], team: [row('t1', 'Person Z', 3000, '2026-10-28', { blk: 'cogs', c0: C20 })], div: [row('w1', 'Вывод', 2000, '2026-10-01', { blk: 'div', c0: C20 })] });
+  const M = await C(L, P, D17), w = item(M, 'w1'), b = M.month.blocks;
+  same([w.rows, w.wd.got, w.wd.by, M.items.some((it) => it.rows.includes('o03') || it.rows.includes('m04'))], [['s30', 'c03', 'c04'], 137.5, [{ c: 'mika', l: 'daily', gbp: 125 }, { c: 'mika', l: '', gbp: 12.5 }], false],
+    'the withdrawal holds Mika\'s September move (100) and his two card payments (25 under «daily», 12.50): 137.50 - the October moves are no taking');
+  same([b.div.fact, b.other.fact, b.team.fact, b.tax.fact, SECS.some((k) => (offOf(M).by[k] || { rows: [] }).rows.some((r) => ['o03', 'm04'].includes(r.id))), M.now, M.free && M.free.wd.gbp],
+    [37.5, 0, 0, 0, false, 19572.5, 1862.5], 'October: the founders\' block holds the card payments alone (37.50); no cost of the studio grew by the moves; they are in no list of the month - and they left the bank: «Денег сейчас» 19,572.50; the withdrawal still has 1,862.50 to go');
+  // (the review of 17 October 2026) A move BACK from a Daily account is the same transfer the other way, and a direct
+  // debit under the label «daily» is the founder's own payment. Mika moves 50 back from his Daily on 5 Oct (filed in
+  // his block under «daily», as money coming back), and pays 30 by direct debit under «daily». The 50 is in no
+  // founders' figure (before: a refund of 50 that took October's dividends to 37.50 − 50 = −12.50, and stood «вне
+  // плана»); the 30 is his taking (before: read as a move by its label alone, and in nothing): the withdrawal holds
+  // 137.50 + 30 = 167.50, October's dividends 37.50 + 30 = 67.50; the Wise balance 19,572.50 + 50 − 30 = 19,592.50.
+  const Lb = ledger(tx.concat([cardText(filed('b05', '2026-10-05', 50, 'mika', 'daily', { at: U }), 'Moved 50.00 GBP from Mika Daily'), cardText(filed('dd05', '2026-10-05', -30, 'mika', 'daily', { at: U }), 'Direct debit to Fitness Club')]));
+  const Mb = await C(Lb, P, D17), wb = item(Mb, 'w1');
+  same([wb.rows, wb.wd.got, Mb.month.blocks.div.fact, SECS.some((k) => (offOf(Mb).by[k] || { rows: [] }).rows.some((r) => r.id === 'b05')), Mb.now, Mb.free && Mb.free.wd.gbp],
+    [['s30', 'c03', 'c04', 'dd05'], 167.5, 67.5, false, 19592.5, 1832.5], 'a move back from Mika\'s Daily account is in no founders\' figure and in no list; a direct debit under «daily» is his - the withdrawal holds it, and October\'s dividends count it');
+  // the one test the whole page asks (Live.daily)
+  const asks = await page.evaluate((rows) => rows.map((r) => window.__money.daily(r)), [
+    { d: '2026-10-03', c: '', l: '', dir: -1, o: { a: -50, p: 'Mika Daily', t: '50,00 GBP перемещено сюда: Mika Daily' } },
+    { d: '2026-10-03', c: '', l: '', dir: -1, o: { a: -50, p: '', t: 'Moved 50.00 GBP to Vanya Monthly' } },
+    { d: '2026-10-03', c: 'misha', l: 'Misha Daily', a: 50, o: { a: -50, t: 'Sent money' } },
+    { d: '2026-09-30', c: 'mika', l: 'daily', a: 50, o: { a: -50, t: 'Moved 50.00 GBP to Mika Daily' } },
+    { d: '2026-10-03', c: 'mika', l: 'daily', a: 50, o: { a: -50, t: 'Card transaction of 50.00 GBP issued by Lunch Place' } },
+    { d: '2026-10-03', c: 'mika', l: 'daily', a: -50, o: { a: 50, t: 'Moved 50.00 GBP from Mika Daily' } },
+    { d: '2026-10-03', c: 'other', l: 'daily', a: 50, o: { a: -50, t: 'daily' } },
+    { d: '2026-10-03', c: 'mika', l: 'tfl', a: 5, o: { a: -5, t: 'Card transaction of 5.00 GBP issued by Travel' } },
+    { d: '2026-10-03', c: '', l: '', dir: 1, o: { a: 50, p: '', t: '50,00 GBP перемещено отсюда: Mika Daily' } },
+    { d: '2026-10-03', c: 'mika', l: 'daily', a: 30, o: { a: -30, t: 'Direct debit to Fitness Club' } },
+    { d: '2026-10-03', c: 'vanya', l: 'monthly', a: 30, o: { a: -30, t: 'STANDING ORDER TO FLAT' } },
+    { d: '2026-10-03', c: 'mika', l: 'daily', a: -20, o: { a: 20, t: 'Card refund from Lunch Place' } }]);
+  // (the review of 17 October 2026: a move back from a Daily account is internal too - it was a refund of a move that
+  // no longer counts; and the label alone marks a move only on a row whose statement names no payment - by card, by
+  // direct debit or by standing order)
+  same(asks, [true, true, true, false, false, true, false, false, true, false, false, false], 'a move is known by the statement (Russian or English) - to a Daily or Monthly account or back from one - or by a founder\'s label «daily»/«monthly» on money that left; not before October, not a payment by card, direct debit or standing order whatever its label, not a label of another block, not a founder\'s ordinary card payment or its refund');
+  // On the page: a statement read now files the October move as a transfer between own accounts, and the September
+  // one and the card payment wait in «Разбор» as they always did.
+  const pg = await scene('daily', L, P, { at: AT17 });
+  await feed(pg, wiseCsv([['TRANSFER-91', '2026-10-09', -60, 'Moved 60.00 GBP to Vanya Daily', '', 'Vanya Daily'], ['TRANSFER-92', '2026-09-29', -70, 'Moved 70.00 GBP to Vanya Daily', '', 'Vanya Daily'], ['CARD-93', '2026-10-09', -9.5, 'Card transaction of 9.50 GBP issued by Lunch Place', '', '']]));
+  await puts('led', 1);
+  const where = (id) => { const t = (store.led.doc.tx || []).find((r) => r.key && r.key.includes(id)), i = (store.led.doc.inbox || []).find((r) => r.key && r.key.includes(id)); return t ? 'table:' + t.c : i ? 'inbox:' + (i.c || '') : 'nowhere'; };
+  same([where('TRANSFER-91'), where('TRANSFER-92'), where('CARD-93')], ['table:skip', 'inbox:', 'inbox:'], '«Разбор» files the move of 9 Oct as a transfer between own accounts at once; the move of 29 Sep and the card payment wait to be sorted, as before');
+  // (the review of 17 October 2026) The move is never paired: its other side, Vanya's Daily account, sends no
+  // statement. A client's 60 that reaches Revolut the next day - the same sum, another account, within four days -
+  // waits in «Разбор» to be sorted. Before, the move was the sure leg of a pair, and took the client's payment into
+  // the table as a transfer between own accounts, without a question: gone from revenue, VAT and «Отчёты».
+  await pg.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'revolut.csv'), 'revolut.csv'); }, 'ID,Date,Amount,Currency,Description\n77,10-10-2026,60.00,GBP,NEW CLIENT LTD INV 12');
+  await sleep(700);
+  await pg.click('.nav [data-tab="inbox"]');
+  const moved = (store.led.doc.tx || []).find((r) => r.key && r.key.includes('TRANSFER-91')) || {};
+  same([await pg.$$eval('#view-inbox .op', (l) => l.filter((e) => /NEW CLIENT/.test(e.textContent)).length), (store.led.doc.tx || []).some((r) => r.o && /NEW CLIENT/.test(r.o.t || '')), !!moved.pair, moved.c],
+    [1, false, false, 'skip'], 'a client\'s 60 on Revolut the next day waits in «Разбор»: the move to Vanya\'s Daily account pairs with nothing and takes nobody\'s payment with it');
+  // «Таблица»: the October moves stand among the transfers, saying where they went; the founders' blocks do not hold them
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  await pg.click('#view-ledger details.card summary');
+  const trs = await pg.$$eval('#view-ledger details.card tbody tr', (l) => l.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+  const blk = (k) => pg.$$eval(`#view-ledger .blk.${k} tbody tr[data-row]`, (l) => l.map((tr) => tr.dataset.row));
+  same([trs.filter((c) => /Daily|Monthly/.test(c[1])).map((c) => [c[1], c[4]]).sort(), (await blk('mika')).sort(), (await blk('misha')).sort()],
+    [[['Wise → Mika Daily', 'на Daily с октября — внутренний'], ['Wise → Misha Monthly', 'на Daily с октября — внутренний'], ['Wise → Vanya Daily', 'на Daily с октября — внутренний']], ['c03', 'c04'], []],
+    '«Таблица»: the three October moves are among the transfers between own accounts, each saying where it went, in plain words; Mika\'s block holds his two card payments, Misha\'s nothing (the September move is in the third quarter)');
+  // «Месяцы» for Mika, October: his card payments, and the words that say where the moves are
+  await pg.click('.nav [data-tab="dashboard"]');
+  await pg.click('#view-dashboard [data-scope="month"]');
+  await pg.selectOption('#periodSel', '2026-10');
+  await pg.click('#view-dashboard [data-focus="f:mika"]');
+  same([(await pg.$$eval('#view-dashboard tr[data-reprow]', (l) => l.map((tr) => tr.dataset.reprow))).sort(), plain(await pg.$eval('#fnd-daily', (e) => e.textContent))],
+    [['c03', 'c04'], 'С октября 2026 переводы на Daily и Monthly фаундеров — внутренние: это не вывод и не расход, их нет ни в выводах, ни в расходах. Они в «Таблице», среди переводов между своими счетами.'],
+    '«Месяцы», Mika in October: his two card payments and nothing else; the report says in plain words that the October moves are internal');
+  // «Отчёты», Mika's block in this month
+  await pg.click('.nav [data-tab="reports"]');
+  await pg.selectOption('#rep-preset', 'month');
+  await pg.click('#view-reports [data-repcat="mika"]');
+  same([(await pg.$$eval('#repOut tr[data-reprow]', (l) => l.map((tr) => tr.dataset.reprow))).sort(), !!(await pg.$('#rep-daily'))], [['c03', 'c04'], true], '«Отчёты», Mika\'s block, October: the same two rows, and the same words');
   await pg.context().close();
 });
 
