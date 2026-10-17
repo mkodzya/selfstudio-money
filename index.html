@@ -1282,12 +1282,19 @@ function parsePdfLines(lines,name){
 // ---------- classification ----------
 const norm=s=>String(s||"").toLowerCase().replace(/\b(ltd|limited|llc|inc|llp|gmbh|ооо|ип)\b/g," ").replace(/[^a-zа-яё0-9.+ ]/gi," ").replace(/\s+/g," ").trim();
 function allRules(){const pr=r=>FOUNDERS.includes(r.c)?1:0;return S.rules.concat(GENERIC).slice().sort((a,b)=>pr(a)-pr(b)||(a.g||0)-(b.g||0)||b.k.length-a.k.length);}
+// A move to (or back from) a founder's Daily or Monthly account from October 2026 (the owner's decision of 17 October
+// 2026) is filed as a transfer between own accounts - by what the statement says, or by the founder's label
+// «daily»/«monthly» a rule would give it - never a payment by card, direct debit or standing order. The test is the
+// forecast engine's own (Live.daily), so «Разбор», the table and every figure agree on which rows they are; settle()
+// never pairs such a row.
 function classify(r){
  const text=norm([r.o.p,r.o.t].join(" "));
- const pn=norm(r.o.p),own=t=>S.own.some(k=>k&&t.includes(k));
- if(r.o.own||OWN.test(text)||own(pn)||(r.dir<0&&own(text))||(r.dir>0&&!pn&&own(text)&&!allRules().some(x=>x.c==="rev"&&text.includes(x.k)))){r.c="skip";r.l="";r.auto=true;r.v=0;r.maybe=false;return;}
+ const pn=norm(r.o.p),own=t=>S.own.some(k=>k&&t.includes(k)),move=(c,l)=>Live.daily({d:r.d,dir:r.dir,o:r.o,c,l});
+ const skip=()=>{r.c="skip";r.l="";r.auto=true;r.v=0;r.maybe=false;};
+ if(r.o.own||OWN.test(text)||own(pn)||(r.dir<0&&own(text))||(r.dir>0&&!pn&&own(text)&&!allRules().some(x=>x.c==="rev"&&text.includes(x.k)))||move("",""))return skip();
  const text2=text.replace(/\d+/g," ").replace(/\s+/g," ");
  const hit=allRules().find(x=>x.k&&(text.includes(x.k)||text2.includes(x.k))&&(x.any||((x.c==="rev")===(r.dir>0))));
+ if(hit&&move(hit.c,hit.l))return skip();
  if(hit){r.c=hit.c;r.l=hit.l;r.auto=hit.c!=="tax";}
  else{r.c=r.dir>0?"rev":(S.holders[norm(r.o.h)]||"");r.l=r.dir>0?(r.o.p||"").replace(/\s+/g," ").trim().slice(0,40):"";r.auto=false;}
  if(!r.vSet||r.c!=="rev")r.v=vatOf(r);
@@ -1316,6 +1323,11 @@ function findTwin(r){
 // Sure: the other side carries one of our own names (S.own) or the bank calls it a conversion.
 // Pair: money left one own account and the same amount reached another within four days.
 // A pair nobody has confirmed yet waits in the inbox for one click; after that its kind is remembered (S.ownSeen).
+// A move to (or back from) a founder's Daily or Monthly account from October 2026 (Live.daily) is filed as a transfer
+// between own accounts by «Разбор» itself, and is never paired: its other side is an account whose statements are
+// rarely uploaded, so it would wait for a partner for ever - and, as the sure leg, it would take with it, without a
+// question, any unrecognised receipt of its sum within four days: a client's payment gone from revenue, VAT and
+// «Отчёты» as an own transfer.
 const acct=r=>r.b+"/"+(r.ac||"")+"/"+((r.o&&r.o.cur)||"GBP");
 // Money coming back into a cost block (a founder returns part of a payment) or going out of revenue (a refund) is stored negative, so the block shows the net.
 const sgn=r=>!r.c||r.c==="skip"||!r.dir||((r.c==="rev")===(r.dir>0))?1:-1;
@@ -1328,7 +1340,7 @@ const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
- const yms=[],pool=S.inbox.filter(r=>!r.pair&&!r.touched&&!r.nopair&&(!r.auto||r.c==="skip")).concat(S.tx.filter(r=>r.c==="skip"&&!r.pair&&r.o));
+ const yms=[],pool=S.inbox.filter(r=>!r.pair&&!r.touched&&!r.nopair&&(!r.auto||r.c==="skip")&&!Live.daily(r)).concat(S.tx.filter(r=>r.c==="skip"&&!r.pair&&r.o&&!Live.daily(r)));
  const ins=pool.filter(r=>r.o.a>0),used=new Set();
  pool.filter(r=>r.o.a<0).forEach(x=>{const t=Date.parse(x.d);
   const y=ins.find(q=>!used.has(q.id)&&acct(q)!==acct(x)&&Math.abs(Date.parse(q.d)-t)<=4*864e5&&(x.o.cur===q.o.cur?Math.abs(Math.abs(x.o.a)-q.o.a)<0.011:Math.abs(x.a-q.a)<=0.03*x.a));
@@ -1459,18 +1471,29 @@ function accept(ids){
 }
 
 // ---------- aggregation ----------
-function months(){const s=new Set(Object.keys(S.history));S.tx.forEach(r=>{if(r.c!=="skip")s.add(r.d.slice(0,7));});return[...s].sort();}
+function months(){const s=new Set(Object.keys(S.history));S.tx.forEach(r=>{if(!ownTr(r))s.add(r.d.slice(0,7));});return[...s].sort();}
 // A founder's personal tax (HMRC Mika, HMRC Vanya) sits in the TAXES block on the sheet, and stays there in the
 // ledger. But it is that founder's money leaving the studio, so every total counts it as their withdrawal and
 // keeps a note of how much of the withdrawal was tax. "Taxes" in the totals is then the studio's own.
 const owner=r=>{if(r.c!=="tax")return "";const l=(r.l||"").toLowerCase();return /\bmika?\b/.test(l)?"mika":/\bvanya\b/.test(l)?"vanya":/\bmisha\b/.test(l)?"misha":"";};
 const cat=r=>owner(r)||r.c;
+// A transfer between own accounts: filed so, or - from October 2026 - a move to (or back from) a founder's Daily or Monthly account
+// (the owner's decision of 17 October 2026, Live.daily). Neither is in a block, a total, «Месяцы» or «Отчёты»; both
+// stand in «Таблица» among the transfers.
+const ownTr=r=>r.c==="skip"||Live.daily(r);
+// Where such a move went, as «Таблица» names it: «Mika Daily», «Misha Monthly» - by the statement, else by the block
+// and the label it was filed under.
+const dailyTo=r=>{const t=String((r.o&&[r.o.p,r.o.t].filter(Boolean).join(" "))||""),m=/(^|[^a-zа-яё])(mika|misha|vanya|мика|миша|ваня)\s+(daily|monthly)/i.exec(t),
+ nm={mika:"mika",мика:"mika",misha:"misha",миша:"misha",vanya:"vanya",ваня:"vanya"},who=m?nm[m[2].toLowerCase()]:FOUNDERS.includes(r.c)?r.c:"",kind=m?m[3]:/monthly/i.test(String(r.l||""))?"monthly":"daily";
+ return (who?FN[who]+" ":"")+(kind.toLowerCase()==="monthly"?"Monthly":"Daily");};
+const DAILY_SAY="С октября 2026 переводы на Daily и Monthly фаундеров — внутренние: это не вывод и не расход, их нет ни в выводах, ни в расходах. Они в «Таблице», среди переводов между своими счетами.";
 // A founder's row with no label is a transfer to themselves — the dividend. The labelled ones are what the studio paid for them.
+// («Daily и Monthly» is what the sheet kept before October 2026: from then on a move to those accounts is no row here.)
 const FG={div:"Дивиденды (переводы себе)",tax:"Личные налоги (HMRC)",daily:"Daily и Monthly",tr:"Транспорт",other:"Прочие расходы"};
 const fGroup=r=>{if(r.c==="tax")return FG.tax;const l=(r.l||"").trim().toLowerCase();if(!l)return FG.div;
  return /daily|monthly|^jar$/.test(l)?FG.daily:/^(tfl|uber|lime|bolt|taxi|transport|car|auto|journey)$/.test(l)?FG.tr:FG.other;};
 function agg(ym){
- const rows=S.tx.filter(r=>r.d.slice(0,7)===ym&&r.c!=="skip");
+ const rows=S.tx.filter(r=>r.d.slice(0,7)===ym&&!ownTr(r));
  const o={rev:0,cogs:0,fixed:0,other:0,tax:0,mika:0,vanya:0,misha:0,behalf:0,vat:0,t_mika:0,t_vanya:0,t_misha:0,e_mika:0,e_vanya:0,e_misha:0};
  if(!rows.length)Object.assign(o,S.history[ym]||{});else rows.forEach(r=>{const k=cat(r);o[k]+=r.a;if(k!==r.c)o["t_"+k]+=r.a;else if(FOUNDERS.includes(k)&&(r.l||"").trim())o["e_"+k]+=r.a;if(r.c==="rev")o.vat+=r.v||0;});
  o.ftax=o.t_mika+o.t_vanya+o.t_misha;o.fexp=o.e_mika+o.e_vanya+o.e_misha;
@@ -1551,7 +1574,7 @@ function renderDash(){
  const perMonth=v=>n>1?`в среднем ${fmtK(v/n)} в месяц`:"";
  const box=(id,label)=>`<div class="chartbox"><svg class="chart" id="${id}" role="img" aria-label="${label}"></svg><div class="tip" hidden></div></div>`;
  const pick=m=>{ui.scope="month";ui.period=m;renderDash();};
- const prow=S.tx.filter(r=>r.c!=="skip"&&inPeriod(r.d.slice(0,7)));
+ const prow=S.tx.filter(r=>!ownTr(r)&&inPeriod(r.d.slice(0,7)));
  const fRow=(k,mx)=>{const t=P["t_"+k],e=P["e_"+k],d=P[k]-t-e;return `<div class="hb fnd go" data-focus="f:${k}" tabindex="0" role="button" title="Показать только ${FN[k]}"><span class="hl">${FN[k]}</span><span class="split"><i style="width:${Math.max(0,d)/mx*100}%"></i><i class="ex" style="width:${Math.max(0,e)/mx*100}%"></i><i class="tx" style="width:${Math.max(0,t)/mx*100}%"></i></span><span class="hv">${fmt(P[k])} <span class="note">дивиденды ${fmtK(d)}${e?` · расходы ${fmtK(e)}`:""}${t?` · налоги ${fmtK(t)}`:""}</span></span></div>`;};
  const fLeg=leg([["--s2","Дивиденды"],["--s4","Daily и расходы"],["--s3","Личные налоги"]]);
  const fMax=Math.max(1,...FOUNDERS.map(k=>P[k]));
@@ -1568,6 +1591,7 @@ function renderDash(){
   body=`<section class="kpis k4" aria-label="Выводы за период">
    ${kp("Выводы всего",tot,perMonth(tot)||title)}${kp("Дивиденды",div,`${share(div)} · переводы себе`)}${kp("Личные налоги",tax,`${share(tax)} · HMRC`)}${kp("Daily и расходы",exp,`${share(exp)} · карта, транспорт, еда`)}
   </section>
+  <p class="note" id="fnd-daily" style="margin:0">${DAILY_SAY}</p>
   <section class="card"><h2>${esc(who)}: выводы по месяцам<span class="note">нажмите на месяц, чтобы открыть его</span></h2>${fLeg}${box("chFnd","Выводы по месяцам")}</section>
   <div class="two">${fk==="all"?`<section class="card"><h2>По фаундерам<span class="note">${title}</span></h2>${fLeg}<div class="hbs fnds">${FOUNDERS.map(k=>fRow(k,fMax)).join("")}</div></section>`:`<section class="card"><h2>С каких счетов<span class="note">${title}</span></h2>${topList(rows.map(r=>Object.assign({},r,{l:r.b||"—"})),"")}</section>`}
    <section class="card"><h2>Из чего состоят выводы<span class="note">${title}</span></h2>${topList(rows.map(r=>Object.assign({},r,{l:fGroup(r)})),"out")}</section></div>
@@ -1629,7 +1653,7 @@ try{Object.assign(rp,JSON.parse(localStorage.getItem(REP_LS)||"{}"));}catch(e){}
 const saveRep=()=>{try{localStorage.setItem(REP_LS,JSON.stringify(rp));}catch(e){}};
 function repRows(){
  const q=rp.q.trim().toLowerCase();
- return S.tx.filter(r=>r.c!=="skip"&&(!rp.from||r.d>=rp.from)&&(!rp.to||r.d<=rp.to)&&(!rp.cats.length||rp.cats.includes(cat(r)))&&(!rp.bank||r.b===rp.bank)&&(!q||(r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)));
+ return S.tx.filter(r=>!ownTr(r)&&(!rp.from||r.d>=rp.from)&&(!rp.to||r.d<=rp.to)&&(!rp.cats.length||rp.cats.includes(cat(r)))&&(!rp.bank||r.b===rp.bank)&&(!q||(r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)));
 }
 const behalfApart=()=>false;
 function repGroups(rows){
@@ -1648,7 +1672,7 @@ function repGroups(rows){
 // sits above the table as tabs, because it is a view of the answer and not a filter on it.
 function repSums(){
  const q=rp.q.trim().toLowerCase(),o={};
- S.tx.forEach(r=>{if(r.c==="skip"||(rp.from&&r.d<rp.from)||(rp.to&&r.d>rp.to)||(rp.bank&&r.b!==rp.bank))return;
+ S.tx.forEach(r=>{if(ownTr(r)||(rp.from&&r.d<rp.from)||(rp.to&&r.d>rp.to)||(rp.bank&&r.b!==rp.bank))return;
   if(q&&!((r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)))return;const k=cat(r);o[k]=(o[k]||0)+r.a;});
  return o;
 }
@@ -1690,7 +1714,7 @@ function renderRepOut(){
  const per=(rp.from?dShort(rp.from)+" "+rp.from.slice(0,4):"начало")+" – "+(rp.to?dShort(rp.to)+" "+rp.to.slice(0,4):"сегодня"),few=ms.length>1;
  const kp=(l,v,h,cls)=>`<div class="kpi"><div class="lbl">${l}</div><div class="val ${cls||""}">${v}</div><div class="hint">${h}</div></div>`;
  const shown=rows.slice().sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0),multi=rp.cats.length!==1;
- el.innerHTML=`
+ el.innerHTML=`${rp.cats.some(k=>FOUNDERS.includes(k))?`<p class="note" id="rep-daily" style="margin:0">${DAILY_SAY}</p>`:""}
  <section class="kpis k4" aria-label="Итог по фильтрам">
   ${kp("Приход",fmt(inn,2),vat?`в том числе VAT ${fmt(vat,2)}`:"выручка")}${kp("Расход",fmt(out,2),beh?(apart?`без «за клиентов» ${fmt(beh,2)}`:`из них за клиентов ${fmt(beh,2)}`):"затраты, налоги и выводы")}
   ${kp("Разница",fmt(inn-out,2),"приход − расход",inn-out<0?"neg":"pos")}${kp("Строк",rows.length,few?`в среднем ${fmtK((inn||out)/ms.length)} в месяц`:per)}
@@ -1781,7 +1805,7 @@ function fxAskCard(){
  const sig=v=>(v<0?"−":"")+fmt(Math.abs(v),2),money=r=>(+r.o.a<0?"−":"")+fmt(Math.abs(+r.o.a),Math.abs(+r.o.a)%1?2:0,SYM[r.o.cur]||"")+(SYM[r.o.cur]?"":" "+r.o.cur);
  // In the table a row's sum stands with a plus whichever way the money went - what came is the block «выручка», what
  // went is every other block - and with a minus when it is money back; a transfer between own accounts is neither.
- const side=k=>rows.filter(r=>r.c!=="skip"&&(r.c==="rev")===(k>0)),was=k=>side(k).reduce((a,r)=>a+r.a,0),will=k=>side(k).reduce((a,r)=>a+(r.a<0?-1:1)*fxNew(r),0);
+ const side=k=>rows.filter(r=>!ownTr(r)&&(r.c==="rev")===(k>0)),was=k=>side(k).reduce((a,r)=>a+r.a,0),will=k=>side(k).reduce((a,r)=>a+(r.a<0?-1:1)*fxNew(r),0);
  const d=round2((will(1)-was(1))-(will(-1)-was(-1))),n=rows.length,far=fxUnset().filter(fxFar).length;
  return `<section class="card wide" id="fx-ask"><h2>Строки в валюте — по курсу своего дня?<span class="note">спрашивается один раз</span></h2>
   <p class="note" style="margin:0;max-width:92ch">${n} ${plural(n,"строка","строки","строк")} в валюте с ${dRu(FX_FROM)} ${plural(n,"внесена","внесены","внесены")} по курсу, который тогда был вписан руками, — один на все дни. ${n===1?"Её":"Их"} можно один раз пересчитать по курсу дня каждого платежа. Всё, что раньше, остаётся как в таблице фаундеров.</p>
@@ -1879,7 +1903,10 @@ function renderLedger(){
  if(!qs.length){el.innerHTML=`${setNav("ledger")}<div class="page-head"><div><h1>Таблица</h1></div></div><div class="empty"><b>В таблице пока нет строк</b>Они появятся после разбора первой выписки.</div>`;return;}
  if(!ui.quarter||!qs.includes(ui.quarter))ui.quarter=qs[qs.length-1];
  const rows=S.tx.filter(r=>qOf(r.d.slice(0,7))===ui.quarter).sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
- const vat=rows.filter(r=>r.c==="rev").reduce((a,r)=>a+(r.v||0),0),skipped=rows.filter(r=>r.c==="skip");
+ // (A move to a founder's Daily or Monthly account from October 2026 is a transfer between own accounts: it stands
+ // among the transfers - filed so by «Разбор», or under a founder's block as before the owner's decision of
+ // 17 October 2026 - says where it went in words, and opens like a row of a block.)
+ const vat=rows.filter(r=>r.c==="rev").reduce((a,r)=>a+(r.v||0),0),skipped=rows.filter(ownTr);
  const e=ui.edit&&S.tx.find(r=>r.id===ui.edit);
  const seen=new Set(),tj=[];skipped.forEach(r=>{if(seen.has(r.id))return;const m=r.pair?S.tx.find(q=>q.pair===r.pair&&q!==r):null;seen.add(r.id);if(m)seen.add(m.id);
   const legs=[r,m].filter(Boolean),out=legs.find(q=>q.o&&q.o.a<0),inn=legs.find(q=>q!==out&&(!q.o||q.o.a>0));tj.push({r,m,out,inn});});
@@ -1893,7 +1920,7 @@ function renderLedger(){
    <label for="e-b">Банк<select id="e-b">${opt(BANKS.map(b=>[b,b]),e.b)}</select></label><label for="e-v">VAT<input id="e-v" type="number" step="any" value="${e.v||""}" style="width:90px"></label>
    <button class="primary" data-esave>Сохранить</button><button data-edel>Удалить</button><button data-eclose>Закрыть</button></div>
    ${e.o?`<div class="note" style="margin-top:8px">В выписке: ${esc(e.o.t||"")} · ${fmt(Math.abs(e.o.a),2,SYM[e.o.cur]||"")}</div>`:""}</section>`:""}
- <div class="blocks">${CATS.map(c=>{const br=rows.filter(r=>r.c===c.k),sum=br.reduce((a,r)=>a+r.a,0);
+ <div class="blocks">${CATS.map(c=>{const br=rows.filter(r=>r.c===c.k&&!ownTr(r)),sum=br.reduce((a,r)=>a+r.a,0);
   return `<section class="blk ${c.k}"><h3>${c.name}<span class="note">${br.length}</span></h3>
    <div class="bt"><span class="sum">${fmt(sum,2)}</span></div>
    <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Amount</th>${c.k==="rev"?'<th class="r">Vat</th><th>Project</th><th>Bank</th>':`<th>Bank</th><th>${c.lab}</th>`}</tr></thead><tbody>
@@ -1902,7 +1929,10 @@ function renderLedger(){
  ${tj.length?`<details class="card"${ui.trOpen?" open":""}><summary>Переводы между своими счетами · ${tj.length}</summary>
   <div class="note" style="margin:6px 0">В блоки и дашборд не входят. Если второй выписки нет, перевод всё равно убран, а пара найдётся, когда вы загрузите второй счёт.</div>
   <div class="tbl"><table><thead><tr><th>Дата</th><th>Откуда → куда</th><th class="r">Сумма</th><th>В выписке</th><th>Пара</th><th></th></tr></thead><tbody>
-  ${tj.map(j=>{const q=j.out||j.inn||j.r;return `<tr><td class="m">${dShort(q.d)}</td><td>${j.out?esc(j.out.b)+(j.out.ac?" ·"+esc(j.out.ac.slice(-4)):""):"?"} → ${j.inn?esc(j.inn.b)+(j.inn.ac?" ·"+esc(j.inn.ac.slice(-4)):""):"?"}</td><td class="m r">${q.o?fmt(Math.abs(q.o.a),2,SYM[q.o.cur]||""):fmt(q.a,2)}</td><td class="note">${esc((q.o&&q.o.t)||"")}${q.s==="demo"?" · пример":""}</td><td>${j.m?'<span class="pill ok">обе стороны</span>':'<span class="pill ask">второй выписки нет</span>'}</td><td><button class="sm" data-untr="${j.r.id}">Не перевод</button></td></tr>`;}).join("")}
+  ${tj.map(j=>{const q=j.out||j.inn||j.r,dm=!j.m&&Live.daily(j.r);
+   if(dm){const back=!!q.o&&+q.o.a>0,acc=esc(q.b)+(q.ac?" ·"+esc(q.ac.slice(-4)):"");
+    return `<tr class="rowbtn${ui.edit===j.r.id?" sel":""}" data-row="${j.r.id}" tabindex="0"><td class="m">${dShort(q.d)}</td><td>${back?esc(dailyTo(j.r))+" → "+acc:acc+" → "+esc(dailyTo(j.r))}</td><td class="m r">${q.o?fmt(Math.abs(q.o.a),2,SYM[q.o.cur]||""):fmt(q.a,2)}</td><td class="note">${esc((q.o&&q.o.t)||"")}${q.s==="demo"?" · пример":""}</td><td class="note">${back?"с Daily обратно — внутренний":"на Daily с октября — внутренний"}</td><td></td></tr>`;}
+   return `<tr><td class="m">${dShort(q.d)}</td><td>${j.out?esc(j.out.b)+(j.out.ac?" ·"+esc(j.out.ac.slice(-4)):""):"?"} → ${j.inn?esc(j.inn.b)+(j.inn.ac?" ·"+esc(j.inn.ac.slice(-4)):""):"?"}</td><td class="m r">${q.o?fmt(Math.abs(q.o.a),2,SYM[q.o.cur]||""):fmt(q.a,2)}</td><td class="note">${esc((q.o&&q.o.t)||"")}${q.s==="demo"?" · пример":""}</td><td>${j.m?'<span class="pill ok">обе стороны</span>':'<span class="pill ask">второй выписки нет</span>'}</td><td><button class="sm" data-untr="${j.r.id}">Не перевод</button></td></tr>`;}).join("")}
   </tbody></table></div></details>`:""}
  <p class="note">Нажмите на строку, чтобы поправить или удалить.</p>`;
 }
@@ -2155,7 +2185,8 @@ const Cash=(()=>{
  // ended says in full what that means, and a row switched off says that it is.
  const said=it=>it.state==="off"?"выключено — в расчёт не идёт":it.state==="undated"&&!it.carry?"без даты — в расчёт по дням не идёт":Ed.remark(it).replace(/^каждый месяц · в последний раз$/,`повтор закончится после ${monG(it.occ?it.occ.ym:it.ym)}`).replace(/^каждый месяц( · )?/,"").replace(/^(ждали|срок был) .*$/,"");
  // Whose takings a withdrawal holds, where that says more than its sum - more than one founder, or a label: a
- // transfer to a founder's daily account is seen here, inside the withdrawal, and nowhere among the studio's costs.
+ // transfer to a founder's daily account made before October 2026 is seen here, inside the withdrawal, and nowhere
+ // among the studio's costs (from October such a move is a transfer between own accounts, and in no withdrawal).
  // In a month's list alone: «Сегодня» names no founder beside a figure.
  const took=it=>{const l=it.wd&&Array.isArray(it.wd.by)?it.wd.by:[];if(!l.length||(l.length===1&&!l[0].l))return "";
   return l.slice(0,6).map(x=>`${FN[x.c]||x.c}${x.l?" "+x.l:""} ${fmt(Math.round(x.gbp))}`).join(" · ")+(l.length>6?` и ещё ${l.length-6}`:"");};
@@ -2202,8 +2233,11 @@ const Cash=(()=>{
  // words «вне плана». It is a fact of the table and no line of the plan: nothing in it is typed, it opens no card,
  // and no figure of the plan counts it.
  const off=k=>{const o=(M.months.by[cu.month]||{}).off;return o?o.by[k]:null;},offRows=k=>(off(k)||{rows:[]}).rows;
+ // A row that withdrawals used up in part stands here with its rest (W2, 17 October 2026): the rest, and «часть
+ // £… из £…» - in the row's own currency, the rest of the whole row; what the withdrawals took is said in theirs.
+ const natP=(v,c)=>fmt(v,Math.abs(v)%1?2:0,SYM[c]||"")+(SYM[c]?"":" "+c);
  function outHTML(r,k){
-  const sum=Math.abs(r.amt).toLocaleString("en-GB",{maximumFractionDigits:2}),say=["вне плана",r.back?"возврат":"",r.prov?"ждёт в «Разборе»":""].filter(Boolean).join(" · ");
+  const sum=Math.abs(r.amt).toLocaleString("en-GB",{maximumFractionDigits:2}),say=["вне плана",r.part?`часть ${natP(r.amt,r.cur)} из ${natP(r.part.of,r.cur)}`:"",r.back?"возврат":"",r.prov?"ждёт в «Разборе»":""].filter(Boolean).join(" · ");
   return `<tr class="cs-r cs-done cs-out" data-cs-out="${esc(r.id)}" data-cs-k="${k}">
    <td class="cs-dt"><span class="cs-dd" data-cs-d="${esc(r.d)}">${dRu(r.d)}</span></td>
    <td class="cs-nmc"><div class="cs-nm"><i class="sw" style="background:${bcol(r.bank)}" title="${esc(r.bank)}"></i><span class="cs-nt">${esc(r.name||"(без названия)")}</span></div></td>
@@ -2892,6 +2926,9 @@ const Cash=(()=>{
 //  Live.vatFor(model, key, bank) → boolean          the «+ VAT» a new inflow starts with; key is norm(alias(name))
 //  Live.write.<verb>(plan, …)                       the hands that change a plan — see WHAT A TAP WRITES
 //  Live.LISTS, Live.perName(periodKey)              the five lists in order; "2026Q3" → «III кв. 2026»
+//  Live.byName(name) → "mika"|"misha"|"vanya"|""    the founder a withdrawal's whole name is (N, below); "" for none
+//  Live.daily(row) → boolean                        a move to (or back from) a founder's Daily or Monthly account from October 2026 (D):
+//                                                   the one test «Разбор», «Таблица», «Месяцы» and «Отчёты» ask too
 //  Live.SECS                                        the six sections a month is shown in: the lists, and «Подписки»
 //  window.__money = {compute, upgrade, passed, vatFor, write, model(opts), today, by}   the same, for the checks;
 //                                                   model() is compute on what the page holds now, today a getter
@@ -2901,6 +2938,9 @@ const Cash=(()=>{
 //          out of everything. r.at is when a row was uploaded (ms; read as 0 when absent): a statement row closes a
 //          written line only if it was uploaded AFTER the line was written, and only statements uploaded after a hand
 //          mark can say the bank shows no such payment. A row in a currency the page has no rate for is read as pounds.
+//          A move to a founder's Daily or Monthly account dated 1 October 2026 or later (D), or back from one, is read
+//          as a transfer between own accounts whatever block it is filed in: it moves its account's balance, and
+//          nothing else.
 //  plan    what GET /api/founder/money/cash stores. An older document is upgraded on the way in (Live.upgrade).
 //  T       today, "YYYY-MM-DD".
 //  opts    {H}: the horizon in days, 30 or 60 (default 60). The window W is T … T+H, both ends included. H changes the
@@ -2926,8 +2966,12 @@ const Cash=(()=>{
 //                   at that; the rest was written as a row of its own (carry). `true` (an old tab) reads as legacy
 //    paid.saw       on a withdrawal whose mark can count in «Денег сейчас», written by the page when a change to the
 //                   plan would otherwise have dealt the withdrawal's rows over, or moved its window (write.keep):
-//                   what the withdrawal held of the table as it lay - {w?, from, to, rows:[[ref, gbp]…]}. w: whose
-//                   the withdrawal was (absent: everybody's). from, to: the window it had; the statements close the
+//                   what the withdrawal held of the table as it lay - {w?, rec?, from, to, rows:[[ref, gbp]…]}. w:
+//                   whose the withdrawal was (absent: everybody's). rec: [ref…] - the takings it held as a record
+//                   (W1, since 17 October 2026): each is held whenever it was uploaded, also once a change has moved
+//                   its day past today (else only rows uploaded after it was written), and each is the record's whole
+//                   - what it has over is its rest «вне плана», dealt to no other withdrawal. A memory written again
+//                   of a withdrawal such a memory holds keeps the takings it still holds in the list. from, to: the window it had; the statements close the
 //                   withdrawal when they reach that `to`. rows: every taking the withdrawal could count - that
 //                   founder's rows, or all three's, of the window it had and of the one the plan gives it now - with
 //                   the pounds of each it held (0: a taking that was not this withdrawal's). `ref` is a hash of the
@@ -2964,10 +3008,13 @@ const Cash=(()=>{
 //    ptax, f        div only: a founder's personal tax; whose ("mika"|"misha"|"vanya"), when the name says.
 //                   A div row without ptax is a withdrawal
 //    whose          div only, on a withdrawal: the founder whose it is ("mika"|"misha"|"vanya"). Absent = everybody's
-//                   (the owner's decision of 12 October 2026). A row that is stored is never read by its name, and
-//                   never by `f` - the upgrade from v2 left `f` on every draw it moved here; a NEW row carries what
-//                   the form proposed from its name unless the founder chose otherwise. It is the line's: every
-//                   stored row of a chain that «… и дальше» split
+//                   (the owner's decision of 12 October 2026) - unless the row's whole name is one founder's, case and
+//                   spaces aside (Mika/Мика, Misha/Миша, Vanya/Ваня): then it is his (N, the owner's decision of
+//                   17 October 2026, which reverses the second «А» of the 12th). "" is «общий» chosen by hand on such
+//                   a row, and keeps it everybody's; it is written only by that choice. Never read by `f` - the
+//                   upgrade from v2 left `f` on every draw it moved here; a NEW row carries what the form proposed from
+//                   its name unless the founder chose otherwise. It is the line's: every stored row of a chain that
+//                   «… и дальше» split
 //  tax                             the studio's taxes, by rules
 //    since:"YYYY-MM-DD"            the day this plan became v3 — the day the page began to answer for the built-in
 //                                  rules. The page stamps it once (Cash); read as T while absent
@@ -3097,7 +3144,10 @@ const Cash=(()=>{
 //    his own withdrawals first, oldest first, then to those that are everybody's, never to another founder's; what
 //    it has over passes on in that order, and what finds no withdrawal stays outside the plan. What is not taken
 //    by the end of the window (as the statements of its bank reach it) is dropped. Never late or missed, never in
-//    a card.
+//    a card. A withdrawal WRITTEN AS A RECORD (W1, 17 October 2026) - somebody's, marked plainly «Оплачено» for a day
+//    that has come - takes its founder's rows near its date first, whatever their upload time: one row within the
+//    fee-folded tolerance of its sum, else the one set of two to four (D2). A row withdrawals take in part shows its
+//    rest outside the plan (W2).
 //    A MARKED withdrawal («Оплачено», «Частично») has been taken, the founder says, and its mark is worth what its
 //    rows leave of the sum. Which rows are its is decided by the walk - and so by every other withdrawal of the plan.
 //    So a change to the plan must not deal them over: the page sees what every withdrawal whose mark can count in
@@ -3288,13 +3338,15 @@ const Cash=(()=>{
 //                                  on); last — this is that month
 //    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
 //                                  the plan document); dated, or — in a plan from before — without a date
-//    wd                            for a withdrawal: {from, to, got, by} — its window and what was taken (native);
+//    wd                            for a withdrawal: {from, to, got, by, rec?} — its window and what was taken (native);
 //                                  by[{c, l, gbp}] — whose takings it holds and under which label, in pounds, the
-//                                  largest first: a transfer to a founder's daily account is {c:"misha", l:"daily"}
+//                                  largest first (a transfer to a founder's daily account made before October 2026
+//                                  is {c:"misha", l:"daily"}); rec: true when it is a record that took its rows (W1)
 //    saw                           for a withdrawal whose mark can count in «Денег сейчас» - it waits for its
 //                                  statement, and is later than its account's balance: what it holds of every taking
-//                                  it may count, as a memory would say it (paid.saw) - {w?, from, to, rows:[[ref,
-//                                  gbp]…]}; a taking of a balance's own day is [ref, gbp, at] there
+//                                  it may count, as a memory would say it (paid.saw) - {w?, rec?, from, to, rows:[[ref,
+//                                  gbp]…]}; a taking of a balance's own day is [ref, gbp, at] there; rec: the takings
+//                                  it holds as a record (W1), where it is one or a record's memory holds them
 //    sawDay                        for any other withdrawal that is switched on, has a sum and a mark that is no
 //                                  word, while some account has a taking of its balance's own day: what it holds of
 //                                  those takings alone - the ones of its window, and any it holds - in the same
@@ -3422,9 +3474,12 @@ const Cash=(()=>{
 //                                  What was PAID outside the plan, in every month from the one the plan was first
 //                                  written in to the running one: by[ym].off = {in, out, nIn, nOut, by{[list]}} —
 //                                  the month's sums and counts, and by[list] = {rows[{id, d, name, amt, cur, gbp,
-//                                  bank, prov, back}], gbp}: the rows of the table that closed no line and used up
-//                                  no withdrawal, by the section of their block (gbp is signed: a refund, `back`,
-//                                  is negative; prov — recognised and still in «Разбор»); by[ym].wait = {n, gbp} —
+//                                  bank, prov, back, part?}], gbp}: the rows of the table that closed no line and used
+//                                  up no withdrawal, by the section of their block (gbp is signed: a refund, `back`,
+//                                  is negative; prov — recognised and still in «Разбор»), and the REST of a founder's
+//                                  row that withdrawals took in part (W2): amt and gbp are the rest, part = {of, took}
+//                                  the whole row and what was taken, in the row's own currency, the two making the
+//                                  row exactly; by[ym].wait = {n, gbp} —
 //                                  what lies in «Разбор» with no block yet. Shown, and in no figure of the plan.
 //                                  Absent in an earlier month and in a month that has not come
 //  clients[]                       {key, name, mark:"vat"|"no", set, last, banks[{bank, vat}], show, rows[], odd} —
@@ -3447,8 +3502,9 @@ const Cash=(()=>{
 //  · «Чей вывод» (the owner's decision of 12 October 2026: «да, делай, А»). The design has one budget for the three
 //    founders; a withdrawal may now say whose it is (`whose`), and then only that founder's rows use it up. The key
 //    is its own: not `f` (the upgrade from v2 wrote `f` on every draw it moved to `div`, and reading it would have
-//    made those rows somebody's on the first load) and not the name (a row called «Vanya» is everybody's until a
-//    founder says so - reading a plan moves no figure). Saying whose a row is deals the rows over: what the others
+//    made those rows somebody's on the first load). Until 17 October 2026 not the name either (a row called «Vanya»
+//    was everybody's until a founder said so); since then a row whose whole name is a founder's is his (N, below).
+//    Saying whose a row is deals the rows over: what the others
 //    took no longer uses it up, and goes to the withdrawals that are everybody's, or outside the plan. «Можно
 //    вывести», the month's blocks and every sum of `div` are still one figure for the studio - nothing in the model
 //    is per founder. Two rows of one name are still one payment to «каждый месяц» and to «Продублировать», whoever
@@ -3507,6 +3563,30 @@ const Cash=(()=>{
 //    if it was uploaded after the line was written is not changed - also for a transfer that sat unsorted in «Разбор»
 //    when the mark was made (E6 lets any other marked line take such a row; a withdrawal's walk does not, marked or
 //    not).
+//  · The owner's decisions of 17 October 2026 («это разные выводы»; «все переводы daily — это переводы
+//    внутренние… только с октября»). N: a withdrawal nobody chose an owner for whose whole name is one founder's is
+//    his (`whose`, above; BYNAME is its switch) - it reverses the second «А» of 12 October, and a plan that has such a
+//    row is read otherwise from the first load: the walk deals that founder's rows to it and the others' away from it,
+//    and a memory written while it was everybody's names no owner and is not in force. W1: the design's walk gives a
+//    withdrawal only rows uploaded after it was written, so a founder who writes down a withdrawal he has made, after
+//    the statement, never saw it closed by its own row - the row stood outside the plan beside it and the next
+//    founder's transfers filled it; a record takes its rows first (D2, where it is said how it keeps the rules of a
+//    marked withdrawal). Known, and kept: what a record takes depends also on the rows other lines hold by hand and on
+//    the memories, so a change to another line can move a record - the seeing and the keeping then hold what the
+//    rules hold: a record whose mark can count is given a memory that names its rows as a record's (`rec`) - held
+//    whenever they were uploaded, even once a change has moved its day past today, and each whole, its rest «вне
+//    плана»; one whose mark cannot count is made first of the takings of a balance's day its memory holds; and a
+//    memory's claim on a taking its withdrawal could not be given (news of an earlier day took the room) keeps no
+//    record from it - where a withdrawal may be a record, such a plan is read once more without those claims.
+//    W2: a row that withdrawals used up in part was the withdrawals' whole - its rest
+//    was shown nowhere; it is shown outside the plan, as the rest. D: the sheet counted a move to a founder's Daily or
+//    Monthly account as his withdrawal, and so did the page until 17 October 2026; from 1 October 2026 such a move -
+//    and a move back from such an account - is a transfer between own accounts (Live.daily): it leaves the balance it
+//    left and is in no withdrawal, no founders' figure, no list outside the plan, no cost of the studio, and «Разбор»
+//    files it so and never pairs it (settle: as the sure leg of a pair it took any unrecognised receipt of its sum
+//    with it). A label «daily»/«monthly» alone marks a move only on money that left and whose statement names no
+//    payment by card, direct debit or standing order. Before October nothing changed: the sheet's «daily» rows are
+//    the founders' takings. Nothing stored is rewritten for any of the four: opening the page writes nothing.
 //  · «под налоги сейчас» (taxes.reserve) is the reserve from facts and from lines marked received — the design's
 //    RES[T−1] plus what a mark made today accrues: that money is in «сейчас» already.
 //  · A marked month of a repeating row keeps first claim on the row uploaded after the mark and dated on.−3 … +7,
@@ -3587,6 +3667,37 @@ const Live=(()=>{
  const hash=s=>{let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return(h>>>0).toString(36);};
  // A payment may be a little short (a bank's cut on the way in) and, going out, a little over (Wise folds its fee in).
  const tol=(t,dir)=>dir>0?[Math.max(2,0.02*t),Math.max(2,0.02*t)]:[Math.max(2,0.02*t),Math.max(5,0.05*t)];
+ // N. Whose a withdrawal is (the owner's decisions of 12 and 17 October 2026). What a founder chose first: `whose`,
+ // and «общий» chosen by hand, which on a row that bears a founder's name is stored as whose:"" and stays
+ // everybody's. Else - since 17 October, «А» - the founder the name IS: the whole name, spaces and case aside, one
+ // founder's own (Mika/Мика, Misha/Миша, Vanya/Ваня). Nothing less than the whole name («Вывод Vanya» is everybody's),
+ // and never `f` (the upgrade from v2 left it on every draw it moved, and the checks turn it upside down).
+ const BYNAME=true;   // N's switch: false reads `whose` alone, as the page did from 12 to 17 October 2026
+ const NAMED={mika:["mika","мика"],misha:["misha","миша"],vanya:["vanya","ваня"]};
+ const byName=n=>{if(!BYNAME)return "";const s=String(n==null?"":n).trim().toLowerCase();return FOUNDERS.find(k=>NAMED[k].includes(s))||"";};
+ const ownerOf=r=>FOUNDERS.includes(r.whose)?r.whose:r.whose===""?"":byName(r.name);
+ // D. A move to a founder's Daily or Monthly account (the owner's decision of 17 October 2026, «А», «только с
+ // октября»): from 1 October 2026 it is a transfer between own accounts - the founders keep those accounts to hold
+ // down what the company card spends - and so in no figure but the balance it left. Before October such a row stays
+ // the founder's taking, as the sheet has it. A row of the table or of «Разбор» is one when it is dated 2026-10-01 or
+ // later, its statement does not call it a payment - by card, by direct debit, by standing order - and either
+ //   · the statement says it is a move between that account and a founder's Daily or Monthly account («перемещено
+ //     сюда: Mika Daily», «Moved … to Mika Daily»), whichever way the money went: a sum moved BACK from a Daily
+ //     account («Moved … from Mika Daily») is the same transfer the other way, or it would lower the founder's
+ //     October as a refund of a move that no longer counts; or
+ //   · money LEFT the account and the row is filed in a founder's block under the label «daily» or «monthly» (alone,
+ //     or after the founder's name) - the label alone, on a row whose statement names no payment.
+ // What a founder pays by card, by direct debit or by standing order is his, whatever its label. This is the one
+ // test: the engine, «Разбор» (classify, and settle, which never pairs such a row), «Месяцы», «Отчёты» and «Таблица»
+ // all ask it.
+ const DAILY_FROM="2026-10-01";
+ const PAID=/card transaction|card payment|direct debit|standing order|транзакция по карте|оплата картой|покупка по карте|прямое списание|прямое дебетование|постоянное поручение/i,MOVE=/перемещен|(^|[^a-z])moved([^a-z]|$)/i;
+ const DEST=/(^|[^a-zа-яё])(mika|misha|vanya|мика|миша|ваня)\s+(daily|monthly)([^a-zа-яё]|$)/i,LABEL=/^((mika|misha|vanya|мика|миша|ваня)\s+)?(daily|monthly)$/i;
+ const daily=r=>{if(!obj(r)||!isD(r.d)||r.d<DAILY_FROM)return false;const o=obj(r.o)?r.o:{},a=+o.a;
+  const t=[o.p,o.t].filter(x=>typeof x==="string").join(" ");if(PAID.test(t))return false;
+  if(MOVE.test(t)&&DEST.test(t))return true;
+  const out=isFinite(a)&&a!==0?a<0:r.dir?r.dir<0:FOUNDERS.includes(r.c)&&+r.a>0;
+  return out&&FOUNDERS.includes(r.c)&&LABEL.test(String(r.l==null?"":r.l).trim());};
 
  // ---- the periods of a tax ----
  // A calendar month, quarter or year, named "2026-10", "2026Q4", "2026". A tax is due on a day of the month that
@@ -3634,15 +3745,18 @@ const Live=(()=>{
   const live=r=>r&&typeof r==="object"&&r.s!=="demo"&&isD(r.d);
   const txs=(Array.isArray(led.tx)?led.tx:[]).filter(live),inb=(Array.isArray(led.inbox)?led.inbox:[]).filter(live),all=txs.concat(inb);
   const sg=r=>!r.c||r.c==="skip"||!r.dir||((r.c==="rev")===(r.dir>0))?1:-1;
-  const isProv=r=>!!(r.c&&r.c!=="skip"&&String(r.l||"").trim()&&r.auto&&!r.twin&&!r.maybe&&!r.rep);
+  // A transfer between own accounts: one filed so, and - from October 2026 - a move to a founder's Daily or Monthly
+  // account (D, above), whatever block it was filed in. Either moves the balance it left and nothing else.
+  const own=r=>r.c==="skip"||daily(r);
+  const isProv=r=>!!(r.c&&!own(r)&&String(r.l||"").trim()&&r.auto&&!r.twin&&!r.maybe&&!r.rep);
   // A row in a currency the page has no rate for is read one to one, as pounds — the table does the same — and so
   // it belongs to the bank's pound account, which «Вписать остаток» can fill, not to an account nobody can type.
   const cur3=c=>CURS.includes(c)?c:"GBP";
   const row=(r,inbox)=>{const o=r.o&&isFinite(+r.o.a)?{a:+r.o.a,cur:cur3(r.o.cur)}:null,a=inbox?r2((+r.a||0)*sg(r)):+r.a||0;
    return{id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0,k:r.key==null?"":String(r.key)};};
-  const pool=txs.filter(r=>r.c&&r.c!=="skip").map(r=>row(r,false)).concat(inb.filter(isProv).map(r=>row(r,true))).sort(byDate);
+  const pool=txs.filter(r=>r.c&&!own(r)).map(r=>row(r,false)).concat(inb.filter(isProv).map(r=>row(r,true))).sort(byDate);
   const poolIds=new Set(pool.map(r=>r.id)),anyRow={};all.forEach(r=>{anyRow[String(r.id)]=r;});
-  const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:r.c==="skip"||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,""),bal:isFinite(r.o.bal)&&r.o.bal!==null&&+r.o.balAt>0?+r.o.bal:null,balAt:+r.o.balAt||0,balIn:+r.o.balIn||+r.o.balAt||0})).sort(byDate);
+  const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:own(r)||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,""),bal:isFinite(r.o.bal)&&r.o.bal!==null&&+r.o.balAt>0?+r.o.bal:null,balAt:+r.o.balAt||0,balIn:+r.o.balIn||+r.o.balAt||0})).sort(byDate);
   // Banks are named by the ledger, and a ledger may name one «constructor»: the maps keyed by a bank have no
   // prototype to answer for it.
   let sheetEnd="";const lastOf=Object.create(null),ups=Object.create(null);
@@ -3657,7 +3771,7 @@ const Live=(()=>{
   let reach=sheetEnd;Object.keys(lastOf).forEach(b=>{if(lastOf[b]>reach)reach=lastOf[b];});if(reach>T)reach=T;
   const skOf=r=>{if(r.c==="tax"){const f=owner(r);return f?"tax|@"+f:"";}if(FOUNDERS.includes(r.c))return "";const l=norm(r.l);return l?r.c+"|"+l:"";};
   let L="";pool.forEach(r=>{r.sk=skOf(r);r.lk=r.sk||(FOUNDERS.includes(r.c)?"@"+r.c:r.c==="tax"?"tax|":"");if(r.d>L)L=r.d;});
-  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
+  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,own,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
  }
 
  // ---- C1–C5. who is paid, or pays, every month ----
@@ -3888,7 +4002,7 @@ const Live=(()=>{
  function compute(led,plan0,T,opts){
   if(!isD(T))throw new Error("Live.compute: T is not a date");
   opts=opts||{};
-  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv}=R;
+  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv,own}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
   // How far «Касса» by months is drawn (the owner's decision of 9 October 2026: «продли кассу на 6 месяцев»): the
   // running month and six after it, with the rows that repeat written out in each. The verdict, «Можно вывести» and
@@ -3935,7 +4049,7 @@ const Live=(()=>{
    const lnk=linkOf(k,r),cur=CURS.includes(r.cur)?r.cur:"GBP",vat=k==="inflows"&&r.vat===true,amt0=Math.max(0,+r.amt||0);
    const of=k!=="taxes"||lnk.ptax?false:obj(r.of)&&r.of.r!=null&&r.of.p!=null?{r:String(r.of.r),p:String(r.of.p),part:!!r.of.part}:r.of===undefined?null:false;
    const base={kind:"typed",list:k,blk:lnk.blk,grp:lnk.ptax?"div":GRP[k],name:String(r.name==null?"":r.name),key:norm(alias(r.name)),cur,vat,vk:vat?TOP:1,dir:k==="inflows"?1:-1,bank:String(r.bank||""),mon:isM(r.mon)?r.mon:"",
-    sk:lnk.sk,lk:lnk.lk,how:lnk.how,label:lnk.label,c0:+r.c0||0,fixed:!!r.fixed,row:id,sub:k==="other"&&r.sub===true,wd:k==="div"&&!lnk.ptax,whose:k==="div"&&!lnk.ptax&&FOUNDERS.includes(r.whose)?r.whose:"",ptax:!!lnk.ptax,of,guess:"",who:String((obj(r.m)&&r.m.by)||""),chain:"",ym0:"",carry:null,moved:false,exc:false,rec:null,tax:null};
+    sk:lnk.sk,lk:lnk.lk,how:lnk.how,label:lnk.label,c0:+r.c0||0,fixed:!!r.fixed,row:id,sub:k==="other"&&r.sub===true,wd:k==="div"&&!lnk.ptax,whose:k==="div"&&!lnk.ptax?ownerOf(r):"",ptax:!!lnk.ptax,of,guess:"",who:String((obj(r.m)&&r.m.by)||""),chain:"",ym0:"",carry:null,moved:false,exc:false,rec:null,tax:null};
    const one=(o,e,on)=>add(Object.assign({},base,o,{on,paid:e.paid===true?{on:"",legacy:true}:obj(e.paid)?e.paid:null,tx:arr(e.tx),notx:e===r?arr(r.notx):arr(r.notx).concat(arr(e.notx)),closed:!!e.closed,rem:o.amt,got:0,gotG:0,done:null,hint:null,match:[],last:""}));
    const rec=obj(r.rec)&&isM(r.rec.from)&&+r.rec.day>=1&&+r.rec.day<=31?r.rec:null;
    if(!rec)return void one({id,src:"row",amt:amt0,date:isD(r.date)?r.date:"",carry:obj(r.carry)&&isM(r.carry.ym)?{ym:r.carry.ym}:null},r,r.on!==false);
@@ -3983,9 +4097,10 @@ const Live=(()=>{
   // twenty after for a one-off, or to the day before the next month's window for a month of a repeating one. Rows
   // go, oldest first, to the earliest open withdrawal whose window holds them; what a row has over one remainder
   // passes on to the next. Never by amount: founders take their money in fourteen to thirty transfers a month.
-  // «Чей вывод» (12 October 2026): a withdrawal that says whose it is takes that founder's rows alone, and a
-  // founder's row looks at his own withdrawals before the ones that are everybody's (wdOf: the order it walks).
-  // With no owner anywhere that order is `wds` itself, and the plan reads to the penny as it did.
+  // «Чей вывод» (12 October 2026): a withdrawal that says whose it is - or, since 17 October, whose whole name is a
+  // founder's (N, `ownerOf`) - takes that founder's rows alone, and a founder's row looks at his own withdrawals
+  // before the ones that are everybody's (wdOf: the order it walks). With no owner anywhere that order is `wds`
+  // itself, and the plan reads to the penny as it did.
   const wds=items.filter(it=>it.wd&&it.date).sort(byItem),wdOf={};
   FOUNDERS.forEach(k=>{wdOf[k]=wds.filter(it=>it.whose===k).concat(wds.filter(it=>!it.whose));});
   // «Оплачено» on a withdrawal says it has been taken, and the mark is worth what its rows leave of the sum. Which
@@ -4012,8 +4127,10 @@ const Live=(()=>{
   const refOf=f=>hash((f.k||"#"+f.id)+"|"+f.c),capOf=it=>gbp(it.amt,it.cur);
   const waits=it=>{const p=it.paid;if(!p||word(it)||!canPay(it))return false;const c=covSince(it.bank,+p.at||0);return !c||c<p.on;};
   const dead=new Set(Array.isArray(opts.dead)?opts.dead:[]),nameOf=it=>(it.src==="occ"?it.chain+"|"+it.ym0:it.id)+"|"+(+it.paid.at||0)+"|"+it.paid.on;
+  // (the takings a memory holds as a record's - W1: each of them whole, whatever its upload time; `rec`, a list of refs)
+  const wholeOf=s=>new Set(Array.isArray(s.rec)?s.rec.map(String):[]);
   const memOf=it=>{const s=it.wt&&!dead.has(nameOf(it))&&obj(it.paid.saw)?it.paid.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to)||String(s.w||"")!==it.whose)return null;
-   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length&&!had.has(String(x[0])))had.set(String(x[0]),Math.max(0,+x[1]||0));});return{from:s.from,to:s.to,had,shut:!!it.cov&&it.cov>=s.to};};
+   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length&&!had.has(String(x[0])))had.set(String(x[0]),Math.max(0,+x[1]||0));});return{from:s.from,to:s.to,had,shut:!!it.cov&&it.cov>=s.to,whole:wholeOf(s)};};
   // The takings of a balance's own day (B, below: `sd`). Whether a statement row dated on the very day a balance
   // was typed for is inside that balance goes by the mark whose place the row took - so, for a founder's taking, by
   // the marked withdrawal that holds it, and so by the walk. A memory that is NOT in force as above - its mark is
@@ -4026,35 +4143,133 @@ const Live=(()=>{
   // with them (`sd`), once.
   const SD=opts.sd instanceof Map?opts.sd:null;
   const dayMem=(it,S)=>{const s=S&&it.paid&&!word(it)&&obj(it.paid.saw)?it.paid.saw:null;if(!s||!Array.isArray(s.rows)||!isD(s.from)||!isD(s.to)||String(s.w||"")!==it.whose)return null;
-   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length>2&&!had.has(String(x[0]))&&S.has(String(x[0]))&&S.get(String(x[0]))===x[2])had.set(String(x[0]),isFinite(+x[1])?Math.max(0,+x[1]):0);});return had.size?{had,day:true}:null;};
-  wds.forEach(it=>{it.wt=waits(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:dayMem(it,SD);it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
+   const had=new Map();s.rows.forEach(x=>{if(Array.isArray(x)&&x.length>2&&!had.has(String(x[0]))&&S.has(String(x[0]))&&S.get(String(x[0]))===x[2])had.set(String(x[0]),isFinite(+x[1])?Math.max(0,+x[1]):0);});return had.size?{had,day:true,whole:wholeOf(s)}:null;};
+  // (`rk`: a withdrawal that may be a record - W1, below: somebody's, marked plainly «Оплачено» on its own word - not
+  // «Частично», not a mark from the old «Касса» - for a day that has come, switched on, with a sum, and tied to no row
+  // by hand)
+  const rk=it=>!!it.whose&&canPay(it)&&!!it.paid&&isD(it.paid.on)&&!word(it)&&it.pamt==null&&!it.tx.length&&!!it.date&&it.date<=T;
+  wds.forEach(it=>{it.wt=waits(it);it.rk=rk(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:dayMem(it,SD);it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
   // The takings: the rows of the founders' blocks that a bank gave a sum for. One name (`ref`) for one taking,
   // however often it is read in; of two rows that share one - the upload makes none - the first is the taking.
   const takers=pool.filter(f=>FOUNDERS.includes(f.c)&&f.o&&!f.ret),mems=wds.filter(it=>it.mem),one=new Map();
   if(wds.some(it=>it.paid))takers.forEach(f=>{f.ref=refOf(f);if(!one.has(f.ref))one.set(f.ref,f);});
-  // (a taking the memory holds is the withdrawal's whatever the window the plan now gives it; never another founder's)
-  const holds=(it,f)=>canPay(it)&&!word(it)&&f.at>it.c0&&!it.notx.includes(f.id)&&(!it.whose||it.whose===f.c);
+  // (a taking the memory holds is the withdrawal's whatever the window the plan now gives it; never another founder's.
+  // Of a withdrawal that may be a record, whatever its upload time too - and so is a taking a memory holds as a
+  // record's (`rec`) when a change has since moved the record's day past today: a record takes its rows whenever they
+  // were uploaded (W1), and «Новый день — нет: вывод держит что держал». Without `rec` such a memory let go of every
+  // row uploaded before the record was written, and its mark counted again on top of a row inside the balance)
+  const holds=(it,f)=>canPay(it)&&!word(it)&&(f.at>it.c0||it.rk||!!(it.mem&&it.mem.whole.has(f.ref)))&&!it.notx.includes(f.id)&&(!it.whose||it.whose===f.c);
   // (the room a day memory keeps: what its takings will give when the walk comes to them)
   mems.forEach(it=>{if(!it.mem.day)return;it.rs=new Map();it.rsv=0;it.mem.had.forEach((h,ref)=>{const f=one.get(ref);if(h>0&&f&&!used.has(f.id)&&holds(it,f)){it.rs.set(ref,h);it.rsv+=h;}});});
+  // W1. A withdrawal written as a record (the owner's word of 17 October 2026: «это разные выводы»). A founder writes
+  // the withdrawal he has made - after the statement that holds it was uploaded - and marks it «Оплачено». The walk
+  // above never gives it that statement's row: a row counts for a line only if it was uploaded after the line was
+  // written. So the row stood «вне плана» beside its own withdrawal, and the withdrawal was filled days later by
+  // whatever came next. Now such a withdrawal (`rk`: somebody's, marked plainly, for a day that has come) takes its
+  // founder's rows near its date FIRST, before the walk deals anything, whatever their upload time:
+  //   · the rows of its founder's block dated within five days of its date (a move to a Daily account is no such
+  //     row from October - D), that no other record took and that no memory of another withdrawal holds;
+  //   · one row within the tolerance of an outgoing payment whose fee is folded in (−max(£2, 2%) … +max(£5, 5%) of
+  //     its sum, in pounds - today's, for a withdrawal in another currency, as the walk counts it), the nearest
+  //     first; else the one set of two to four such rows whose sum is within it - two sets that fit are none.
+  // They are its, up to its sum, and it is done; what a row has over its sum is that row's rest, shown «вне плана»
+  // (W2). Nothing fits: dealt by the walk exactly as before. Records go oldest first.
+  // A record that holds a memory of the takings of a balance's day (its mark cannot count - it is inside the balance,
+  // or waits no longer), which holds those takings as a record's (`rec`), is made of what it holds FIRST - as much of
+  // each as it held - and never of a taking of that day it held none of; they are completed from the rest as above
+  // (they alone, if they fit; else the one set of two to four that holds them), and taken in the table's order, as any
+  // record's rows, with room kept for each remembered taking still to come. Where those takings are no rows of its
+  // any more - another founder's, more than five days off, tied by hand to another line, held by another memory - or
+  // nothing completes them, it is no record, and the walk gives it what the memory holds (`holds`, whatever their
+  // upload time); and so does a memory of a balance's day written while it was NO record (no `rec`: the walk dealt
+  // it then, and the memory holds what the walk gave). Where the choice it makes with no memory keeps to its memory
+  // - takes every taking of that day it held and none it did not - that choice stands as it is, so that the seeing
+  // and the keeping around no change move nothing. Without this, a change that set loose a row nearer its date
+  // - a tie by hand taken off another line - let a record take that row and drop the taking of the balance's day:
+  // «Денег сейчас» moved by the whole taking with nothing new from the bank.
+  // How this keeps the rules of a marked withdrawal. A record and the walk never share a row: what a record takes
+  // is `used` before the walk begins, so no row gives the withdrawals more than its sum. A record's mark is a mark
+  // its rows have closed - done by "row" - and is never counted in «Денег сейчас», nor twice: a row it took that was
+  // uploaded after the mark stands in the mark's place (tookMark), one that was on the page before it is inside the
+  // balance by its date, as it always was. What a record takes depends on its own fields, the table, the records
+  // older than it, the rows other lines hold by hand (`tx`) and the memories - so a change to another line CAN move
+  // it: a tie by hand taken off or put on, an earlier record changed, a memory written. Then the seeing and the
+  // keeping hold what the rules ask: one whose mark can count is given a memory of what it held (a record's rows are
+  // in its window, so `sawOf` sees them), which names the takings it holds as a record's (`rec`); a withdrawal held
+  // by a memory in force is no record - the memory gives it those rows whenever they were uploaded (`holds`: `rk`, or
+  // `rec` once a change has moved its day past today), each of them whole, as W1 took it (its rest stays «вне
+  // плана», below) - and no other record may take a row a memory holds. So a mark that can count neither
+  // counts twice nor vanishes. One whose mark cannot count is given the memory of its takings of a balance's day,
+  // and takes them first (above): a change to another line moves none of them into the balance or out of it.
+  // (a taking a memory names but could not be given - news of an earlier day, uploaded since, took its withdrawal's
+  // room first, as the walk deals news - keeps no record from it: `stale`, below)
+  const STALE=new Set(Array.isArray(opts.stale)?opts.stale.map(String):[]);
+  {const resBy=new Map();mems.forEach(it=>it.mem.had.forEach((h,ref)=>{const f=one.get(ref);if(h>0&&f&&!STALE.has(nameOf(it)+"#"+ref)){if(!resBy.has(f.id))resBy.set(f.id,new Set());resBy.get(f.id).add(it);}}));
+   const g=f=>Math.abs(f.a),at=new Map();takers.forEach((f,i)=>{at.set(f,i);});
+   wds.forEach(it=>{if(!it.rk||(it.mem&&!it.mem.day))return;
+    const t=capOf(it),z=tol(t,-1),fit=x=>x>=t-z[0]-1e-9&&x<=t+z[1]+1e-9,far=f=>Math.abs(dn(f.d)-dn(it.date));
+    const ok=f=>f.c===it.whose&&far(f)<=5&&!used.has(f.id)&&!it.notx.includes(f.id)&&![...(resBy.get(f.id)||[])].some(x=>x!==it);
+    const sets=(cs,base,s0)=>{let n=0,found=null;const walk=(i,acc,s)=>{if(n>1)return;if(acc.length>=2&&acc.length>base.length&&fit(s)){n++;found=acc.slice();}if(acc.length===4)return;for(let j=i;j<cs.length;j++){acc.push(cs[j]);walk(j+1,acc,s+g(cs[j]));acc.pop();}};
+     walk(0,base.slice(),s0);return n===1?found:null;};
+    // the choice with no memory: the nearest single row that fits, else the one set of two to four
+    const cs=takers.filter(ok);let set=null;
+    {const best=cs.filter(f=>fit(g(f))).sort((a,b)=>far(a)-far(b)||Math.abs(g(a)-t)-Math.abs(g(b)-t)||at.get(a)-at.get(b))[0];
+     if(best)set=[best];else if(cs.length>=2&&cs.length<=12)set=sets(cs,[],0);}
+    // its own day memory: the takings of a balance's day it held (`pre`) must be among its rows, and none it held
+    // none of. Where the choice above keeps to that, it stands as it is; where not, a memory that holds those
+    // takings as a record's (`rec`) makes it of them first, completed from the rest - and any other memory leaves it
+    // to the walk, which gives it what that memory holds
+    const dm=it.mem&&it.mem.day?it.mem.had:null,pre=[];
+    if(dm){let lost=false;dm.forEach((h,ref)=>{const f=one.get(ref);if(!(h>0)||!f)return;if(ok(f)&&holds(it,f))pre.push(f);else lost=true;});
+     const zero=f=>dm.has(f.ref)&&!(dm.get(f.ref)>0);
+     if(lost||!set||!pre.every(f=>set.includes(f))||set.some(zero)){
+      if(lost||!pre.length||!pre.every(f=>it.mem.whole.has(f.ref)))return;
+      const rest=cs.filter(f=>!dm.has(f.ref)),s0=sum(pre,g);
+      set=fit(s0)?pre.slice():pre.length<4&&rest.length<=12?sets(rest,pre,s0):null;}}
+    if(!set)return;
+    // (in the table's order, as any record's rows - with room kept for what the memory holds of a taking still to
+    // come: no taking of the balance's day gives it less than it held)
+    let owed=sum(pre,f=>Math.min(g(f),dm.get(f.ref)));
+    const take=(f,cap)=>{const v=Math.min(g(f),cap,t-it.gotG);if(v<0.005)return;it.gotG+=v;it.took.set(f.id,v);it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);};
+    set.sort((a,b)=>at.get(a)-at.get(b)).forEach(f=>{if(pre.includes(f)){const h=Math.min(g(f),dm.get(f.ref));owed-=h;take(f,h);}else take(f,Math.max(0,t-it.gotG-owed));});
+    if(!it.match.length)return;
+    it.record=true;it.done={by:"row",on:it.last,rows:it.match.slice(),note:"",got:r2(nat(it.gotG,it.cur))};});}
   if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);const known=mems.length>0&&one.get(f.ref)===f;
    const may=it=>!(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1);
    const give=(it,take)=>{it.gotG+=take;left-=take;it.took.set(f.id,take);it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);};
-   if(known)mems.forEach(it=>{const h=it.mem.had.get(f.ref);if(it.rs&&it.rs.has(f.ref)){it.rsv-=it.rs.get(f.ref);it.rs.delete(f.ref);}if(!h||!holds(it,f))return;const take=Math.min(h,left,capOf(it)-it.gotG);if(take>=0.005)give(it,take);});
+   // (a row a memory gives as a record's - `rec` - is that record's whole, as W1 made it: what it has over is its rest
+   // «вне плана» - W2 - and passes on to no other withdrawal; else a memory written of a record dealt that rest on,
+   // with no change. A row the walk gave such a withdrawal as news since is dealt as the walk deals every row)
+   let whole=false;
+   if(known)mems.forEach(it=>{const h=it.mem.had.get(f.ref);if(it.rs&&it.rs.has(f.ref)){it.rsv-=it.rs.get(f.ref);it.rs.delete(f.ref);}if(!h||!holds(it,f))return;const take=Math.min(h,left,capOf(it)-it.gotG);if(take>=0.005){give(it,take);if(it.mem.whole.has(f.ref))whole=true;}});
+   if(whole)left=0;
    for(const it of wdOf[f.c]){if(left<0.005)break;if(!may(it)||(known&&it.mem&&it.mem.had.has(f.ref)))continue;
     const open=capOf(it)-it.gotG-(it.rsv||0);if(open<0.005)continue;give(it,Math.min(left,open));}});
+  // A memory in force names a taking its withdrawal could not be given: news of an earlier day, uploaded since, took
+  // the room first - the walk deals news so, and the next change to the plan writes the memory anew as it now lies.
+  // Such a claim must not keep a record (W1) from that taking: read with it, a record was refused a row nobody held,
+  // and the seeing and the keeping around no change at all - which write the memory anew, or take it out - made it a
+  // record. So where a withdrawal may be a record, the plan is read again, once, without those claims (`stale`).
+  // Nothing changes where no withdrawal may be a record: the claims keep nothing else from anything.
+  if(!opts.stale&&wds.some(it=>it.rk)){const st=[];mems.forEach(it=>it.mem.had.forEach((h,ref)=>{const f=one.get(ref);if(h>0&&f&&!(it.took.get(f.id)>0))st.push(nameOf(it)+"#"+ref);}));
+   if(st.length)return compute(led,plan0,T,Object.assign({},opts,{stale:st}));}
   // What a mark that waits would remember (paid.saw): whose the withdrawal is, its window, the takings it may
   // count and what it holds of each - to the last digit, not to the penny: a withdrawal in another currency leaves
   // a row with a sum that is not whole pence. A taking a memory in force holds that is out of the table for now
   // is kept as it was remembered.
   // A taking of a balance's own day is written with the balance it was read against - [ref, gbp, at]. And what a
   // mark that cannot count would remember (`day`): those takings alone - the ones of its window, and any it holds
-  // - and nothing at all where no account has such a taking.
+  // - and nothing at all where no account has such a taking. A record's (W1) names the takings it holds (`rec`): they
+  // may have been uploaded before it was written, the memory holds them all the same, and each is the record's
+  // whole. So does one written again of a withdrawal a record's memory holds - of the takings it still holds as such:
+  // once its day has moved past today it is no record, and a memory written anew without them would let those rows
+  // go at the next change.
   const sd=new Map();
-  const sawOf=(it,day)=>{if(day&&!sd.size)return undefined;const rows=[],u=new Set(),m=it.mem;
+  const sawOf=(it,day)=>{if(day&&!sd.size)return undefined;const rows=[],u=new Set(),m=it.mem,rec=[],whole=ref=>it.record||(!!m&&m.whole.has(ref));
    takers.forEach(f=>{if(one.get(f.ref)!==f||(it.whose&&it.whose!==f.c))return;const at=sd.get(f.ref),t=it.took.get(f.id)||0;
-    if((day&&at===undefined)||!((f.d>=it.w0&&f.d<=it.w1)||(m&&m.had.has(f.ref))||(day&&t>0)))return;u.add(f.ref);rows.push(at===undefined?[f.ref,t]:[f.ref,t,at]);});
-   if(m&&!day)m.had.forEach((h,ref)=>{if(!u.has(ref))rows.push([ref,h]);});
-   return Object.assign(it.whose?{w:it.whose}:{},{from:it.mm?it.mm.from:it.w0,to:it.mm?it.mm.to:it.w1,rows});};
+    if((day&&at===undefined)||!((f.d>=it.w0&&f.d<=it.w1)||(m&&m.had.has(f.ref))||(day&&t>0)))return;u.add(f.ref);rows.push(at===undefined?[f.ref,t]:[f.ref,t,at]);if(t>0&&whole(f.ref))rec.push(f.ref);});
+   if(m&&!day)m.had.forEach((h,ref)=>{if(!u.has(ref)){rows.push([ref,h]);if(h>0&&m.whole.has(ref))rec.push(ref);}});
+   return Object.assign(it.whose?{w:it.whose}:{},rec.length?{rec}:{},{from:it.mm?it.mm.from:it.w0,to:it.mm?it.mm.to:it.w1,rows});};
   // Done when what is left is nothing to speak of — or when the statements of its bank reach the end of its
   // window: what was not taken by then is dropped, in words «взято £6,000 из £10,000», never carried as late.
   wds.forEach(it=>{if(!canPay(it))return;const t=gbp(it.amt,it.cur),lo=tol(t,-1)[0],got=r2(nat(it.gotG,it.cur));
@@ -4570,7 +4785,7 @@ const Live=(()=>{
   // keep F above the cushion on every day of the sixty that follow — so it is one figure, the same at either chip.
   // Today's figure also has to hold without the money that is counted on today and has not come (F0): an inflow
   // dated today or earlier raises it only once a statement row or a mark has closed it.
-  const sumA=l=>sum(l,r=>Math.abs(+r.a||0)),unrec=inb.filter(r=>r.dir>0&&!isProv(r)&&r.c!=="skip"&&!r.maybe&&!r.twin),prov=inb.filter(isProv),unrecG=sumA(unrec);
+  const sumA=l=>sum(l,r=>Math.abs(+r.a||0)),unrec=inb.filter(r=>r.dir>0&&!isProv(r)&&!own(r)&&!r.maybe&&!r.twin),prov=inb.filter(isProv),unrecG=sumA(unrec);
   const usualOut=usual("team")+usual("other"),written=it=>it.src!=="tax",teamish=it=>written(it)&&it.cash<0&&(it.grp==="team"||it.grp==="other");
   const in60=it=>!!it.day&&it.day<=T60,empty=!items.some(it=>written(it)&&(in60(it)||it.state==="undated"));
   let free=null;
@@ -4624,20 +4839,28 @@ const Live=(()=>{
   // filed, or recognised and still in «Разбор» - that closed no line and were used by no withdrawal (`off`, with
   // the rows by the section of their block). They are shown and counted in no figure of the plan: the line, «Можно вывести»
   // and «Денег сейчас» are what they were - the money is in the balances already, these rows are facts. A founder's
-  // row is one of them only where no withdrawal had room for it: a transfer to a founder's daily account is his
-  // taking, like any row of his block, and never a cost of the studio (the same day's word). A row that used a
-  // withdrawal up in part is that withdrawal's, whole. Months before the plan was first written show none - there
-  // every row would be one - and neither does a month that has not come. `wait` is what still lies in «Разбор»
-  // with no block of its own: it can be shown in no section until somebody sorts it.
+  // row is one of them only where no withdrawal had room for it. A transfer to a founder's daily account made before
+  // October 2026 is his taking, like any row of his block (the same day's word); from October it is a transfer
+  // between own accounts (D) and is no row of this list at all. A row that used withdrawals up in part shows its
+  // rest here as a line of its own (W2, 17 October 2026): the rest, in the row's own currency, and `part` - the
+  // whole row and what the withdrawals took of it, so that the two make the row exactly (the rest is the row's own
+  // sum in proportion to the pounds left over, and what was taken is the row less the rest - never a second
+  // reckoning at a day's rate). Months before the plan was first written show none - there every row would be one
+  // - and neither does a month that has not come. `wait` is what still lies in «Разбор» with no block of its own:
+  // it can be shown in no section until somebody sorts it.
   {const c0min=items.reduce((a,it)=>it.src!=="tax"&&it.c0>0&&it.c0<a?it.c0:a,Infinity),began=isFinite(c0min)?dayOf(c0min).slice(0,7):ymT;
    const subLk=new Set(items.filter(it=>it.sub&&it.lk).map(it=>it.lk));
    const secOfRow=r=>r.c==="rev"?"inflows":r.c==="cogs"?"team":r.c==="tax"?(r.sk?"div":"taxes"):FOUNDERS.includes(r.c)?"div":subLk.has(r.lk)?"subs":"other";
    const nameOfRow=r=>FOUNDERS.includes(r.c)?FN[r.c]+(r.l?" · "+r.l:""):r.l;
    Object.keys(months).forEach(m=>{if(m<began||m>ymT)return;const o=months[m];o.off={in:0,out:0,nIn:0,nOut:0,by:{}};SECS.forEach(k=>{o.off.by[k]={rows:[],gbp:0};});
-    const w=inb.filter(r=>r.d.slice(0,7)===m&&!isProv(r)&&r.c!=="skip"&&!r.maybe&&!r.twin&&!r.rep);o.wait={n:w.length,gbp:r2(sum(w,r=>Math.abs(+r.a||0)))};});
-   pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||used.has(r.id)||!KEYS.includes(r.c))return;const k=secOfRow(r),z=o.off.by[k];
-    z.rows.push({id:r.id,d:r.d,name:nameOfRow(r),amt:r2(Math.abs(r.o?r.o.a:r.a)),cur:r.o?r.o.cur:"GBP",gbp:r2(r.a),bank:r.b,prov:r.prov,back:r.ret});z.gbp=r2(z.gbp+r.a);
-    if(k==="inflows"){o.off.in=r2(o.off.in+r.a);o.off.nIn++;}else{o.off.out=r2(o.off.out+r.a);o.off.nOut++;}});}
+    const w=inb.filter(r=>r.d.slice(0,7)===m&&!isProv(r)&&!own(r)&&!r.maybe&&!r.twin&&!r.rep);o.wait={n:w.length,gbp:r2(sum(w,r=>Math.abs(+r.a||0)))};});
+   const tookOf=new Map();wds.forEach(it=>it.took.forEach((v,id)=>{tookOf.set(id,(tookOf.get(id)||0)+v);}));
+   pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||!KEYS.includes(r.c))return;let a=r.a,amt=r2(Math.abs(r.o?r.o.a:r.a)),part=null;
+    if(used.has(r.id)){const t=tookOf.get(r.id)||0,full=Math.abs(r.a);if(!(t>0)||r.ret||!FOUNDERS.includes(r.c))return;const rest=r2(full-t);if(!(rest>=0.005))return;
+     const of=amt,n=r2(of*rest/full);a=rest;amt=n;part={of,took:r2(of-n)};}
+    const k=secOfRow(r),z=o.off.by[k];
+    z.rows.push(Object.assign({id:r.id,d:r.d,name:nameOfRow(r),amt,cur:r.o?r.o.cur:"GBP",gbp:r2(a),bank:r.b,prov:r.prov,back:r.ret},part?{part}:{}));z.gbp=r2(z.gbp+a);
+    if(k==="inflows"){o.off.in=r2(o.off.in+a);o.off.nIn++;}else{o.off.out=r2(o.off.out+a);o.off.nOut++;}});}
   // R1. A row that is about to repeat must not count a later month twice: the later months that already hold a
   // one-off row of the same label are named here, for the tick to switch the repeat off in them. What is left of a
   // line paid in part (carry) is never such a row, dated or not: it is a debt beside the month's own line, not that
@@ -4742,7 +4965,7 @@ const Live=(()=>{
     bank:it.bank,acct:it.acct,date:it.date,ym:it.ym,on:it.on,sk:it.sk,how:it.how,label:it.label,g:it.g,cov:it.cov,state:it.state,open:it.open,lateDays:it.late,step:it.step,day:it.day,done,
     mark:p?{on:isD(p.on)?p.on:"",at:+p.at||0,by:String(p.by||""),counts:!!it.counts,cov:it.markCov||"",amt:it.pamt!=null?r2(it.pamt):null}:null,part:it.got>0&&!d?{got:r2(it.got),of:r2(it.amt*it.vk)}:null,hint:it.hint,rows:it.match.slice(),fixed:it.fixed,c0:it.c0,who:it.who,
     row:it.row,occ:it.src==="occ"?{ym:it.ym0,chain:it.chain,day:it.rec.day,from:it.rec.from,to:it.rec.to,until:it.until,last:!!it.until&&it.until===it.ym0,exc:it.exc,moved:it.moved,stops:!!it.stops}:null,carry:it.carry,
-    wd:it.wd?{from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur)),by:tookBy(it)}:null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
+    wd:it.wd?Object.assign({from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur)),by:tookBy(it)},it.record?{rec:true}:{}):null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
    cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld});
@@ -4831,12 +5054,15 @@ const Live=(()=>{
     const rows=c.saw.rows.filter(x=>x.length>2&&ats.has(x[2])&&(N.has(x[0])?N.get(x[0])[2]===x[2]:(+x[1]||0)>=0.005)).concat(now.rows.filter(x=>x.length>2&&!had.has(x[0])&&was.has(x[2])).map(x=>[x[0],0,x[2]]));
     if(!rows.length)return;
     if(rows.some(x=>Math.abs((+x[1]||0)-(N.has(x[0])?+N.get(x[0])[1]||0:0))>=0.005))moved=true;
-    todo.push([s.paid,Object.assign(it.whose?{w:it.whose}:{},{from:now.from,to:now.to,rows})]);});
+    const rc=Array.isArray(c.saw.rec)?c.saw.rec.filter(r=>rows.some(x=>x[0]===r&&(+x[1]||0)>=0.005)):[];
+    todo.push([s.paid,Object.assign(it.whose?{w:it.whose}:{},rc.length?{rec:rc}:{},{from:now.from,to:now.to,rows})]);});
    if(moved)todo.forEach(([p,w])=>{p.saw=w;});
    return moved?todo.length:0;};
  // «Чей вывод»: said of a withdrawal, and of no other row. Like the name it is the row's, not a month's; nobody's
- // is no key at all. Nothing here reads the name: a row called «Vanya» is everybody's until somebody says whose.
- const whoseOf=(r,v,k)=>{if(v.whose===undefined||k!=="div"||r.ptax)return;if(FOUNDERS.includes(v.whose))r.whose=v.whose;else delete r.whose;};
+ // is no key at all - except on a row whose name is a founder's, which is that founder's by its name (N): there
+ // «общий» chosen by hand is whose:"", the one thing that keeps it everybody's. (The name is read as it is after
+ // the change: `fields` has written it.)
+ const whoseOf=(r,v,k)=>{if(v.whose===undefined||k!=="div"||r.ptax)return;if(FOUNDERS.includes(v.whose))r.whose=v.whose;else if(byName(r.name))r.whose="";else delete r.whose;};
  // A repeating row that «… и дальше» split is several stored rows of one chain - one line through time. Whose it is
  // goes to every one of them when it is said of a month («Только {месяц}», the card of a closed month), and with
  // `from` to the parts that begin in that month or later («{Месяц} и дальше»).
@@ -4867,8 +5093,9 @@ const Live=(()=>{
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});if(f){k="div";r.ptax=true;r.f=f;delete r.of;}else if(r.of===undefined)r.of=false;}
    r.blk=k==="div"?"div":BLOCKS[k].includes(r.blk)?r.blk:BLK0[k];if(k==="inflows")r.vat=r.vat===true;else delete r.vat;
    if(k!=="other")delete r.sub;
-   // (An owner the form put on a withdrawal is kept; anywhere else, and anything that is not a founder, is dropped.)
-   if(!(k==="div"&&!r.ptax&&FOUNDERS.includes(r.whose)))delete r.whose;
+   // (An owner the form put on a withdrawal is kept, and so is «общий» chosen by hand on a withdrawal called after
+   // a founder - whose:"" (N); anywhere else, and anything that is not a founder, is dropped.)
+   if(!(k==="div"&&!r.ptax&&(FOUNDERS.includes(r.whose)||(r.whose===""&&byName(r.name)))))delete r.whose;
    if(!Array.isArray(P[k]))P[k]=[];P[k].push(r);return k;},
   // «Продублировать с {октября}»: lines of the month before, written again as rows of the month `ym` — the name,
   // the currency, the bank and the VAT, on the same day of the month, and NO SUM: who is paid and when repeats, how
@@ -4879,7 +5106,7 @@ const Live=(()=>{
   dup(P,its,ym,ids,now,by){return its.map((it,i)=>{const src=(P[it.list]||[]).find(x=>String(x.id)===String(it.row))||{},day=isD(it.date)?+it.date.slice(8):0;
     const r={id:String(ids[i]),name:it.name,amt:0,cur:it.cur,bank:it.bank,on:true,tag:"",info:false,date:day?dayIn(ym,day):"",c0:now,m:{t:now,by},blk:src.blk};
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
-    if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose)r.whose=src.whose;if(src.sub)r.sub=true;
+    if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose!==undefined)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
   mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
   unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
@@ -4926,6 +5153,8 @@ const Live=(()=>{
    s.paid={on,at:now,by,amt:g};if(!(rest>0))return null;
    const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r.blk,carry:{ym:from||ym}});
    ["sk","skBy","vat","ptax","f","whose","sub"].forEach(f=>{if(r[f]!==undefined)z[f]=r[f];});
+   // (the rest of a withdrawal that is a founder's by its name is his too: the rest's own name is no founder's - N)
+   if(z.whose===undefined&&it.wd&&FOUNDERS.includes(it.whose))z.whose=it.whose;
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
    P[h.k].splice(h.i+1,0,z);return z;},
   // A change to one line. A one-off row: its own fields. A month of a repeating row («Только {октябрь}», R3): the
@@ -5019,12 +5248,12 @@ const Live=(()=>{
  // one the rule answers for — which is what rule.from has to become. `rule` is model.taxes.rules[i].
  const perAt=(per,key)=>perOf(per,key.length===4?key+"-12":key[4]==="Q"?key.slice(0,4)+"-"+pad(+key[5]*3):key);
  const fromOf=(rule,k)=>rule&&rule.first?dueOf(rule,perStep(rule.per,perAt(rule.per,String(rule.first)),k)):"";
- return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName};
+ return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName,byName,daily};
 })();
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
  // (whatIf: what a list of trial changes does to the plan's figures - nothing on the screen moves; trial: the one on it.)
  whatIf(list){return Trial.ask(list);},get trial(){return Trial.peek();},
  model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
@@ -5631,8 +5860,15 @@ const Ed=(()=>{
  const nowOf=()=>{const m=Plan.model();return m&&!m.v0&&typeof m.now==="number"?m.now:null;};
  const nowSay=n0=>{const n1=nowOf();return n0!=null&&n1!=null&&Math.abs(n1-n0)>=0.5?` · «Денег сейчас» теперь ${fmt(n1)}: пересчитана отметка «Оплачено» на выводе`:"";};
  // What a name says of whose a NEW withdrawal is: the one founder named in it, in Latin or in Russian - or nobody
- // (two names say nothing). A proposal in the form and no more: a row that is stored is never read by its name.
+ // (two names say nothing). A proposal in the form and no more. (A row that is stored is read by its name only where
+ // the whole name is one founder's - «Vanya», «Миша» - since 17 October 2026: Live, N.)
  const whoseBy=name=>{const s=" "+String(name||"").toLowerCase()+" ",R={mika:/[^a-zа-яё](mika|мик[аиеу]|микой)[^a-zа-яё]/,misha:/[^a-zа-яё](misha|миш[аиеу]|мишей)[^a-zа-яё]/,vanya:/[^a-zа-яё](vanya|ван[яиею]|ваней)[^a-zа-яё]/},hit=FOUNDERS.filter(k=>R[k].test(s));return hit.length===1?hit[0]:"";};
+ // Whose a STORED withdrawal is under a name, with nobody's hand on «Чей вывод» in the card: a founder chosen, or
+ // «общий» chosen (whose:""), stands whatever the name; otherwise the name speaks (N) - «Vanya» is Vanya's, «Вывод»
+ // everybody's. The card's select follows the name as it is typed until the founder chooses in it himself, and only
+ // that choice is written: a rename alone writes no owner, in the card as anywhere else (17 October 2026).
+ const storedWhose=it=>{const P=Plan.doc(),r=P&&Array.isArray(P.div)?P.div.find(x=>x&&String(x.id)===String(it.row||it.id)):null;return r?r.whose:undefined;};
+ const whoseUnder=(it,name)=>{const w=storedWhose(it);return FOUNDERS.includes(w)?w:w===""?"":Live.byName(name);};
  function ofSelect(v){
   const ps=perOpen(),known=x=>x==="own"||x===""||ps.some(p=>x.slice(2)===p.key),val=v==null?"own":v;
   const o=[["","Выберите, к чему относится"],["own","Отдельный налог или платёж"]].filter(x=>x[0]||val==="");
@@ -5865,7 +6101,13 @@ const Ed=(()=>{
   if(!okDate(v.date))return miss(card,"date",FARMSG);
   if(!v.date&&(v.mon||forecast(it)))return miss(card,"date",forecast(it)?"У этой строки дата есть всегда":"Чтобы повторять каждый месяц, нужна дата");
   if(f("of")&&v.of==="")return miss(card,"of","Выберите, к чему относится этот налог");
-  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==it.date,vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.whose||"")};
+  // (Whose a withdrawal is: «Чей вывод» is written when the founder chose in it - it differs from what the row would
+  // be under its new name with nobody's hand on it (whoseUnder: the select followed the name as it was typed). A
+  // rename alone writes no owner: «Вывод» renamed «Vanya» is Vanya's by its name, «Vanya» renamed «Вывод» is
+  // everybody's - and whose:"" is written only where «общий» was chosen. The toast says whose the row now is
+  // whenever that changed, by the choice or by the name.)
+  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==it.date,vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.wd?whoseUnder(it,v.name):it.whose||"")};
+  const whose1=!!f("whose")&&(FOUNDERS.includes(v.whose)?v.whose:"")!==(it.whose||"");
   // Nothing of the row was changed and «Частично» stands open in the card: the press on the card's own button — or
   // Enter in one of the row's fields — is the answer to that question, with its refusals. Read as «nothing to
   // save», it closed the card without a word, and the sum and the day just typed went with it. A change to the row
@@ -5880,11 +6122,11 @@ const Ed=(()=>{
   // A row of its own whose new date is in another month leaves the month it was opened in: the toast says where to.
   const away=ch.date&&!was&&!tax&&!!v.date&&!!it.ym&&v.date.slice(0,7)!==it.ym;
   // «Чей вывод» is the row's: said of a month of a repeat it is written to every month, whatever the press was for.
-  const wt=ch.whose?" · "+whoseSay(v.whose)+(was&&!onward?" — для всех месяцев":""):"";
+  const wt=whose1?" · "+whoseSay(v.whose)+(was&&!onward?" — для всех месяцев":""):"";
   const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)+wt
    :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${wt}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
-  const n0=ch.whose?nowOf():null;
-  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(ch.whose?nowSay(n0):"")+(left?" · «Частично» не записано — ответьте на него заново":""),back);
+  const n0=whose1?nowOf():null;
+  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(whose1?nowSay(n0):"")+(left?" · «Частично» не записано — ответьте на него заново":""),back);
   drop(gone);
  }
  // What a change to a row's fields writes. `v` is the row as it should now read, `ch` names the fields that differ
@@ -5946,6 +6188,9 @@ const Ed=(()=>{
   if(of==="")return miss(card,"of","Выберите, к чему относится этот налог");
   const mon_=cur.mon,ptax=list==="div"&&cur.kind==="ptax",own=list==="taxes"&&!!owner({c:"tax",l:name}),ck=d.vat&&cur.vatSet?newClient():"";
   const tw=d.monthly&&d.date?twins(own?"div":list,name,d.date.slice(0,7)):[],whose=list==="div"&&!ptax&&FOUNDERS.includes(d.whose)?d.whose:"";
+  // («общий» chosen by hand for a withdrawal called after a founder is said in the row - whose:"" - or the name would
+  // make it his: N)
+  const common=list==="div"&&!ptax&&!whose&&!!cur.whoseSet&&!!Live.byName(name);
   const say=(d.date?`В плане: ${name}`:`В плане без даты: ${name}. В расчёт пойдёт, когда появится дата`)+(whose?" · "+whoseSay(whose):"")+(own?" · личный налог — перенесён в «Дивиденды»":"")+(ck?" · запомню для клиента: UK, с VAT":"")+(tw.length?" · "+twinWords(tw):"");cur=null;
   // Every inflow says whether its invoice carries VAT — what the founder saw is what the plan counts. A tax says
   // what it is (`of`); one with a founder in its name is a personal tax and goes to «Дивиденды» (Live.write.add
@@ -5954,7 +6199,7 @@ const Ed=(()=>{
    const r={id:uid(),name,amt,cur:d.cur,bank:d.bank,on:true,tag:"",info:false,date:d.date||"",c0:now,m:{t:now,by},blk:BLK0[list]};
    if(!r.date)r.mon=mon_||Live.today().slice(0,7);if(list==="inflows")r.vat=!!d.vat;if(what==="subs")r.sub=true;
    if(list==="taxes")r.of=ofStore(of);
-   if(ptax){r.ptax=true;const f=owner({c:"tax",l:name});if(f)r.f=f;}else if(whose)r.whose=whose;
+   if(ptax){r.ptax=true;const f=owner({c:"tax",l:name});if(f)r.f=f;}else if(whose)r.whose=whose;else if(common)r.whose="";
    relink(r,list);const k=W.add(P,list,r);
    if(d.monthly)W.tick(P,{id:r.id,twins:tw});
    if(ck)W.client(P,M,ck,"vat");
@@ -6257,6 +6502,9 @@ const Ed=(()=>{
     if(s&&g!==cur.of){cur.of=g;s.closest("label").outerHTML=ofSelect(g);}}
    return;}
   if(card.dataset.edCard==="row"&&t.dataset.edF){const f=k=>q(card,`[data-ed-f="${k}"]`),it=item(card.dataset.edId);
+   // «Чей вывод» follows the name as it is typed - until the founder chooses in it himself (whoseUnder, above)
+   if(t.dataset.edF==="whose")card.dataset.edWhoseHand="1";
+   if(t.dataset.edF==="name"&&it&&it.wd&&f("whose")&&!card.dataset.edWhoseHand){const w=whoseUnder(it,t.value.trim());if(f("whose").value!==w)f("whose").value=w;}
    if(f("vat"))note("vat",vatNote(f("amt").value,f("cur").value,f("vat").checked));
    if(t.dataset.edF==="date"&&it&&it.src==="row")note("monthly",recNote(t.value,null));
    // The tick of a month taken off, or put back: the note and the buttons say what saving will now do.

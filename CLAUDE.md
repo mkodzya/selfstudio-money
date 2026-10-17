@@ -349,7 +349,9 @@ a deploy:
   against the page of before the rules by the scripts in
   `checks/withdrawals/` (run by hand, under node - its README says how);
   the checks `rv-wdmark` and `rv-wdday` hold the others and the page's own
-  hand. What the second rule does not reach - a row that is no founder's
+  hand. (Since 17 October 2026 the first is asked of a plan read with N and D
+  written out, and where no withdrawal is a record - `checks/withdrawals/`,
+  README.) What the second rule does not reach - a row that is no founder's
   taking, a part of a marked withdrawal, a marked withdrawal that holds a
   row of another account than its own (another bank's, or another
   currency's of its own bank) - is in `docs/handoff.md`, the entry of
@@ -368,10 +370,40 @@ a deploy:
   the model, the rows by list). It is a fact and no line: no figure of the plan counts it,
   nothing is written into a later month because of it, and nothing in it
   is typed or pressed - rule 1 of the page stands, the plan holds only what
-  a founder wrote. A founder's transfer to his daily account is his taking,
-  inside the withdrawal that holds it (`wd.by`), and never a cost of the
-  studio. **A change that lets such a row into a figure of the plan, or
-  writes a line from it, breaks rule 1**; the check `rv-offplan` holds it.
+  a founder wrote. A row that withdrawals took in part stands there with its
+  rest, in its own currency (the owner's decision of 17 October 2026: what
+  was taken and the rest make the row exactly). A founder's transfer to his
+  daily account made before October 2026 is his taking, inside the
+  withdrawal that holds it (`wd.by`), and never a cost of the studio; from
+  1 October 2026 a move to a founder's Daily or Monthly account, or back
+  from one, is a transfer between own accounts (the same day's decision,
+  «только с октября»): it moves its account's balance and is in no figure,
+  no withdrawal and no list, and «Разбор» never pairs it with another row -
+  `Live.daily` is the one test the page asks for it, in the engine,
+  «Разбор», «Таблица», «Месяцы» and «Отчёты». **A change that lets such a
+  row into a figure of the plan, or writes a line from it, breaks rule 1**;
+  the checks `rv-offplan`, `rest` and `daily` hold it.
+- **A withdrawal is whose its row says, and whose its name is** (the
+  owner's decision of 17 October 2026, N, which reverses the second «А» of
+  12 October): with no `whose`, a withdrawal whose whole name is one
+  founder's (Mika/Мика, Misha/Миша, Vanya/Ваня) is his; «общий» chosen by
+  hand on such a row is stored as `whose: ""`, and nothing else writes it -
+  a rename in the card writes no owner. Never `f`. **A withdrawal
+  written as a record** (W1, the same day) - somebody's, marked plainly
+  «Оплачено» for a day that has come - takes its founder's rows near its
+  date before the walk deals anything, whatever their upload time. It is
+  held to the four things above: what it takes is no other withdrawal's,
+  it holds no more than its sum, and its mark is closed by its rows and
+  counts in «Денег сейчас» neither twice nor not at all. What it takes
+  depends also on the rows other lines hold by hand and on the memories,
+  so a change to another line can move it; then the seeing and the
+  keeping hold what the rules ask - a record's memory names the rows it
+  holds as a record's (`rec`): held whatever their upload time, even once
+  its day has moved past today, and each whole, its rest «вне плана»; and
+  a record whose mark cannot count is made first of the takings of a
+  balance's day its memory holds (`D2` in the engine says how).
+  `checks/withdrawals/` hold it with the rest (its README, and
+  `cases.cjs`), and the check `records` on the page.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two

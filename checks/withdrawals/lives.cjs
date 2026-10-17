@@ -1,14 +1,24 @@
 // The rule on random lives of a plan: «a change to the plan deals nothing of a marked withdrawal over».
 // A life: a plan and a table; then, step by step, statements come (rows are shown in the order they were
 // uploaded), the table is changed by hand, lines are marked, and the plan is changed the page's way (see, change,
-// keep). What is held at every step:
-//   F. A plan that holds no memory is read as the page read it before the rule, byte for byte but for item.saw
-//      and item.sawDay.
+// keep). Every other life is given what the owner decided on 17 October 2026 (gen.cjs, `news`): withdrawals named
+// after a founder (N), records written after their rows (W1), moves to a Daily account (D). What is held at every step:
+//   N, D. The plan and the table are read as they are read with every withdrawal named after a founder given that
+//      owner by hand and every move to or back from a Daily or Monthly account from October filed as a transfer
+//      between own accounts (lib.cjs, `named`, `toOwn`) - the whole model, byte for byte, memory or not.
+//   W. What lib.cjs, `wCheck`, holds of every record and every rest (W1, W2) - and, where the plan holds no memory,
+//      that a withdrawal that may be a record and has a row of its founder that fits it is one.
+//   F. A plan that holds no memory, read with N and D written out, is read as the page read it before the rule, byte
+//      for byte but for the fields `bare` names - where no withdrawal is a record (W1): those are counted.
 //   B. A change made on ANOTHER line - another month of the same row too, as long as it leaves this one's day, sum,
 //      owner and bank as they were - moves nothing of a withdrawal whose mark can count: what it holds, its rows,
 //      whether its mark counts (one that rows or its window have closed: that it stays closed). And, unless the
 //      change was made on a marked withdrawal, reached one, or took a mark off: neither «Денег сейчас» nor the
 //      marks' sum - and where every mark that waits can count, nor the month's fact for dividends.
+//   Y. A change that moves only the day of a withdrawal whose mark can count - the card of an earlier month,
+//      «… и дальше» - leaves it holding what it held, and its mark counting or not as it did («Новый день — нет:
+//      вывод держит что держал», 13 October 2026, rule 5). Asked of records too (W1): one whose day the change moves
+//      past today is no record any more, and its memory (`rec`) holds the rows it took whenever they were uploaded.
 //   D. No row gives the withdrawals more than its sum; none holds more than its own sum or than its rows' worth.
 //   K. The seeing and the keeping, called by hand around no change at all (the page does not call them then),
 //      move no figure, and write nothing into a plan without a memory.
@@ -18,7 +28,7 @@
 // The counters printed at the end say how often each was looked at - and how often there was anything to move.
 // usage: ENGINES=<folder> [BIAS=1] [STEPS=n] [ON=dev] node checks/withdrawals/lives.cjs <lives> [rich]
 const SEEDS = +process.argv[2] || 300, RICH = process.argv[3] === 'rich', STEPS = +process.env.STEPS || 9;
-const { ms, ledger, clone, item, mk, round2, filed, wd, engines, bare } = require('./lib.cjs');
+const { ms, ledger, clone, item, mk, round2, filed, wd, engines, bare, named, toOwn, wCheck, FX } = require('./lib.cjs');
 const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;   // ON=dev: the same lives on the page before the rule - B must fail there
 const { make, FOUNDERS, day, T, rng } = require('./gen.cjs');
 const { C, wr, raw, page, see, keep } = mk(Live), d = mk(DEV);
@@ -46,8 +56,9 @@ const conserve = (M, L) => {
   if (all.every((it) => it.cur === 'GBP')) { const rows = new Set(); ws.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = ws.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0); if (tot > cap + 0.011) return `the withdrawals hold ${tot} of rows worth ${cap}`; }
   return '';
 };
+const ON_DEV = process.env.ON === 'dev', raw2 = (L, P) => JSON.parse(JSON.stringify(Live.compute(clone(L), clone(P), T, { H: 30 })));
 for (let seed = 1; seed <= SEEDS; seed++) {
-  const g = make(seed, { marks: seed % 3 === 0 ? 'old' : 'none', rich: RICH }), { pick, int, chance } = g;
+  const g = make(seed, { marks: seed % 3 === 0 ? 'old' : 'none', rich: RICH, news: seed % 2 === 0 }), { pick, int, chance } = g, YR = rng(seed * 31 + 7);
   // the table, shown as it was uploaded: rows come in batches by their moment
   const allTx = g.L.tx.slice().sort((a, b) => a.at - b.at), allInb = g.L.inbox.slice();
   let shown = Math.max(1, Math.floor(allTx.length * (0.3 + 0.4 * g.R()))), tx = allTx.slice(0, shown), inb = allInb.slice(), now = ms(T + 'T09:00:00Z');
@@ -56,7 +67,11 @@ for (let seed = 1; seed <= SEEDS; seed++) {
   const check = (tag) => {
     M = C(L, P, T);
     const c = conserve(M, L); if (c) fail('D: ' + c + ' (' + tag + ')', seed);
-    if (!hasMem(P)) { up('F'); const b = JSON.stringify(d.C(L, P, T)); if (strip(M) !== b) fail('F: not develop\'s model with no memory (' + tag + ')', seed); } else up('steps with a memory');
+    if (ON_DEV) { if (!hasMem(P)) { up('F'); const b = JSON.stringify(d.C(L, P, T)); if (strip(M) !== b) fail('F: not develop\'s model with no memory (' + tag + ')', seed); } else up('steps with a memory'); return; }
+    const L2 = toOwn(L), P2 = named(P);
+    if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(raw2(L2, P2)) !== JSON.stringify(M)) fail('N/D: not the model of the plan and table with them written out (' + tag + ')', seed); }
+    const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed);
+    if (!hasMem(P)) { if (M.items.some((it) => it.wd && it.wd.rec)) up('F not asked: a record'); else { up('F'); const b = JSON.stringify(d.C(L2, P2, T)); if (strip(M) !== b) fail('F: not develop\'s model with no memory (' + tag + ')', seed); } } else up('steps with a memory');
   };
   check('start');
   // BIAS: marks first, and mostly changes to lines - so that withdrawals hold to a memory through most of the life
@@ -100,10 +115,24 @@ for (let seed = 1; seed <= SEEDS; seed++) {
       P = Q; up('changes'); check('change ' + op);
       // (a withdrawal the change left as its founder wrote it - its day, sum, owner, bank, on or off - is another line to it)
       others.forEach(([key, v, was]) => { const x = wdsOf(M).find((q) => keyOf(q) === key); if (!x || self(x) !== was) return; up('B'); if (view(x) !== v) fail('B: a change to another line moved a marked withdrawal (op ' + op + ')', seed, key + '\n   ' + v + '\n   ' + view(x)); });
+      // Y. (the day of a withdrawal whose mark can count, moved by the change, and nothing else of it)
+      if (op === 3 && it.mark && it.saw) { const x = M.items.find((q) => q.id === it.id), was = JSON.parse(self(it)), is = x && JSON.parse(self(x));
+        if (x && is[0] !== was[0] && JSON.stringify(is.slice(1)) === JSON.stringify(was.slice(1))) { up('Y'); if (it.wd.rec) up('Y, a record'); if (it.wd.rec && !(x.date <= T)) up('Y, a record moved past today');
+          if (view(x) !== view(it)) fail('Y: a marked withdrawal whose day moved holds another thing (rec ' + !!it.wd.rec + ')', seed, view(it) + '\n   ' + view(x)); } }
       // (the figures: unless the change was made on a marked withdrawal, reached one - another month of its row - or took a mark off)
       own = !!it.mark || marked.some(([key, was]) => { const x = wdsOf(M).find((q) => keyOf(q) === key); return !x || self(x) !== was; });
       if (!own && !marks && op !== 10) { up('B figures'); if (waiting(before).length) up('B figures, a mark that counts was there'); const fact = allCount(before) && allCount(M); if (fact) up('B figures, the fact too'); if (figs(M, fact) !== figs(before, fact)) fail('B: a change to another line moved the figures (op ' + op + ')', seed, figs(before) + ' -> ' + figs(M)); }
     }
+    // Y, made to happen (a stream of its own, so the steps above are drawn as before): now and then the day of a
+    // withdrawal whose mark can count is moved, the way the card of an earlier month moves it («… и дальше»)
+    if (!ON_DEV && YR() < 0.12) { const ys = wdsOf(M).filter((x) => x.mark && x.saw);
+      if (ys.length) { const it = ys[Math.floor(YR() * ys.length)], to = day(it.date, (YR() < 0.5 ? -1 : 1) * (1 + Math.floor(YR() * 20))), others = waiting(M).filter((x) => x.id !== it.id).map((x) => [keyOf(x), view(x), self(x)]);
+        let Q = P; try { Q = wr(P, 'set', it, { date: to }, now + 1, BY); } catch (e) { Q = P; }
+        if (JSON.stringify(Q) !== JSON.stringify(P)) { P = Q; up('changes'); up('days moved'); check('day moved');
+          const x = M.items.find((q) => q.id === it.id);
+          if (x && x.date === to) { up('Y'); if (it.wd.rec) up('Y, a record'); if (it.wd.rec && !(to <= T)) up('Y, a record moved past today');
+            if (view(x) !== view(it)) fail('Y: a marked withdrawal whose day moved holds another thing (rec ' + !!it.wd.rec + ')', seed, view(it) + '\n   ' + view(x)); }
+          others.forEach(([key, v, was]) => { const z = wdsOf(M).find((q) => keyOf(q) === key); if (!z || self(z) !== was) return; up('B'); if (view(z) !== v) fail('B: moving the day of another line moved a marked withdrawal', seed, key + '\n   ' + v + '\n   ' + view(z)); }); } } }
     // K. see and keep around nothing
     { const had = hasMem(P), Q = keep(clone(P), see(P)), M2 = C(L, Q, T); C(L, P, T); up('K'); if (had) up('K, with a memory'); if (JSON.stringify(Q) !== JSON.stringify(P)) up(hasMem(Q) ? 'K, the memory written anew' : 'K, the memory taken out'); const flat = (X) => { const Z = clone(X); bare(Z).items.forEach((it) => { if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); }; if (flat(M2) !== flat(M)) fail('K: see and keep alone moved the model', seed); if (strip(M2) !== strip(M)) up('K, only a window differs'); if (!had && hasMem(Q)) fail('K: see and keep alone wrote a memory', seed); if (had && hasMem(Q)) up('K, memory kept'); }
   }

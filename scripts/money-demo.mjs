@@ -211,14 +211,20 @@ export function demoLedger(todayISO) {
     if (m === 1) add(ago, y, m, 9, 7420, 'tax', 'Barclays', 'HMRC CT', { t: 'HMRC CORPORATION TAX' });
 
     // What the founders take out. No label is a dividend; the rest is the
-    // small change of running a life through a company card.
+    // small change of running a life through a company card - and the
+    // statement says so: a card payment is the founder's whatever its label.
+    // (Since 17 October 2026 a MOVE to a founder's Daily or Monthly account is
+    // a transfer between own accounts from October on; these rows are not
+    // moves, and the studio reads exactly as it did. Their text is no draw of
+    // the generator: every figure it makes is what it was.)
+    const lunch = { t: 'Card transaction issued by Lunch Place' }, club = { t: 'Card payment to Fitness Club' };
     for (let i = whole(1, 2); i > 0; i--) add(ago, y, m, whole(2, 27), to(between(900, 1900), 50), 'mika', 'Wise', '');
-    for (let i = whole(2, 4); i > 0; i--) add(ago, y, m, whole(1, 28), to(between(12, 70), 1), 'mika', 'Wise', 'daily');
+    for (let i = whole(2, 4); i > 0; i--) add(ago, y, m, whole(1, 28), to(between(12, 70), 1), 'mika', 'Wise', 'daily', lunch);
     for (let i = whole(2, 3); i > 0; i--) add(ago, y, m, whole(2, 27), to(between(1000, 2000), 50), 'misha', 'Barclays', '');
-    add(ago, y, m, whole(1, 5), 240, 'misha', 'Barclays', 'monthly');
+    add(ago, y, m, whole(1, 5), 240, 'misha', 'Barclays', 'monthly', club);
     for (let i = 2; i > 0; i--) add(ago, y, m, whole(2, 27), to(between(1200, 2200), 50), 'vanya', 'Wise', '');
     for (let i = whole(7, 12); i > 0; i--) add(ago, y, m, whole(1, 28), between(2.8, 9.6), 'vanya', 'Wise', 'tfl');
-    for (let i = whole(4, 8); i > 0; i--) add(ago, y, m, whole(1, 28), to(between(8, 60), 1), 'vanya', 'Wise', 'daily');
+    for (let i = whole(4, 8); i > 0; i--) add(ago, y, m, whole(1, 28), to(between(8, 60), 1), 'vanya', 'Wise', 'daily', lunch);
 
     for (let i = whole(0, 2); i > 0; i--) add(ago, y, m, whole(1, 28), to(between(50, 300), 1), 'other', 'Wise', pick(['Trainline', 'Booking', 'Ryanair', 'Courier']));
     for (let i = whole(1, 3); i > 0; i--) {
