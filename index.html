@@ -1184,7 +1184,7 @@ function parseGrid(grid,name){
  stmtEnds(rows,sure&&!odd);
  // (A fee is folded into its payment, and the balance after it goes with the payment - unless that takes it back to an
  // earlier day than another row's: then the file's last day is not the day the balance is of.)
- const out=foldFees(rows);out.forEach(r=>{if(r.eb!=null&&out.some(q=>q.cur===r.cur&&q.d>r.d))delete r.eb;});
+ const out=foldFees(rows,defCur);out.forEach(r=>{if(r.eb!=null&&out.some(q=>q.cur===r.cur&&q.d>r.d))delete r.eb;});
  return{bank,defCur,rows:out,cols:Object.keys(map).length,acn:Object.keys(accs).sort((x,y)=>accs[y]-accs[x])[0]||""};
 }
 // The statement's own balance (the owner's decision of 9 October 2026: «бери остатки из выписок»). A statement that
@@ -1206,11 +1206,19 @@ function stmtEnds(rows,ok){
  rows.forEach(r=>{delete r.rb;});
 }
 
-// Wise prints its fee as a row of its own; the sheet records the payment with the fee inside.
-function foldFees(rows){
+// Wise prints its fee as a row of its own; the sheet records the payment with the fee inside. The fee stays inside
+// the payment's amount: that amount, with the statement's id, is the key the table knows the row by, and a second
+// reading of the same file must find it there (an amount without the fee, or the fee as a row of its own, would be
+// a new key - the same money in twice). Since 19 October 2026 the payment's text also says the fee in Wise's own
+// words, «(fee: 0.40 GBP)»: the bank's fee is a line of its own (Live.fee), read from those words; the key of a
+// payment that has an id of its own - every row a fee is folded into - does not read the text. (A text that says
+// a fee already is left as it is.)
+function foldFees(rows,cur0){
  const ref=r=>(/^FEE-(.+)$/i.exec(r.tid||"")||/wise charges for:\s*(\S+)/i.exec(r.t||"")||[])[1],byId={};
  rows.forEach(r=>{if(r.tid&&!ref(r))byId[r.tid]=r;});
- return rows.filter(r=>{const id=ref(r),par=id&&byId[id];if(!par||par.cur!==r.cur||r.a>0)return true;par.a=round2(par.a+r.a);par.fee=round2((par.fee||0)-r.a);if(r.eb!=null)par.eb=r.eb;return false;});
+ const out=rows.filter(r=>{const id=ref(r),par=id&&byId[id];if(!par||par.cur!==r.cur||r.a>0)return true;par.a=round2(par.a+r.a);par.fee=round2((par.fee||0)-r.a);if(r.eb!=null)par.eb=r.eb;return false;});
+ out.forEach(r=>{const c=r.cur||cur0||"";if(r.fee>0&&/^[A-Z]{3}$/.test(c)&&!/\(fee:/i.test(r.t||""))r.t=(r.t?r.t+" ":"")+"(fee: "+r.fee.toFixed(2)+" "+c+")";});
+ return out;
 }
 // ---------- pdf statements ----------
 function loadScript(src){return new Promise((res,rej)=>{const e=document.createElement("script");e.src=src;e.onload=res;e.onerror=()=>rej(new Error("script"));document.head.appendChild(e);});}
@@ -1287,10 +1295,20 @@ function allRules(){const pr=r=>FOUNDERS.includes(r.c)?1:0;return S.rules.concat
 // «daily»/«monthly» a rule would give it - never a payment by card, direct debit or standing order. The test is the
 // forecast engine's own (Live.daily), so «Разбор», the table and every figure agree on which rows they are; settle()
 // never pairs such a row.
+// A fee row of its own (Live.fee, from October 2026: «Комиссия за …», a month's charges of Barclays, a Wise fee whose
+// payment the file did not hold) is filed by «Разбор» itself, as it is: a fee counts as a fee whatever block it is
+// filed in, so the block only has to be a cost that is recognised - the one a rule gives it (a rule a founder taught
+// for such rows, or «Barc charges»), else «Fixed» under the label «Bank fees». Never a transfer between own accounts
+// («Комиссия за перевод собственных средств» is a fee), never revenue, never a founder's, and never paired. A payment
+// with a fee inside is filed as any payment: the fee is read off its text wherever it stands.
+const FEE_LABEL="Bank fees";
 function classify(r){
  const text=norm([r.o.p,r.o.t].join(" "));
  const pn=norm(r.o.p),own=t=>S.own.some(k=>k&&t.includes(k)),move=(c,l)=>Live.daily({d:r.d,dir:r.dir,o:r.o,c,l});
  const skip=()=>{r.c="skip";r.l="";r.auto=true;r.v=0;r.maybe=false;};
+ const fw=Live.fee({d:r.d,s:r.s,b:r.b,a:r.a,o:r.o});
+ if(fw&&fw.whole){const t2=text.replace(/\d+/g," ").replace(/\s+/g," "),hit=allRules().find(x=>x.k&&x.c!=="rev"&&!FOUNDERS.includes(x.c)&&(text.includes(x.k)||t2.includes(x.k)));
+  r.c=hit?hit.c:"fixed";r.l=hit?hit.l:FEE_LABEL;r.auto=!hit||hit.c!=="tax";r.v=0;r.maybe=false;return;}
  if(r.o.own||OWN.test(text)||own(pn)||(r.dir<0&&own(text))||(r.dir>0&&!pn&&own(text)&&!allRules().some(x=>x.c==="rev"&&text.includes(x.k)))||move("",""))return skip();
  const text2=text.replace(/\d+/g," ").replace(/\s+/g," ");
  const hit=allRules().find(x=>x.k&&(text.includes(x.k)||text2.includes(x.k))&&(x.any||((x.c==="rev")===(r.dir>0))));
@@ -1336,7 +1354,10 @@ const keyOfText=r=>(norm(r.o&&r.o.p)||norm(String((r.o&&r.o.t)||"").replace(/\(f
 const seenKey=r=>{const k=keyOf(r);return k.length>=4?r.b+"|"+(r.o.a<0?"out":"in")+"|"+k:"";};
 // Looked up as the map's own key only: a label «constructor» or «__proto__» must not be answered by Object's.
 const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.hasOwnProperty.call(a,k.toLowerCase())?a[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
-const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:String(r.o.t||r.o.p||"").slice(0,120)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;t.o.balIn=+r.o.balIn||+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
+// (A statement's text is kept to 120 characters. The bank's fee it states, «(fee: 0.40 GBP)», is kept whole at its
+// end: since 19 October 2026 that is how the fee inside a payment is known - Live.fee.)
+const text120=s=>{s=String(s||"");if(s.length<=120)return s;const f=(s.match(/\(fee:[^)]*\)/gi)||[]).join(" ");return f&&!s.slice(0,120).includes(f)?s.slice(0,Math.max(0,119-f.length))+" "+f:s.slice(0,120);};
+const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:text120(r.o.t||r.o.p)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;t.o.balIn=+r.o.balIn||+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
@@ -1471,7 +1492,7 @@ function accept(ids){
 }
 
 // ---------- aggregation ----------
-function months(){const s=new Set(Object.keys(S.history));S.tx.forEach(r=>{if(!ownTr(r))s.add(r.d.slice(0,7));});return[...s].sort();}
+function months(){const s=new Set(Object.keys(S.history));S.tx.forEach(r=>{if(!ownTr(r)||Live.fee(r))s.add(r.d.slice(0,7));});return[...s].sort();}
 // A founder's personal tax (HMRC Mika, HMRC Vanya) sits in the TAXES block on the sheet, and stays there in the
 // ledger. But it is that founder's money leaving the studio, so every total counts it as their withdrawal and
 // keeps a note of how much of the withdrawal was tax. "Taxes" in the totals is then the studio's own.
@@ -1492,14 +1513,35 @@ const DAILY_SAY="С октября 2026 переводы на Daily и Monthly �
 const FG={div:"Дивиденды (переводы себе)",tax:"Личные налоги (HMRC)",daily:"Daily и Monthly",tr:"Транспорт",other:"Прочие расходы"};
 const fGroup=r=>{if(r.c==="tax")return FG.tax;const l=(r.l||"").trim().toLowerCase();if(!l)return FG.div;
  return /daily|monthly|^jar$/.test(l)?FG.daily:/^(tfl|uber|lime|bolt|taxi|transport|car|auto|journey)$/.test(l)?FG.tr:FG.other;};
+// The bank's fees (the owner's decision of 19 October 2026: «убери комиссию отдельной строкой. давай вообще иметь
+// отдельную строку как банковские комиссии и считать их по каждому банку отдельно»). Which part of a row of the table
+// is a bank's fee - the whole row, or what is inside a payment - is the engine's one test (Live.fee): «Месяцы»,
+// «Отчёты» and «Таблица» ask it as «Касса» and «Сегодня» do, so a fee is counted once, in one place, on every screen.
+// `counted` is the table as those screens count it: a payment at its amount WITHOUT the fee, in its block, and each
+// fee as a row of its own of the category «Банковские комиссии» (c "fee", labelled with its bank) - a fee row of its
+// own, a fee inside a payment, and the fee of a transfer between own accounts, which is in no block itself. Copies:
+// nothing stored is touched. A table with no fee in it is counted exactly as before.
+const FEECAT={k:"fee",name:"BANK FEES",ru:"Банковские комиссии",lab:"Bank"};CAT.fee=FEECAT;
+const netOf=(r,f)=>f&&!f.whole?round2(r.a-Math.sign(r.a)*f.g):r.a;
+function counted(list){const out=[];list.forEach(r=>{const f=Live.fee(r);
+  if(!ownTr(r)&&!(f&&f.whole))out.push(f?Object.assign({},r,{a:netOf(r,f),feeIn:f.g}):r);
+  if(f)out.push({id:r.id,d:r.d,b:r.b,c:"fee",l:f.bank,a:f.g,v:0,s:r.s,o:r.o,isFee:true,whole:f.whole,cur:f.cur,n:f.n});});return out;}
+// What a list of fees comes to, bank by bank, in the bank's own currency and in pounds - «Wise £3.20 · Tochka
+// ₽1,180 (£10.00) · Mosta $5 (£3.70)». `list` holds counted rows of c "fee", or the engine's months.by[ym].fees.banks.
+function feeSplit(list){const by={};list.forEach(x=>{if(x.nat){by[x.bank]={gbp:x.gbp,nat:Object.fromEntries(x.nat.map(z=>[z.cur,z.n]))};return;}
+  const b=by[x.l]||(by[x.l]={gbp:0,nat:{}});b.gbp+=x.a;b.nat[x.cur]=(b.nat[x.cur]||0)+x.n;});
+ const rank=b=>{const i=BANKS.indexOf(b);return i<0?BANKS.length:i;},money=(v,c)=>c==="GBP"?fmt(v,2):fmt(v,v%1?2:0,SYM[c]||"")+(SYM[c]?"":" "+c);
+ return Object.keys(by).sort((x,y)=>rank(x)-rank(y)||(x<y?-1:1)).map(b=>{const o=by[b],cs=Object.keys(o.nat).sort((x,y)=>x==="GBP"?-1:y==="GBP"?1:x<y?-1:1);
+  return b+" "+(cs.length===1&&cs[0]==="GBP"?fmt(o.gbp,2):cs.map(c=>money(round2(o.nat[c]),c)).join(" + ")+" ("+fmt(o.gbp,2)+")");}).join(" · ");}
 function agg(ym){
- const rows=S.tx.filter(r=>r.d.slice(0,7)===ym&&!ownTr(r));
- const o={rev:0,cogs:0,fixed:0,other:0,tax:0,mika:0,vanya:0,misha:0,behalf:0,vat:0,t_mika:0,t_vanya:0,t_misha:0,e_mika:0,e_vanya:0,e_misha:0};
+ const rows=counted(S.tx.filter(r=>r.d.slice(0,7)===ym));
+ const o={rev:0,cogs:0,fixed:0,other:0,tax:0,mika:0,vanya:0,misha:0,behalf:0,fee:0,vat:0,t_mika:0,t_vanya:0,t_misha:0,e_mika:0,e_vanya:0,e_misha:0};
  if(!rows.length)Object.assign(o,S.history[ym]||{});else rows.forEach(r=>{const k=cat(r);o[k]+=r.a;if(k!==r.c)o["t_"+k]+=r.a;else if(FOUNDERS.includes(k)&&(r.l||"").trim())o["e_"+k]+=r.a;if(r.c==="rev")o.vat+=r.v||0;});
  o.ftax=o.t_mika+o.t_vanya+o.t_misha;o.fexp=o.e_mika+o.e_vanya+o.e_misha;
  // Money paid on a client's behalf is a cost like any other. The sheet's Dashboard left it out as "not ours" — but the
  // client's repayment arrives as revenue and was counted there, so every month's result was too high by exactly this block.
- o.costs=o.cogs+o.fixed+o.other+o.behalf;o.ebitda=o.rev-o.costs;o.founders=o.mika+o.vanya+o.misha;o.out=o.costs+o.tax+o.founders;o.result=o.rev-o.out;
+ // The bank's fees are a cost of their own (from October 2026; a month of the sheet has none).
+ o.costs=o.cogs+o.fixed+o.other+o.behalf+o.fee;o.ebitda=o.rev-o.costs;o.founders=o.mika+o.vanya+o.misha;o.out=o.costs+o.tax+o.founders;o.result=o.rev-o.out;
  return o;
 }
 const qOf=ym=>ym.slice(0,4)+"-Q"+Math.ceil(+ym.slice(5)/3);
@@ -1574,7 +1616,9 @@ function renderDash(){
  const perMonth=v=>n>1?`в среднем ${fmtK(v/n)} в месяц`:"";
  const box=(id,label)=>`<div class="chartbox"><svg class="chart" id="${id}" role="img" aria-label="${label}"></svg><div class="tip" hidden></div></div>`;
  const pick=m=>{ui.scope="month";ui.period=m;renderDash();};
- const prow=S.tx.filter(r=>!ownTr(r)&&inPeriod(r.d.slice(0,7)));
+ // (the rows as they count: a payment without its bank's fee, and the fees apart - `counted`; a founder's figures hold
+ // no fee: «no fee is a founder's money», 19 October 2026)
+ const crow=counted(S.tx),prow=crow.filter(r=>!r.isFee&&inPeriod(r.d.slice(0,7))),pfee=crow.filter(r=>r.isFee&&inPeriod(r.d.slice(0,7)));
  const fRow=(k,mx)=>{const t=P["t_"+k],e=P["e_"+k],d=P[k]-t-e;return `<div class="hb fnd go" data-focus="f:${k}" tabindex="0" role="button" title="Показать только ${FN[k]}"><span class="hl">${FN[k]}</span><span class="split"><i style="width:${Math.max(0,d)/mx*100}%"></i><i class="ex" style="width:${Math.max(0,e)/mx*100}%"></i><i class="tx" style="width:${Math.max(0,t)/mx*100}%"></i></span><span class="hv">${fmt(P[k])} <span class="note">дивиденды ${fmtK(d)}${e?` · расходы ${fmtK(e)}`:""}${t?` · налоги ${fmtK(t)}`:""}</span></span></div>`;};
  const fLeg=leg([["--s2","Дивиденды"],["--s4","Daily и расходы"],["--s3","Личные налоги"]]);
  const fMax=Math.max(1,...FOUNDERS.map(k=>P[k]));
@@ -1600,7 +1644,7 @@ function renderDash(){
   const ser=g=>ms.map(m=>keys.reduce((a,k)=>a+(g==="t"?A[m]["t_"+k]:g==="e"?A[m]["e_"+k]:A[m][k]-A[m]["t_"+k]-A[m]["e_"+k]),0));
   draw=()=>chart("chFnd",ms,[{n:"Дивиденды",c:"--s2",v:ser("d")},{n:"Daily и расходы",c:"--s4",v:ser("e")},{n:"Личные налоги",c:"--s3",v:ser("t")}],"stack",pick,pm);
  }else if(pn){
-  const same=r=>r.c==="cogs"&&(r.l||"").trim().toLowerCase()===pn.toLowerCase(),rows=prow.filter(same),tot=rows.reduce((a,r)=>a+r.a,0),ever=S.tx.filter(same),last=ever.slice().sort((a,b)=>a.d<b.d?1:-1)[0];
+  const same=r=>r.c==="cogs"&&(r.l||"").trim().toLowerCase()===pn.toLowerCase(),rows=prow.filter(same),tot=rows.reduce((a,r)=>a+r.a,0),ever=crow.filter(r=>!r.isFee&&same(r)),last=ever.slice().sort((a,b)=>a.d<b.d?1:-1)[0];
   body=`<section class="kpis k4" aria-label="Выплаты человеку">
    ${kp("Выплачено",tot,perMonth(tot)||title)}${kp("Платежей",String(rows.length),last?`последний ${dShort(last.d)} ${last.d.slice(0,4)}`:"")}${kp("Доля в COGS",pct(P.cogs?tot/P.cogs:NaN),`COGS периода ${fmtK(P.cogs||0)}`)}${kp("За всё время",ever.reduce((a,r)=>a+r.a,0),`${ever.length} платежей`)}
   </section>
@@ -1610,30 +1654,31 @@ function renderDash(){
  }else{
   const i0=all.indexOf(pm[0]),prev=all.slice(Math.max(0,i0-12),i0),avg=k=>prev.reduce((a,m)=>a+A[m][k],0)/(prev.length||1);
   const hint=k=>ui.scope==="month"?(prev.length?`ср. за ${prev.length} мес ${fmtK(avg(k))}`:"первый месяц"):perMonth(P[k]);
-  const R=[["Revenue","rev"],["COGS","cogs"],["cogs % of revenue",o=>o.rev?o.cogs/o.rev:NaN,"pct"],["Fixed","fixed"],["Other","other"],["On behalf of clients","behalf"],["Total costs","costs","tot"],["EBITDA","ebitda","tot"],["EBITDA %",o=>o.rev?o.ebitda/o.rev:NaN,"pct"],["Taxes (студия)","tax"],["Mika","mika"],["Vanya","vanya"],["Misha","misha"],["Total founders","founders","tot"],["из них личные налоги","ftax","sub"],["NET CASH IN","rev","tot"],["NET CASH OUT","out","tot"],["RESULT","result","tot res"]];
-  const cols=all.slice().reverse();
+  const R=[["Revenue","rev"],["COGS","cogs"],["cogs % of revenue",o=>o.rev?o.cogs/o.rev:NaN,"pct"],["Fixed","fixed"],["Other","other"],["On behalf of clients","behalf"],["Банковские комиссии","fee"],["Total costs","costs","tot"],["EBITDA","ebitda","tot"],["EBITDA %",o=>o.rev?o.ebitda/o.rev:NaN,"pct"],["Taxes (студия)","tax"],["Mika","mika"],["Vanya","vanya"],["Misha","misha"],["Total founders","founders","tot"],["из них личные налоги","ftax","sub"],["NET CASH IN","rev","tot"],["NET CASH OUT","out","tot"],["RESULT","result","tot res"]];
+  const cols=all.slice().reverse(),RR=R.filter(([,k])=>k!=="fee"||cols.some(m=>A[m].fee));
   body=`<section class="kpis" aria-label="Итоги периода">
-   ${kp("Выручка",P.rev,hint("rev"))}${kp("Расходы",P.costs,`COGS ${fmtK(P.cogs)}${P.behalf?` · за клиентов ${fmtK(P.behalf)}`:""}`)}${kp("EBITDA",P.ebitda,`маржа ${pct(P.rev?P.ebitda/P.rev:NaN)}`,P.ebitda<0?"neg":"")}
+   ${kp("Выручка",P.rev,hint("rev"))}${kp("Расходы",P.costs,`COGS ${fmtK(P.cogs)}${P.behalf?` · за клиентов ${fmtK(P.behalf)}`:""}${P.fee?` · комиссии банков ${fmtK(P.fee)}`:""}`)}${kp("EBITDA",P.ebitda,`маржа ${pct(P.rev?P.ebitda/P.rev:NaN)}`,P.ebitda<0?"neg":"")}
    ${kp("Налоги студии",P.tax,P.vat?`VAT в выручке ${fmtK(P.vat)}`:hint("tax"))}${kp("Выводы фаундеров",P.founders,`дивиденды ${fmtK(P.founders-P.ftax-P.fexp)} · налоги ${fmtK(P.ftax)}`)}${kp("Результат",P.result,"приход − весь расход",P.result<0?"neg":"pos",1)}
   </section>
   <section class="card"><h2>Приход и расход по месяцам <span class="note">нажмите на месяц, чтобы открыть его</span></h2>${leg([["--s1","Приход (выручка)"],["--s2","Расход (затраты + налоги + фаундеры)"]])}${box("chFlow","Приход и расход по месяцам")}</section>
   <div class="two">
    <section class="card"><h2>Результат месяца</h2>${leg([["--s1","плюс"],["--s3","минус"]])}${box("chRes","Результат по месяцам")}</section>
-   <section class="card"><h2>Куда ушли деньги</h2>${leg([["--s1","COGS"],["--s2","Фаундеры с налогами"],["--s3","Налоги студии"],["--s6","За клиентов"],["--s4","Fixed"],["--s5","Other"]])}${box("chOut","Структура расхода по месяцам")}</section>
+   <section class="card"><h2>Куда ушли деньги</h2>${leg([["--s1","COGS"],["--s2","Фаундеры с налогами"],["--s3","Налоги студии"],["--s6","За клиентов"],["--s4","Fixed"],["--s5","Other"]].concat(ms.some(m=>A[m].fee)?[["--text-muted","Комиссии банков"]]:[]))}${box("chOut","Структура расхода по месяцам")}</section>
   </div>
   <div class="two">
    <section class="card"><h2>Выручка по клиентам <span class="note">${title}</span></h2>${topList(prow.filter(r=>r.c==="rev"),"")}</section>
    <section class="card"><h2>COGS по людям <span class="note">${title} · нажмите на человека</span></h2>${topList(prow.filter(r=>r.c==="cogs"),"out",true)}</section>
   </div>
   <section class="card"><h2>Выводы фаундеров <span class="note">${title} · нажмите на фаундера</span></h2>${fLeg}<div class="hbs fnds">${FOUNDERS.map(k=>fRow(k,fMax)).join("")}</div></section>
+  ${pfee.length?`<section class="card" id="dash-fees"><h2>Банковские комиссии <span class="note">${title} · ${fmt(round2(pfee.reduce((a,r)=>a+r.a,0)),2)} · по банкам</span></h2><p class="note" id="dash-fees-by" style="margin:0">${esc(feeSplit(pfee))}</p></section>`:""}
   <section class="card dash"><h2>По месяцам <span class="note">строки как на листе Dashboard · личные налоги фаундеров — в их выводах, «за клиентов» — в затратах</span></h2>
    <div class="tbl"><table><thead><tr><th></th>${cols.map(m=>`<th class="r${pm.includes(m)?" sel":""}" data-m="${m}">${ymLabel(m)}${m===run?" · идёт":""}</th>`).join("")}</tr></thead><tbody>
-   ${R.map(([nm,k,cl])=>`<tr class="${cl||""}"><td>${nm}</td>${cols.map(m=>{const o=A[m],v=typeof k==="function"?k(o):o[k];return `<td class="m r${pm.includes(m)?" sel":""}${cl&&cl.includes("res")?(v<0?" neg":" pos"):""}">${cl==="pct"?pct(v):fmt(v,v%1?2:0)}</td>`;}).join("")}</tr>`).join("")}
+   ${RR.map(([nm,k,cl])=>`<tr class="${cl||""}"><td>${nm}</td>${cols.map(m=>{const o=A[m],v=typeof k==="function"?k(o):o[k];return `<td class="m r${pm.includes(m)?" sel":""}${cl&&cl.includes("res")?(v<0?" neg":" pos"):""}">${cl==="pct"?pct(v):fmt(v,v%1?2:0)}</td>`;}).join("")}</tr>`).join("")}
    </tbody></table></div>${cols.includes(run)?`<p class="note" style="margin:10px 0 0">${MONF[+run.slice(5)-1]} ещё идёт: здесь только то, что уже в выписках. <a href="#today" data-tab="today">Сейчас — на «Сегодня»</a>.</p>`:""}</section>`;
   draw=()=>{
    chart("chFlow",ms,[{n:"Приход",c:"--s1",v:ms.map(m=>A[m].rev)},{n:"Расход",c:"--s2",v:ms.map(m=>A[m].out)}],"group",pick,pm);
    chart("chRes",ms,[{n:"Результат",c:"--s1",v:ms.map(m=>A[m].result)}],"sign",pick,pm);
-   chart("chOut",ms,[{n:"COGS",c:"--s1",v:ms.map(m=>A[m].cogs)},{n:"Фаундеры с налогами",c:"--s2",v:ms.map(m=>A[m].founders)},{n:"Налоги студии",c:"--s3",v:ms.map(m=>A[m].tax)},{n:"За клиентов",c:"--s6",v:ms.map(m=>A[m].behalf)},{n:"Fixed",c:"--s4",v:ms.map(m=>A[m].fixed)},{n:"Other",c:"--s5",v:ms.map(m=>A[m].other)}],"stack",pick,pm);
+   chart("chOut",ms,[{n:"COGS",c:"--s1",v:ms.map(m=>A[m].cogs)},{n:"Фаундеры с налогами",c:"--s2",v:ms.map(m=>A[m].founders)},{n:"Налоги студии",c:"--s3",v:ms.map(m=>A[m].tax)},{n:"За клиентов",c:"--s6",v:ms.map(m=>A[m].behalf)},{n:"Fixed",c:"--s4",v:ms.map(m=>A[m].fixed)},{n:"Other",c:"--s5",v:ms.map(m=>A[m].other)}].concat(ms.some(m=>A[m].fee)?[{n:"Комиссии банков",c:"--text-muted",v:ms.map(m=>A[m].fee)}]:[]),"stack",pick,pm);
   };
  }
  el.innerHTML=head+body;draw();
@@ -1651,9 +1696,11 @@ const GROUPS=[["cat","По блокам"],["label","По клиентам и л�
 let rp=Object.assign({cats:[],bank:"",q:"",group:"cat"},preset("y12"));
 try{Object.assign(rp,JSON.parse(localStorage.getItem(REP_LS)||"{}"));}catch(e){}
 const saveRep=()=>{try{localStorage.setItem(REP_LS,JSON.stringify(rp));}catch(e){}};
+// (The rows as they count - `counted`: a payment at its amount without the bank's fee, in its block, and every fee a
+// row of «Банковские комиссии», of its bank, from October 2026. A founder's report holds no fee.)
 function repRows(){
  const q=rp.q.trim().toLowerCase();
- return S.tx.filter(r=>!ownTr(r)&&(!rp.from||r.d>=rp.from)&&(!rp.to||r.d<=rp.to)&&(!rp.cats.length||rp.cats.includes(cat(r)))&&(!rp.bank||r.b===rp.bank)&&(!q||(r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)));
+ return counted(S.tx).filter(r=>(!rp.from||r.d>=rp.from)&&(!rp.to||r.d<=rp.to)&&(!rp.cats.length||rp.cats.includes(cat(r)))&&(!rp.bank||r.b===rp.bank)&&(!q||(r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)));
 }
 const behalfApart=()=>false;
 function repGroups(rows){
@@ -1672,13 +1719,13 @@ function repGroups(rows){
 // sits above the table as tabs, because it is a view of the answer and not a filter on it.
 function repSums(){
  const q=rp.q.trim().toLowerCase(),o={};
- S.tx.forEach(r=>{if(ownTr(r)||(rp.from&&r.d<rp.from)||(rp.to&&r.d>rp.to)||(rp.bank&&r.b!==rp.bank))return;
+ counted(S.tx).forEach(r=>{if((rp.from&&r.d<rp.from)||(rp.to&&r.d>rp.to)||(rp.bank&&r.b!==rp.bank))return;
   if(q&&!((r.l||"").toLowerCase().includes(q)||((r.o&&r.o.t)||"").toLowerCase().includes(q)))return;const k=cat(r);o[k]=(o[k]||0)+r.a;});
  return o;
 }
 function paintSums(){
  const o=repSums(),put=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v?fmt(v):"—";};
- CATS.forEach(c=>put("rep-n-"+c.k,o[c.k]));put("rep-n-founders",FOUNDERS.reduce((a,k)=>a+(o[k]||0),0));
+ CATS.forEach(c=>put("rep-n-"+c.k,o[c.k]));put("rep-n-fee",o.fee);put("rep-n-founders",FOUNDERS.reduce((a,k)=>a+(o[k]||0),0));
 }
 function renderReports(){
  const banks=[...new Set(S.tx.map(r=>r.b).filter(Boolean))].sort(),labs=[...new Set(S.tx.map(r=>(r.l||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
@@ -1694,7 +1741,7 @@ function renderReports(){
     <div class="dr"><label for="rep-from">С</label><input type="date" id="rep-from" data-rep="from" value="${rp.from}"><label for="rep-to">По</label><input type="date" id="rep-to" data-rep="to" value="${rp.to}"></div></section>
    <section><h3>Найти</h3><input id="rep-q" data-rep="q" type="search" list="rep-labs" value="${esc(rp.q)}" placeholder="Клиент, человек, подпись" autocomplete="off" aria-label="Клиент, человек или подпись">
     <datalist id="rep-labs">${labs.map(l=>`<option value="${esc(l)}">`).join("")}</datalist></section>
-   <section><h3>Блок${rp.cats.length?'<button data-repcat="">все</button>':""}</h3>${["rev","cogs","fixed","other","behalf","tax"].map(k=>row(k)).join("")}
+   <section><h3>Блок${rp.cats.length?'<button data-repcat="">все</button>':""}</h3>${["rev","cogs","fixed","other","behalf","fee","tax"].map(k=>row(k)).join("")}
     <button class="chk" role="checkbox" aria-checked="${fo}" data-repcat="founders">${box(fo)}<span>Фаундеры</span><span class="n" id="rep-n-founders"></span></button>${FOUNDERS.map(k=>row(k,true)).join("")}</section>
    <section><h3>Банк</h3><select id="rep-bank" data-rep="bank" aria-label="Банк">${opt([["","Все банки"]].concat(banks.map(b=>[b,b])),rp.bank)}</select></section>
   </aside>
@@ -1714,7 +1761,9 @@ function renderRepOut(){
  const per=(rp.from?dShort(rp.from)+" "+rp.from.slice(0,4):"начало")+" – "+(rp.to?dShort(rp.to)+" "+rp.to.slice(0,4):"сегодня"),few=ms.length>1;
  const kp=(l,v,h,cls)=>`<div class="kpi"><div class="lbl">${l}</div><div class="val ${cls||""}">${v}</div><div class="hint">${h}</div></div>`;
  const shown=rows.slice().sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0),multi=rp.cats.length!==1;
+ const fz=rows.filter(r=>r.isFee);
  el.innerHTML=`${rp.cats.some(k=>FOUNDERS.includes(k))?`<p class="note" id="rep-daily" style="margin:0">${DAILY_SAY}</p>`:""}
+ ${fz.length?`<p class="note" id="rep-fees" style="margin:0">Банковские комиссии по банкам: ${esc(feeSplit(fz))}. Платежи, в которых была комиссия, — здесь без неё.</p>`:""}
  <section class="kpis k4" aria-label="Итог по фильтрам">
   ${kp("Приход",fmt(inn,2),vat?`в том числе VAT ${fmt(vat,2)}`:"выручка")}${kp("Расход",fmt(out,2),beh?(apart?`без «за клиентов» ${fmt(beh,2)}`:`из них за клиентов ${fmt(beh,2)}`):"затраты, налоги и выводы")}
   ${kp("Разница",fmt(inn-out,2),"приход − расход",inn-out<0?"neg":"pos")}${kp("Строк",rows.length,few?`в среднем ${fmtK((inn||out)/ms.length)} в месяц`:per)}
@@ -1906,6 +1955,11 @@ function renderLedger(){
  // (A move to a founder's Daily or Monthly account from October 2026 is a transfer between own accounts: it stands
  // among the transfers - filed so by «Разбор», or under a founder's block as before the owner's decision of
  // 17 October 2026 - says where it went in words, and opens like a row of a block.)
+ // (The bank's fees, from October 2026 - Live.fee: a payment with a fee inside stands in its block at its amount
+ // without the fee, and says the fee in plain words; a fee row of its own is in no block. Every fee of the period -
+ // of its own, inside a payment, of a transfer between own accounts - stands in «BANK FEES», after the nine blocks,
+ // and opens the row it is of.)
+ const fz=new Map();rows.forEach(r=>{const f=Live.fee(r);if(f)fz.set(r,f);});const fwhole=r=>!!(fz.get(r)&&fz.get(r).whole);
  const vat=rows.filter(r=>r.c==="rev").reduce((a,r)=>a+(r.v||0),0),skipped=rows.filter(ownTr);
  const e=ui.edit&&S.tx.find(r=>r.id===ui.edit);
  const seen=new Set(),tj=[];skipped.forEach(r=>{if(seen.has(r.id))return;const m=r.pair?S.tx.find(q=>q.pair===r.pair&&q!==r):null;seen.add(r.id);if(m)seen.add(m.id);
@@ -1919,13 +1973,18 @@ function renderLedger(){
    <label for="e-c">Блок<select id="e-c">${catOpts(e.c)}</select></label><label for="e-l">Подпись<input id="e-l" value="${esc(e.l||"")}"></label>
    <label for="e-b">Банк<select id="e-b">${opt(BANKS.map(b=>[b,b]),e.b)}</select></label><label for="e-v">VAT<input id="e-v" type="number" step="any" value="${e.v||""}" style="width:90px"></label>
    <button class="primary" data-esave>Сохранить</button><button data-edel>Удалить</button><button data-eclose>Закрыть</button></div>
-   ${e.o?`<div class="note" style="margin-top:8px">В выписке: ${esc(e.o.t||"")} · ${fmt(Math.abs(e.o.a),2,SYM[e.o.cur]||"")}</div>`:""}</section>`:""}
- <div class="blocks">${CATS.map(c=>{const br=rows.filter(r=>r.c===c.k&&!ownTr(r)),sum=br.reduce((a,r)=>a+r.a,0);
+   ${e.o?`<div class="note" style="margin-top:8px">В выписке: ${esc(e.o.t||"")} · ${fmt(Math.abs(e.o.a),2,SYM[e.o.cur]||"")}${(f=>f?f.whole?" · вся строка — комиссия банка, в блок не входит":` · в т.ч. комиссия банка ${fmt(f.n,2,SYM[f.cur]||"")}: в блоке строка без неё`:"")(Live.fee(e))}</div>`:""}</section>`:""}
+ <div class="blocks">${CATS.map(c=>{const br=rows.filter(r=>r.c===c.k&&!ownTr(r)&&!fwhole(r)),sum=br.reduce((a,r)=>a+netOf(r,fz.get(r)),0);
   return `<section class="blk ${c.k}"><h3>${c.name}<span class="note">${br.length}</span></h3>
    <div class="bt"><span class="sum">${fmt(sum,2)}</span></div>
    <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Amount</th>${c.k==="rev"?'<th class="r">Vat</th><th>Project</th><th>Bank</th>':`<th>Bank</th><th>${c.lab}</th>`}</tr></thead><tbody>
-   ${br.map(r=>`<tr class="rowbtn${ui.edit===r.id?" sel":""}" data-row="${r.id}" tabindex="0"><td class="m">${dShort(r.d)}</td><td class="m r">${fmt(r.a,2)}</td>${c.k==="rev"?`<td class="m r">${r.v?fmt(r.v,2):""}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td><td>${esc(r.b)}</td>`:`<td>${esc(r.b)}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td>`}</tr>`).join("")||`<tr><td colspan="5" class="note" style="padding:10px">пусто</td></tr>`}
-   </tbody></table></div></section>`;}).join("")}</div>
+   ${br.map(r=>`<tr class="rowbtn${ui.edit===r.id?" sel":""}" data-row="${r.id}" tabindex="0"><td class="m">${dShort(r.d)}</td><td class="m r">${fmt(netOf(r,fz.get(r)),2)}${fz.get(r)?` <div class="note">в т.ч. комиссия банка ${fmt(fz.get(r).g,2)}</div>`:""}</td>${c.k==="rev"?`<td class="m r">${r.v?fmt(r.v,2):""}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td><td>${esc(r.b)}</td>`:`<td>${esc(r.b)}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td>`}</tr>`).join("")||`<tr><td colspan="5" class="note" style="padding:10px">пусто</td></tr>`}
+   </tbody></table></div></section>`;}).join("")}${fz.size?(()=>{const fl=[...fz].sort((a,b)=>a[0].d<b[0].d?-1:a[0].d>b[0].d?1:0),tot=fl.reduce((a,[,f])=>a+f.g,0);
+  return `<section class="blk fee" id="led-fees"><h3>${FEECAT.name}<span class="note">${fl.length}</span></h3>
+   <div class="bt"><span class="sum">${fmt(tot,2)}</span><span class="note">${esc(feeSplit(fl.map(([,f])=>({l:f.bank,a:f.g,cur:f.cur,n:f.n}))))}</span></div>
+   <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Amount</th><th>Bank</th><th>Fee</th></tr></thead><tbody>
+   ${fl.map(([r,f])=>`<tr class="rowbtn${ui.edit===r.id?" sel":""}" data-row="${r.id}" tabindex="0"><td class="m">${dShort(r.d)}</td><td class="m r">${fmt(f.g,2)}</td><td>${esc(f.bank)}</td><td class="lb note" title="${esc((r.o&&r.o.t)||"")}">${f.whole?"комиссия банка":ownTr(r)?"из перевода между своими":"из платежа"+(r.l?": "+esc(r.l):"")}</td></tr>`).join("")}
+   </tbody></table></div></section>`;})():""}</div>
  ${tj.length?`<details class="card"${ui.trOpen?" open":""}><summary>Переводы между своими счетами · ${tj.length}</summary>
   <div class="note" style="margin:6px 0">В блоки и дашборд не входят. Если второй выписки нет, перевод всё равно убран, а пара найдётся, когда вы загрузите второй счёт.</div>
   <div class="tbl"><table><thead><tr><th>Дата</th><th>Откуда → куда</th><th class="r">Сумма</th><th>В выписке</th><th>Пара</th><th></th></tr></thead><tbody>
@@ -2299,6 +2358,12 @@ const Cash=(()=>{
    <div class="tbl"${fold?" hidden":""}><table><tbody>${body}</tbody></table></div>${foot}
    <div class="row cs-addrow"${fold?" hidden":""}><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">${k==="subs"?"+ новая подписка":"+ новая строка"}</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}${k==="subs"&&all?'<button class="sm ghost" data-cs-fold aria-expanded="true">Свернуть</button>':""}</div>${adding?Ed.sheet("add"):""}</section>`;
  }
+ // The bank's fees of the month (the owner's decision of 19 October 2026: «отдельной строкой… по каждому банку
+ // отдельно»): one line among the month's costs, after «Прочие расходы» - what the statements say each bank took, in
+ // its own currency and in pounds (M.months.by[ym].fees). Facts only: nothing in it is typed or pressed, and no
+ // figure of the plan counts it - the plan forecasts no fee; a founder who wants one writes a row, a line like any other.
+ function feesHTML(){const z=(M.months.by[cu.month]||{}).fees;if(!z||!z.n)return "";
+  return `<section class="card" id="cs-fees"><h2>Банковские комиссии<span class="note mono">${lv("mon.fees",z.gbp,fmt(z.gbp,2))}</span></h2><p class="note" id="cs-fees-by" style="margin:0">${esc(feeSplit(z.banks))}. По выпискам: эти деньги уже ушли со счетов, план комиссии не прогнозирует.</p></section>`;}
  // ---- «Подставить по прошлым месяцам» ----
  // The one helper, opened by a founder and never run by the page: who was paid, or paid, in four of the last six
  // months, each with what it was LAST time and its usual day — nothing ticked. What is ticked becomes ordinary
@@ -2419,7 +2484,7 @@ const Cash=(()=>{
   const written=M.items.some(it=>it.src!=="tax"&&it.ym===m),hb='<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>';
   const help=cu.helper?helperHTML():m>=ymT&&!written?`<div class="empty cs-nomonth" id="cs-nomonth"><b>В ${monP(m)} пока ничего не вписано</b>В плане только то, что вписали вы. Впишите строки ниже — или начните с тех, кому платят каждый месяц.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-cs-helper>Подставить по прошлым месяцам</button></div></div>`:`<div class="row cs-helpbar">${hb}<span class="note">список тех, кому платят каждый месяц, — отметьте, кого вписать</span></div>`;
   // What comes in on the left, what goes out on the right.
-  const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)).join("")}</div>`;
+  const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)+(k==="other"?feesHTML():"")).join("")}</div>`;
   return `<div id="cs-plan" class="stack">${sw}${back}${past}${outs}${wait}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
    <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
@@ -2929,6 +2994,9 @@ const Cash=(()=>{
 //  Live.byName(name) → "mika"|"misha"|"vanya"|""    the founder a withdrawal's whole name is (N, below); "" for none
 //  Live.daily(row) → boolean                        a move to (or back from) a founder's Daily or Monthly account from October 2026 (D):
 //                                                   the one test «Разбор», «Таблица», «Месяцы» and «Отчёты» ask too
+//  Live.fee(row) → null | {whole, bank, cur, n, g}  a bank's fee from October 2026 (F): the whole row (a fee row of its own) or a
+//                                                   part of it (the fee inside a payment) - n in the row's currency, g in pounds;
+//                                                   the one test the engine, «Разбор», «Таблица», «Месяцы» and «Отчёты» ask
 //  Live.SECS                                        the six sections a month is shown in: the lists, and «Подписки»
 //  window.__money = {compute, upgrade, passed, vatFor, write, model(opts), today, by}   the same, for the checks;
 //                                                   model() is compute on what the page holds now, today a getter
@@ -2940,7 +3008,10 @@ const Cash=(()=>{
 //          mark can say the bank shows no such payment. A row in a currency the page has no rate for is read as pounds.
 //          A move to a founder's Daily or Monthly account dated 1 October 2026 or later (D), or back from one, is read
 //          as a transfer between own accounts whatever block it is filed in: it moves its account's balance, and
-//          nothing else.
+//          nothing else. A bank's fee from 1 October 2026 (F, Live.fee) is read off the row's text: a row with a fee
+//          inside counts for its withdrawal and its block WITHOUT it, and closes a line other than a withdrawal by its
+//          whole amount or by the amount without the fee, paying it the whole; a fee row of its own counts only as a
+//          fee; the fee of a transfer between own accounts counts too. Every row still moves its balance whole.
 //  plan    what GET /api/founder/money/cash stores. An older document is upgraded on the way in (Live.upgrade).
 //  T       today, "YYYY-MM-DD".
 //  opts    {H}: the horizon in days, 30 or 60 (default 60). The window W is T … T+H, both ends included. H changes the
@@ -3146,8 +3217,8 @@ const Cash=(()=>{
 //    by the end of the window (as the statements of its bank reach it) is dropped. Never late or missed, never in
 //    a card. A withdrawal WRITTEN AS A RECORD (W1, 17 October 2026) - somebody's, marked plainly «Оплачено» for a day
 //    that has come - takes its founder's rows near its date first, whatever their upload time: one row within the
-//    fee-folded tolerance of its sum, else the one set of two to four (D2). A row withdrawals take in part shows its
-//    rest outside the plan (W2).
+//    tolerance of its sum, else the one set of two to four (D2) - each row at its amount without the bank's fee (F). A
+//    row withdrawals take in part shows its rest outside the plan (W2).
 //    A MARKED withdrawal («Оплачено», «Частично») has been taken, the founder says, and its mark is worth what its
 //    rows leave of the sum. Which rows are its is decided by the walk - and so by every other withdrawal of the plan.
 //    So a change to the plan must not deal them over: the page sees what every withdrawal whose mark can count in
@@ -3462,7 +3533,9 @@ const Cash=(()=>{
 //    before{ym,in,out}             what the line counts today that is last month's and so is in no `rest`
 //    blocks{rev,team,other,tax,div,result}   each {fact, rest, total, usual}; rev also vat (the tax on top inside
 //                                  its total); div also ptaxFact, ptaxRest. tax is the studio's taxes PAID or DUE in
-//                                  the month; div the three founders' blocks and their personal taxes, as one
+//                                  the month; div the three founders' blocks and their personal taxes, as one. Since
+//                                  19 October 2026 also blocks.fee: the bank's fees of the month (F) - facts only, rest
+//                                  0; every other block holds its rows without their fees, and result is less the fees
 //    accrued                       what the month itself accrues in taxes, by every rule that counts
 //    M_EXP                         blocks.result.total
 //  months{list[], by{[ym]}, to60, more}  the monthly constructor. list: the months the switcher walks — from the
@@ -3481,7 +3554,10 @@ const Cash=(()=>{
 //                                  the whole row and what was taken, in the row's own currency, the two making the
 //                                  row exactly; by[ym].wait = {n, gbp} —
 //                                  what lies in «Разбор» with no block yet. Shown, and in no figure of the plan.
-//                                  Absent in an earlier month and in a month that has not come
+//                                  Absent in an earlier month and in a month that has not come.
+//                                  by[ym].fees = {gbp, n, banks[{bank, gbp, nat[{cur, n}]}]} — the bank's fees of a
+//                                  month that has come (F), per bank in pounds and in its own currencies, in the order
+//                                  of BANKS; absent where the month holds none (every month before October 2026)
 //  clients[]                       {key, name, mark:"vat"|"no", set, last, banks[{bank, vat}], show, rows[], odd} —
 //                                  every revenue label of the table and every name of a written inflow. mark is the
 //                                  founder's (set:true) or proposed; banks — the proposal per bank he has paid
@@ -3587,6 +3663,52 @@ const Cash=(()=>{
 //    with it). A label «daily»/«monthly» alone marks a move only on money that left and whose statement names no
 //    payment by card, direct debit or standing order. Before October nothing changed: the sheet's «daily» rows are
 //    the founders' takings. Nothing stored is rewritten for any of the four: opening the page writes nothing.
+//  · The owner's decision of 19 October 2026 («убери комиссию отдельной строкой. давай вообще иметь отдельную строку
+//    как банковские комиссии и считать их по каждому банку отдельно»): F. After 1.13.0 October's «Дивиденды» showed
+//    a founder's line «… · вне плана · часть £… из £…»: a record closed by two Wise transfers whose amounts held
+//    Wise's fees (folded into the payment: foldFees, or Wise's own «(fee: X CUR)») came to a few pounds over its sum,
+//    and W2 showed the over as the founder's rest. From 1 October 2026 a bank's fee is a cost of the studio of its own, per bank, and
+//    no part of the payment it rode on (`fee`, Live.fee - the one test, read off the stored text: nothing stored is
+//    rewritten, and a statement row keeps the amount and the key it was filed with, so a file read again is known as
+//    it was). In `read`: a row of the pool with a fee inside is there at its amount WITHOUT the fee, in pounds and in
+//    its own currency (and so is anyRow's copy, for a line tied to it by hand) - so the withdrawals and their records
+//    (N, W1, W2, wd.by), the tax periods it pays, the month's blocks and the rows outside the plan all count it net.
+//    A line other than a withdrawal is closed by such a row when its WHOLE amount or its amount without the fee fits
+//    it, and has been paid the whole (`w`, `asLine` - the review of 19 October 2026): a founder writes what he will
+//    pay, as the sheet and «как в прошлый раз» say it, with the fee inside, and the fee left with it; held to the net
+//    alone, a line waited for its fee, and the fee stood twice in the month's «Расход» and in «Можно вывести». So lines
+//    are closed as before the fees, and also where only the net fits (a line written at what the person got). A fee
+//    row of its own (`fw`) stays in the pool for a line a founder wrote for it, if he
+//    wrote one, and is no taking, no tax payment, no client's receipt, no row of a block and no row outside the plan;
+//    the fee of a transfer between own accounts - a move to a Daily account too - is a cost, the transfer itself in no
+//    flow. `fees` is every fee once; the month's blocks.fee and months.by[ym].fees are made of it. Facts keep every row
+//    whole: money in and out of a bank is what it was - «Денег сейчас» does not move, nor does what the line and «Можно
+//    вывести» count from the balances; only the line the money is on is new. What can move: a withdrawal a taking with
+//    a fee inside used up in part has that fee more to go (the fee is not the founder's), and a mark on it, if it
+//    counts, is worth that much more - «Можно вывести» and «Денег сейчас» lower by the fee, which is now a cost and
+//    no taking; and a taking of a balance's own day that another withdrawal holds now (counted without its fee) is
+//    inside that balance or after it by the line that holds it (B), as it always was - known, and kept (the
+//    counter in checks/withdrawals, G). Before October nothing changed: the sheet says nothing of a fee. The plan forecasts no fee (no
+//    average): a founder may write one, and it is then a line like any other, closed by its fee row.
+//    A memory written before the fees (by 1.13.0) holds a record's rows (`rec`) at what they gave with the fee inside:
+//    read without them, what such a row held over its worth goes to the record's rows the memory holds in part (`spare`
+//    in D2, the review of 19 October 2026) - else the record was short by those fees, and «часть» stood «вне плана» for
+//    good. Known, and not closed here: the seeing and the keeping around no change can make a withdrawal that may be a
+//    record (two of its founder's sets fit - no record - until a memory written for a later withdrawal claims a row of
+//    one) a record of the other set, whose rows counted without their fees come to under its sum, where the walk had
+//    topped it up by those fees from a third row: the fees' worth moves between two withdrawals whose marks do not
+//    count, and «Можно вывести» by as much (checks/withdrawals, K - life 370; docs/handoff.md asks the owner).
+//    W1's tolerance keeps its allowance for a fee folded in (+max(£5, 5%) going out). With the fees taken out a
+//    record and its rows meet at their net sums, closer than before and never further; the allowance is not widened
+//    and not narrowed, because it is still needed - a fee no statement names stays inside the amount (Barclays'
+//    payments, a Wise row read from a PDF, a bank that prints none), a record in another currency is compared at
+//    today's rate with rows counted at their own day's, and `tol` is the one tolerance every outgoing line closes
+//    within: narrowed, a plan with no fee anywhere would deal its rows otherwise than it always did (and
+//    checks/withdrawals holds such a plan to develop before the fees, byte for byte).
+//    For the future: Wise's JSON statement, if its API is ever read instead of the files, gives a FLAT fee as a row
+//    of its own that carries its payment's referenceNumber - folded as foldFees folds a «FEE-» row, its id has to be
+//    composed (as the files' ids are), not taken as it is, or a payment read once from a file and once from the API
+//    would be two keys: the same money twice.
 //  · «под налоги сейчас» (taxes.reserve) is the reserve from facts and from lines marked received — the design's
 //    RES[T−1] plus what a mark made today accrues: that money is in «сейчас» already.
 //  · A marked month of a repeating row keeps first claim on the row uploaded after the mark and dated on.−3 … +7,
@@ -3698,6 +3820,45 @@ const Live=(()=>{
   if(MOVE.test(t)&&DEST.test(t))return true;
   const out=isFinite(a)&&a!==0?a<0:r.dir?r.dir<0:FOUNDERS.includes(r.c)&&+r.a>0;
   return out&&FOUNDERS.includes(r.c)&&LABEL.test(String(r.l==null?"":r.l).trim());};
+ // F. A bank's fee (the owner's decision of 19 October 2026: «убери комиссию отдельной строкой. давай вообще иметь
+ // отдельную строку как банковские комиссии и считать их по каждому банку отдельно»). From 1 October 2026 a fee is a
+ // cost of the studio of its own, «Банковские комиссии», counted per bank, and no part of the payment it rode on: a
+ // founder's transfer whose amount holds Wise's fee is his at the amount WITHOUT it. Statement rows only - a row of
+ // the founders' sheet says nothing of a fee, and the months it holds stay exactly as they are. This is the one
+ // test the engine and every screen ask (`fee(row)` → null | {whole, bank, cur, n, g}): a row of the table or of
+ // «Разбор», money that LEFT its account, dated 2026-10-01 or later, whose statement says a fee -
+ //   · the whole row is the fee (`whole`), a fee row of its own, whatever block it was filed in: its text begins
+ //     «Комиссия за …» and names one of a bank's own operations (Tochka's «Комиссия за осуществление валютного
+ //     контроля …», «Комиссия за операцию …», «Комиссия за перевод …»; Mosta's «Комиссия за пополнение кошелька · …»),
+ //     or «Wise Charges for: …» (a Wise fee whose payment the file did not hold), or, on a row of Barclays, it is the
+ //     month's charges: it BEGINS «CHARGES» or «COMMISSION CHARGES» and names a PERIOD or nothing more («CHARGES
+ //     ACCOUNT FEES PERIOD …», «COMMISSION CHARGES»), and no payment, transfer, bill or card, no code Barclays gives a
+ //     payment (BBP, STO, DD, FPO, BGC, …) and no firm (Ltd, PLC, …). A row the statement calls a payment by card, by
+ //     direct debit or by standing order is never a fee of its own, whatever its text (a shop may be called anything),
+ //     nor one that names an agent, an intermediary or a reward. (The review of 19 October 2026: «ACME PROPERTY MGMT
+ //     SERVICE CHARGES PERIOD Q4 BBP» - a landlord's service charges -, a firm called «Charges Consulting», and
+ //     «Комиссия за привлечение клиента по агентскому договору» were read as bank fees, and, a fee being a fee whatever
+ //     its block, left Fixed and COGS for good.);
+ //   · or a part of it (`whole` false): «(fee: 0.40 GBP)» in its text, in the row's own currency (Wise's words for a
+ //     fee inside a payment; foldFees writes the same of a fee it folds), or, on a row of Mosta, a transfer that says
+ //     its fee inside, «Перевод 495 USDT, комиссия 5 · …» - in the row's currency, and less than the row.
+ // n is the fee in the row's own currency, g in pounds - the row's own pounds in the same share, so that a row's
+ // amount without the fee and its fee make the row exactly, in its currency and in pounds. A client's payment («Оплата
+ // за услуги …») is money IN and never a fee; a salary, a card payment in a café called «Coffee», a payment to a
+ // «Комиссионный магазин» say no fee. Nothing stored is rewritten for it: opening the page writes nothing, and the
+ // amount and the key a statement row was filed with stay what they were - the fee is read off the row's text.
+ const FEES=true;   // the fee's switch: false reads no fee anywhere - the page as it was until 19 October 2026
+ // (Cyrillic is no \w to a pattern: what ends a Russian word here is a space, never \b.)
+ const FEE_FROM="2026-10-01",FEE_WISE=/^\s*wise charges for\b/i,FEE_BARC=/^\s*(commission\s+)?charges\b(\s*$|.*\bperiod\b)/i,
+  FEE_NOT=/\b(payment|transfer|bill|card|refund|bbp|sto|dd|ddr|fpo|fpi|bgc|tfr|chq|deb|ltd|limited|plc|llp|inv|invoice)\b/i,
+  FEE_ROW=/^\s*комиссия\s+за\s+(осуществлени|операци|перевод|пополнени|обслуживани|ведени|выдач|сняти|исполнени|плат[её]ж|зачислени|списани|конвертаци|(покупк|продаж)[уи]\s+валют|валютн|смс|sms|выпуск|перевыпуск|подключени|пакет|расч[её]тн|кассов|внесени|инкассаци|выписк|справк|эквайринг|сопровождени|проведени|при[её]м|отправк|возврат)/i,
+  FEE_AGENT=/агент|посредни|вознагражд|комитент|комиссионер|принципал/i;
+ const fee=r=>{if(!FEES||!obj(r)||!isD(r.d)||r.d<FEE_FROM||r.s==="sheet"||!obj(r.o))return null;const a=+r.o.a;if(!isFinite(a)||!(a<0))return null;
+  const t=String(typeof r.o.t==="string"&&r.o.t.trim()?r.o.t:r.o.p==null?"":r.o.p),bank=String(r.b||""),oc=String(r.o.cur||"GBP").toUpperCase(),cur=CURS.includes(oc)?oc:"GBP",g0=Math.abs(+r.a||0);
+  if(!PAID.test(t)&&!FEE_AGENT.test(t)&&(FEE_ROW.test(t)||FEE_WISE.test(t)||(bank==="Barclays"&&FEE_BARC.test(t)&&!FEE_NOT.test(t))))return{whole:true,bank,cur,n:r2(-a),g:r2(g0)};
+  let n=0,m;const re=/\(fee:\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z]{3})\s*\)/gi;while((m=re.exec(t)))if(m[2].toUpperCase()===oc)n+=+m[1].replace(/,/g,"");
+  if(bank==="Mosta"&&(m=/^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[.,]\d+)?)/i.exec(t)))n+=+m[1].replace(",",".");
+  n=r2(n);return n>0&&n<-a?{whole:false,bank,cur,n,g:r2(g0*n/-a)}:null;};
 
  // ---- the periods of a tax ----
  // A calendar month, quarter or year, named "2026-10", "2026Q4", "2026". A tax is due on a day of the month that
@@ -3752,10 +3913,25 @@ const Live=(()=>{
   // A row in a currency the page has no rate for is read one to one, as pounds — the table does the same — and so
   // it belongs to the bank's pound account, which «Вписать остаток» can fill, not to an account nobody can type.
   const cur3=c=>CURS.includes(c)?c:"GBP";
-  const row=(r,inbox)=>{const o=r.o&&isFinite(+r.o.a)?{a:+r.o.a,cur:cur3(r.o.cur)}:null,a=inbox?r2((+r.a||0)*sg(r)):+r.a||0;
-   return{id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0,k:r.key==null?"":String(r.key)};};
+  // F. The bank's fees (`fee`, above), of every row the table counts: the rows of the pool, below, and the transfers
+  // between own accounts that are filed - they are in no flow, and their fee is a cost all the same (a move to a
+  // founder's Daily account too). `fees` is the list; a row of the pool with a fee inside is there at its amount
+  // WITHOUT the fee - in pounds and in its own currency - and so is `anyRow`'s copy of it, for a line a founder tied
+  // it to by hand; a fee row of its own (`fw`) is in the pool for the line a founder wrote for it, if he wrote one, and
+  // is no row of a block, no taking of a withdrawal, no payment of a tax and no row outside the plan. Facts, which move
+  // a balance, keep every row's whole amount: the fee left the bank. A row with a fee inside keeps its whole amount
+  // beside the net one, too - `w` {a, o}, and `fee`, the fee in pounds: a line other than a withdrawal is closed by
+  // a row whose whole amount or whose amount without the fee fits it, and is paid by the whole (`asLine` in compute -
+  // a founder writes what he will pay, and the fee left with it), and a record's memory written before the fees is
+  // read without them (`spare` in D2).
+  const fees=[],feeOf=new Map();
+  txs.filter(r=>r.c).concat(inb.filter(isProv)).forEach(r=>{const f=fee(r);if(!f)return;feeOf.set(r,f);fees.push({id:String(r.id),d:r.d,b:f.bank,cur:f.cur,n:f.n,g:f.g,whole:f.whole,prov:!txs.includes(r)});});
+  const net=(r,f)=>Object.assign({},r,{a:r2((+r.a||0)-Math.sign(+r.a||0)*f.g),o:Object.assign({},r.o,{a:r2(+r.o.a+f.n)}),w:{a:r.a,o:r.o}});
+  const row=(r0,inbox)=>{const f=feeOf.get(r0),r=f&&!f.whole?net(r0,f):r0,oOf=r=>r.o&&isFinite(+r.o.a)?{a:+r.o.a,cur:cur3(r.o.cur)}:null,aOf=r=>inbox?r2((+r.a||0)*sg(r)):+r.a||0,o=oOf(r),a=aOf(r);
+   const x={id:String(r.id),d:r.d,a,c:r.c,b:r.b||"",l:alias(r.l),v:r.c==="rev"?+r.v||0:0,o,at:+r.at||0,prov:!!inbox,ret:o?Math.sign(o.a)!==dirOf(r.c):a<0,k:r.key==null?"":String(r.key)};
+   if(f&&f.whole)x.fw=true;else if(f){x.fee=f.g;x.w={a:aOf(r0),o:oOf(r0)};}return x;};
   const pool=txs.filter(r=>r.c&&!own(r)).map(r=>row(r,false)).concat(inb.filter(isProv).map(r=>row(r,true))).sort(byDate);
-  const poolIds=new Set(pool.map(r=>r.id)),anyRow={};all.forEach(r=>{anyRow[String(r.id)]=r;});
+  const poolIds=new Set(pool.map(r=>r.id)),anyRow={};all.forEach(r=>{const f=feeOf.get(r);anyRow[String(r.id)]=f&&!f.whole?net(r,f):r;});
   const facts=all.filter(r=>r.o&&isFinite(+r.o.a)&&!r.rep).map(r=>({id:String(r.id),d:r.d,b:r.b||"",cur:cur3(r.o.cur),a:+r.o.a,g:Math.abs(+r.a||0),at:+r.at||0,own:own(r)||!!r.maybe,twin:!!r.twin,ac:String(r.ac||"").replace(/\D/g,""),bal:isFinite(r.o.bal)&&r.o.bal!==null&&+r.o.balAt>0?+r.o.bal:null,balAt:+r.o.balAt||0,balIn:+r.o.balIn||+r.o.balAt||0})).sort(byDate);
   // Banks are named by the ledger, and a ledger may name one «constructor»: the maps keyed by a bank have no
   // prototype to answer for it.
@@ -3771,7 +3947,7 @@ const Live=(()=>{
   let reach=sheetEnd;Object.keys(lastOf).forEach(b=>{if(lastOf[b]>reach)reach=lastOf[b];});if(reach>T)reach=T;
   const skOf=r=>{if(r.c==="tax"){const f=owner(r);return f?"tax|@"+f:"";}if(FOUNDERS.includes(r.c))return "";const l=norm(r.l);return l?r.c+"|"+l:"";};
   let L="";pool.forEach(r=>{r.sk=skOf(r);r.lk=r.sk||(FOUNDERS.includes(r.c)?"@"+r.c:r.c==="tax"?"tax|":"");if(r.d>L)L=r.d;});
-  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,own,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L};
+  return{led,fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,rules,byDate,inb,isProv,own,pool,poolIds,anyRow,facts,fees,sheetEnd,lastOf,cov,covSince,reach,L};
  }
 
  // ---- C1–C5. who is paid, or pays, every month ----
@@ -3864,7 +4040,9 @@ const Live=(()=>{
  // are worked out here exactly as A did — its links, its matching of typed rows, its cycles — and nothing else of
  // A is kept. Returns {row id: what A counted, in the row's own currency}; 0 for a month A had as paid or covered.
  function counted(led,X,T){
-  const R=read(led,T),{pool,facts,gbp,nat,gbpOn,natOn,anyRow,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
+  // (A knew no bank's fee: its rows are their whole amounts - F, 19 October 2026)
+  const R=read(led,T),{facts,gbp,nat,gbpOn,natOn,poolIds,covSince}=R,ser=obj(X.ser)?X.ser:{},SER=seriesOf(R,ser),find=linker(R,SER);
+  const whole=f=>f&&f.w?Object.assign({},f,f.w):f,pool=R.pool.map(whole),rowOf=id=>whole(R.anyRow[id]);
   const link=(k,r)=>{const b0=KEYS.includes(r.blk)?r.blk:BLK0[k];
    if(typeof r.sk==="string"&&r.sk&&!/^(rev|cogs|fixed|other|behalf)\|./.test(r.sk)){const vat=r.sk.startsWith("tax|vat|"),m=r.sk.startsWith("m|");return{lk:vat?"tax|":m?"":r.sk,sk:r.sk};}
    if(k==="taxes"){const f=owner({c:"tax",l:r.name});return f?{lk:"tax|@"+f,sk:"tax|@"+f}:{lk:"tax|",sk:""};}
@@ -3878,7 +4056,7 @@ const Live=(()=>{
     paid,tx:arr(r.tx),notx:arr(r.notx),occ:!!(r.sk&&r.cyc&&id==="h|"+r.sk+"|"+r.cyc),cyc:String(r.cyc||""),rem:amt,got:0,done:null,fullG:gbp(amt*vk,cur)});}));
   const linked=new Set(items.map(it=>it.lk).filter(Boolean)),used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
-  items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
+  items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;const rs=it.tx.map(rowOf).filter(Boolean);if(!rs.length)return;
    let s=0;rs.forEach(f=>{s+=f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);used.add(String(f.id));});
    const t=it.rem*it.vk;if(s>=t-tol(t,it.dir)[0]||rs.some(f=>shared[String(f.id)]>1))it.done="row";else{it.got+=s;it.rem=Math.max(0,(t-s)/it.vk);}});
   const byAmt=(f,it)=>BLOCKS[it.list].includes(f.c)&&!(f.sk&&SER[f.sk]&&SER[f.sk].regular)&&!(f.lk&&linked.has(f.lk));
@@ -4002,7 +4180,7 @@ const Live=(()=>{
  function compute(led,plan0,T,opts){
   if(!isD(T))throw new Error("Live.compute: T is not a date");
   opts=opts||{};
-  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv,own}=R;
+  const R=read(led,T),{fx,gbp,nat,rateOn,gbpOn,natOn,dayOn,alias,pool,poolIds,anyRow,facts,fees,sheetEnd,lastOf,cov,covSince,reach,L,inb,isProv,own}=R;
   const P=upgrade(plan0,led,T),H=opts.H>0?Math.min(120,Math.round(opts.H)):60,END=plus(T,H),ymT=T.slice(0,7),cushion=Math.max(0,+P.cushion||0),T60=plus(T,60),FAR=plus(T,120);
   // How far «Касса» by months is drawn (the owner's decision of 9 October 2026: «продли кассу на 6 месяцев»): the
   // running month and six after it, with the rows that repeat written out in each. The verdict, «Можно вывести» and
@@ -4023,7 +4201,7 @@ const Live=(()=>{
   const ontop=RULES.filter(r=>r.base==="ontop"),topRate=sum(ontop,r=>r.rate),TOP=1+topRate/100;
   // A client is the label the table knows him by. A written name is that client's when it is the label, begins
   // with it, or shares its first word with that label alone.
-  const CL=Object.create(null);pool.forEach(r=>{if(r.c!=="rev")return;const k=norm(r.l);if(!k)return;const c=CL[k]||(CL[k]={key:k,name:r.l,rows:[],last:""});c.rows.push(r);c.name=r.l;if(!r.ret&&r.d>c.last)c.last=r.d;});
+  const CL=Object.create(null);pool.forEach(r=>{if(r.c!=="rev"||r.fw)return;const k=norm(r.l);if(!k)return;const c=CL[k]||(CL[k]={key:k,name:r.l,rows:[],last:""});c.rows.push(r);c.name=r.l;if(!r.ret&&r.d>c.last)c.last=r.d;});
   const clientKey=n=>{if(!n||CL[n])return n;let pre="";const same=[],w=n.split(" ")[0];Object.keys(CL).forEach(k=>{if(n.startsWith(k+" ")&&k.length>pre.length)pre=k;if(k.split(" ")[0]===w)same.push(k);});return pre||(same.length===1?same[0]:n);};
   // Proposed per client AND bank: two of the latest three receipts through that bank carry VAT (with one or two
   // rows the latest decides); a bank he has never paid through takes the answer of all his rows. A founder's own
@@ -4082,7 +4260,14 @@ const Live=(()=>{
   // and last the tax periods, which take only what nothing else claimed.
   const used=new Set(),canPay=it=>it.on&&it.amt>0&&!it.done;
   const shared={};items.forEach(it=>it.tx.forEach(id=>{shared[id]=(shared[id]||0)+1;}));
-  const paidIn=(f,it)=>f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);
+  // (F, the review of 19 October 2026: a row with the bank's fee inside is, to a line other than a withdrawal, the
+  // money that left the bank for it - its whole amount, fee and all (`w`, read). A founder writes what he will pay,
+  // as the sheet and «как в прошлый раз» say it, with the fee inside; held to the amount without the fee, such a line
+  // waited for the fee, and the fee stood twice in the month's «Расход» - once a fee, once the line's rest - and
+  // «Можно вывести» was lower by it. A line is paid by the whole; a withdrawal by the row without the fee, which is
+  // no founder's money. The month still counts the row without its fee in its block and the fee once.)
+  const asLine=(f,it)=>f.w&&!it.wd?Object.assign({},f,f.w):f;
+  const paidIn=(f0,it)=>{const f=asLine(f0,it);return f.o&&(f.o.cur||"GBP")===it.cur?Math.abs(+f.o.a||0):natOn(Math.abs(+f.a||0),it.cur,f.d);};
   items.forEach(it=>{if(!canPay(it)||!it.tx.length)return;
    const rs=it.tx.map(id=>anyRow[id]).filter(Boolean);if(!rs.length)return;
    let s=0,last="";rs.forEach(f=>{s+=paidIn(f,it);used.add(String(f.id));if(f.d>last)last=f.d;});
@@ -4151,8 +4336,21 @@ const Live=(()=>{
   wds.forEach(it=>{it.wt=waits(it);it.rk=rk(it);const n=it.src==="occ"?nextOf(it):null,m=it.mm=memOf(it);it.mem=m&&!m.shut?m:dayMem(it,SD);it.w0=plus(it.date,-10);it.w1=n&&n.date>it.date?plus(n.date,-11):plus(it.date,20);it.e1=m?m.to:it.w1;it.took=new Map();});
   // The takings: the rows of the founders' blocks that a bank gave a sum for. One name (`ref`) for one taking,
   // however often it is read in; of two rows that share one - the upload makes none - the first is the taking.
-  const takers=pool.filter(f=>FOUNDERS.includes(f.c)&&f.o&&!f.ret),mems=wds.filter(it=>it.mem),one=new Map();
+  // (a fee row of its own is a fee, and no taking of a founder's, whatever block it was filed in - F)
+  const takers=pool.filter(f=>FOUNDERS.includes(f.c)&&f.o&&!f.ret&&!f.fw),mems=wds.filter(it=>it.mem),one=new Map();
   if(wds.some(it=>it.paid))takers.forEach(f=>{f.ref=refOf(f);if(!one.has(f.ref))one.set(f.ref,f);});
+  // (F, the review of 19 October 2026. A memory written before the fees - by 1.13.0, which prod ran - holds a record's
+  // rows (`rec`) at what they gave WITH the bank's fee inside: a row the record held whole gave its fee too, and the
+  // row it held in part - the last it took - gave its sum less all that. Read with the fees, the whole row gives its
+  // amount without the fee, and the part row held to its old figure left the record short by the earlier rows' fees:
+  // that short stood «вне плана · часть» for good - the very line F takes away - and the seeing and the keeping wrote
+  // it on. So what such a row held over its worth, up to its fee (`spare`), is given to the record's rows the memory
+  // holds in part, in the table's order and each up to its worth - as W1 itself takes a record's rows. A memory
+  // written since holds no row at more than its worth, and a table without a fee has none of it: either is read as
+  // it was. The memories of rows no record took - the walk's - hold what they held, and the fee is to go.)
+  mems.forEach(it=>{const m=it.mem;if(!m.whole.size)return;let spare=0;const rs=takers.filter(f=>one.get(f.ref)===f&&m.whole.has(f.ref)&&m.had.has(f.ref));
+   rs.forEach(f=>{const h=m.had.get(f.ref),x=h-Math.abs(f.a);if(f.fee>0&&x>=0.005){spare+=Math.min(f.fee,x);m.had.set(f.ref,Math.abs(f.a));}});
+   rs.forEach(f=>{const h=m.had.get(f.ref),room=Math.abs(f.a)-h;if(spare<0.005||!(h>0)||room<0.005)return;const v=Math.min(room,spare);m.had.set(f.ref,h+v);spare-=v;});});
   // (a taking the memory holds is the withdrawal's whatever the window the plan now gives it; never another founder's.
   // Of a withdrawal that may be a record, whatever its upload time too - and so is a taking a memory holds as a
   // record's (`rec`) when a change has since moved the record's day past today: a record takes its rows whenever they
@@ -4171,7 +4369,10 @@ const Live=(()=>{
   //     row from October - D), that no other record took and that no memory of another withdrawal holds;
   //   · one row within the tolerance of an outgoing payment whose fee is folded in (−max(£2, 2%) … +max(£5, 5%) of
   //     its sum, in pounds - today's, for a withdrawal in another currency, as the walk counts it), the nearest
-  //     first; else the one set of two to four such rows whose sum is within it - two sets that fit are none.
+  //     first; else the one set of two to four such rows whose sum is within it - two sets that fit are none. Since
+  //     19 October 2026 each row is counted WITHOUT the bank's fee its statement says (F, `read`): a record of 2,400
+  //     closed by Wise transfers of 1,603.20 and 805.25 with 3.20 and 5.25 of fees inside is closed by 1,600 + 800,
+  //     and nothing of them is its founder's rest. The allowance for a fee folded in stays, for a fee no statement names.
   // They are its, up to its sum, and it is done; what a row has over its sum is that row's rest, shown «вне плана»
   // (W2). Nothing fits: dealt by the walk exactly as before. Records go oldest first.
   // A record that holds a memory of the takings of a balance's day (its mark cannot count - it is inside the balance,
@@ -4234,7 +4435,7 @@ const Live=(()=>{
     set.sort((a,b)=>at.get(a)-at.get(b)).forEach(f=>{if(pre.includes(f)){const h=Math.min(g(f),dm.get(f.ref));owed-=h;take(f,h);}else take(f,Math.max(0,t-it.gotG-owed));});
     if(!it.match.length)return;
     it.record=true;it.done={by:"row",on:it.last,rows:it.match.slice(),note:"",got:r2(nat(it.gotG,it.cur))};});}
-  if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||used.has(f.id))return;let left=Math.abs(f.a);const known=mems.length>0&&one.get(f.ref)===f;
+  if(wds.length)pool.forEach(f=>{if(!FOUNDERS.includes(f.c)||!f.o||f.ret||f.fw||used.has(f.id))return;let left=Math.abs(f.a);const known=mems.length>0&&one.get(f.ref)===f;
    const may=it=>!(!canPay(it)||word(it)||!(f.at>it.c0)||it.notx.includes(f.id)||f.d<it.w0||f.d>it.w1);
    const give=(it,take)=>{it.gotG+=take;left-=take;it.took.set(f.id,take);it.match.push(f.id);if(f.d>it.last)it.last=f.d;used.add(f.id);};
    // (a row a memory gives as a record's - `rec` - is that record's whole, as W1 made it: what it has over is its rest
@@ -4284,8 +4485,12 @@ const Live=(()=>{
   const byAmt=(f,it)=>BLOCKS[it.list].includes(f.c)&&!(f.sk&&SER[f.sk]&&SER[f.sk].was)&&!(f.lk&&linked.has(f.lk));
   const mine=(it,f)=>it.ptax?f.lk.startsWith("tax|@")&&(it.lk==="tax|@"||it.lk===f.lk):!!it.lk&&it.lk===f.lk;
   const named=it=>!!it.lk&&it.lk[0]!=="@"&&!it.lk.startsWith("tax|");
-  const cmpN=(f,it,t)=>{if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
+  const cmp1=(f,it,t)=>{if(f.o.cur===it.cur){const x=Math.abs(f.o.a),z=tol(t,it.dir);return{x,t,lo:z[0],hi:z[1],ok:x>=t-z[0]&&x<=t+z[1]};}
    const x=natOn(Math.abs(f.a),it.cur,f.d);return{x,t,lo:0.06*t,hi:0.06*t,ok:Math.abs(x-t)<=0.06*t};};
+  // (a row with the bank's fee inside fits a line by its whole amount, as before the fees, or by its amount without
+  // the fee - a line written at what the person gets; where neither fits, it is the whole that a line has been paid -
+  // `asLine`, above)
+  const cmpN=(f,it,t)=>{if(!f.w||it.wd)return cmp1(f,it,t);const w=cmp1(asLine(f,it),it,t);if(w.ok)return w;const n=cmp1(f,it,t);return n.ok?n:w;};
   const cmp=(f,it,k)=>cmpN(f,it,it.rem*it.vk*(k||1));
   // Where a tax is paid from: the account the rule names; else, for a share of receipts, the account it is charged
   // on; else any pound account. A row the bank gave no amount for is placed by its bank alone.
@@ -4298,7 +4503,7 @@ const Live=(()=>{
   const whole=it=>!!it.of&&!it.of.part&&it.W;
   const cand=(f,it,loose)=>it.dir===Math.sign(f.o.a)&&!it.notx.includes(f.id)&&(loose||f.at>it.c0)&&
    (whole(it)?!!it.date&&f.d>=plus(it.date,-31)&&f.d<=plus(it.date,61)&&(!ruleBy[it.of.r]||onPay(ruleBy[it.of.r],f)):!it.date||f.d>=plus(it.date,loose?-31:-10))&&(it.lk?mine(it,f):byAmt(f,it));
-  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(f.a)/gbpOn(it.rem,it.cur,f.d);return k>=0.7&&k<=1.3;};
+  const fits=(f,it)=>{if(!whole(it))return cmp(f,it).ok;const k=Math.abs(asLine(f,it).a)/gbpOn(it.rem,it.cur,f.d);return k>=0.7&&k<=1.3;};
   const close=(it,f,note,more)=>{it.done=Object.assign({by:"row",on:f.d,rows:[f.id],note:note||""},more||{});it.match.push(f.id);used.add(f.id);};
   // Which tax row is a period's whole bill: the first a founder said so of; a second one for the same period is
   // read as a part of it. (A row from before v3, which says nothing, is read further down, with the periods.)
@@ -4313,7 +4518,7 @@ const Live=(()=>{
   // statements of its bank reach the next month's window. One repeating payout carries at most one unpaid month.
   const missedNow=o=>{if(o.dir>0||o.moved||o.got>0||!o.cov)return false;const n=nextOf(o);return !!n&&o.cov>=plus(n.date,-10);};
   const ownOf=(l,f)=>{let best=null,bd=1e9;const n=dn(f.d);l.forEach(o=>{const k=Math.abs(dn(o.date)-n);if(k<bd||(k===bd&&o.date<best.date)){bd=k;best=o;}});return best;};
-  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a,d:f.d},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
+  const give=(o,f)=>{o.got+=paidIn({o:f.o,a:f.a,d:f.d,w:f.w},o);o.match.push(f.id);if(f.d>o.last)o.last=f.d;used.add(f.id);};
   // The lines a founder said «Частично» of. Each knows how much was paid, and so knows its row when it comes.
   const said=items.filter(it=>it.pamt!=null&&!it.wd&&!word(it));
   pool.forEach(f=>{
@@ -4343,8 +4548,8 @@ const Live=(()=>{
     // 2. the invoice with the tax on top where the row had none, or without it where the row had it
     if(f.c==="rev"&&TOP>1){if((hit=nm.find(it=>!it.vat&&cmp(f,it,TOP).ok)))return close(hit,f,"vat");if((hit=nm.find(it=>it.vat&&cmpN(f,it,it.rem).ok)))return close(hit,f,"novat");}
     if(nm.length>=2){                                                                  // 3. one payment for several lines
-     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),X=same?Math.abs(f.o.a):Math.abs(f.a);
-     const ok=s=>{if(!same)return Math.abs(X-s)<=0.06*s;const z=tol(s,c12[0].dir);return X>=s-z[0]&&X<=s+z[1];};
+     const c12=nm.slice(0,12),same=c12.every(it=>it.cur===f.o.cur),val=it=>same?it.rem*it.vk:gbpOn(it.rem*it.vk,it.cur,f.d),Xs=[asLine(f,c12[0]),f].map(r=>same?Math.abs(r.o.a):Math.abs(r.a));
+     const ok=s=>Xs.some(X=>{if(!same)return Math.abs(X-s)<=0.06*s;const z=tol(s,c12[0].dir);return X>=s-z[0]&&X<=s+z[1];});
      let found=null,n=0;const walk=(i,set,s)=>{if(n>1)return;if(set.length>=2&&ok(s)){n++;found=set.slice();}if(set.length===6)return;for(let j=i;j<c12.length;j++){set.push(c12[j]);walk(j+1,set,s+val(c12[j]));set.pop();}};
      walk(0,[],0);
      if(n===1){found.forEach(it=>{it.done={by:"row",on:f.d,rows:[f.id],note:"sum"};it.match.push(f.id);});used.add(f.id);return;}}
@@ -4434,7 +4639,7 @@ const Live=(()=>{
     const c=cmp(f,it);if(!c.ok&&!(named(it)&&f.at>it.c0&&c.x>=0.3*c.t&&c.x<=1.5*c.t))return;
     if(occ&&Math.abs(dn(f.d)-dn(it.date))>15)return;
     const s=f.sk&&SER[f.sk];if(!occ&&s&&s.recent&&it.date&&s.cyc(f.d)!==s.cyc(it.date))return;h=f;});
-   if(h)it.hint={id:h.id,d:h.d,amt:Math.abs(h.o.a),cur:h.o.cur,label:h.l};});
+   if(h)it.hint={id:h.id,d:h.d,amt:Math.abs(asLine(h,it).o.a),cur:h.o.cur,label:h.l};});
 
   // ---- F1. where each written line stands ----
   // Lateness is measured at the day the statements reach, never at today: a payment is not late on days nobody has
@@ -4497,7 +4702,7 @@ const Live=(()=>{
   // What a rule has accrued from facts (T3): UK VAT is the ledger's own figure, the VAT the revenue rows carry;
   // another tax on top is its share of the same invoices; a share of receipts is the rate times what arrived on
   // its account, in that account's currency — a row the bank gave no amount for at today's rate.
-  const revs=pool.filter(r=>r.c==="rev"),acctOf=k=>{const i=k.indexOf("|");return i<0?[k,"GBP"]:[k.slice(0,i),k.slice(i+1)];};
+  const revs=pool.filter(r=>r.c==="rev"&&!r.fw),acctOf=k=>{const i=k.indexOf("|");return i<0?[k,"GBP"]:[k.slice(0,i),k.slice(i+1)];};
   const factsOf=(rule,a,b)=>{let g=0,n=0,sheet=false;const [bank,cur]=acctOf(rule.acct||"|GBP");
    revs.forEach(r=>{if(r.d<a||r.d>b)return;
     if(rule.base==="ontop"){if(rule.id==="vat")g+=r.v;else if(r.v>0)g+=r.a*rule.rate/(100+topRate);return;}
@@ -4538,7 +4743,7 @@ const Live=(()=>{
    const near=PER.find(X=>openish(X)&&!billOf[X.key]&&Math.abs(dn(X.due)-dn(it.date))<=31&&it.fullG>=0.5*owed0(X)&&it.fullG<=1.5*owed0(X));
    if(near){it.guess="size";it.near=near.key;}});
   // A whole-bill row read by its name only now is matched like one: the pool was dealt before it was known.
-  const taxPool=pool.filter(r=>r.c==="tax"&&!r.sk&&!r.ret);
+  const taxPool=pool.filter(r=>r.c==="tax"&&!r.sk&&!r.ret&&!r.fw);
   items.forEach(it=>{if(it.guess!=="name"||!it.W||!canPay(it)||word(it))return;const f=taxPool.find(f=>f.o&&!used.has(f.id)&&cand(f,it)&&fits(f,it));
    if(f){close(it,f,"bill",{got:paidIn(f,it)});stand(it);settle(it);}});
   items.forEach(it=>{if(!it.of||it.W)return;const X=perBy[it.of.r+"|"+it.of.p];if(X)X.parts.push(it);});
@@ -4754,13 +4959,16 @@ const Live=(()=>{
 
   // ---- G. the running month: fact so far, plan for the rest, beside a usual month ----
   // Six rows: revenue, the team, other costs (fixed, other, on behalf of clients), the studio's taxes, dividends —
-  // the three founders' blocks and their personal taxes, as one — and the result. No row is per founder.
-  const byM={};let inInbox=0,mThrough="";const zero=()=>({rev:0,team:0,other:0,tax:0,div:0,vat:0,ptax:0});
-  pool.forEach(r=>{const m=r.d.slice(0,7),own=r.c==="tax"&&!!r.sk,k=own?"div":rowOfBlock(r.c);if(!KEYS.includes(r.c))return;const o=byM[m]||(byM[m]=zero());o[k]+=r.a;if(own)o.ptax+=r.a;if(r.c==="rev")o.vat+=r.v;
+  // the three founders' blocks and their personal taxes, as one — and the result. No row is per founder. Since
+  // 19 October 2026 a seventh, the bank's fees (F): facts only - the plan forecasts no fee, so its `rest` is nothing;
+  // each row is in its block without its fee, and the fee here, once. The result is less them too.
+  const byM={};let inInbox=0,mThrough="";const zero=()=>({rev:0,team:0,other:0,tax:0,div:0,vat:0,ptax:0,fee:0});
+  pool.forEach(r=>{if(r.fw)return;const m=r.d.slice(0,7),own=r.c==="tax"&&!!r.sk,k=own?"div":rowOfBlock(r.c);if(!KEYS.includes(r.c))return;const o=byM[m]||(byM[m]=zero());o[k]+=r.a;if(own)o.ptax+=r.a;if(r.c==="rev")o.vat+=r.v;
    if(m===ymT){if(r.prov)inInbox+=Math.abs(r.a);if(r.d>mThrough)mThrough=r.d;}});
-  const hist=obj(led&&led.history)?led.history:{},res_=o=>{o.result=o.rev-o.team-o.other-o.tax-o.div;return o;};
+  fees.forEach(x=>{const m=x.d.slice(0,7),o=byM[m]||(byM[m]=zero());o.fee+=x.g;if(m===ymT){if(x.prov)inInbox+=x.g;if(x.d>mThrough)mThrough=x.d;}});
+  const hist=obj(led&&led.history)?led.history:{},res_=o=>{o.result=o.rev-o.team-o.other-o.tax-o.div-(o.fee||0);return o;};
   const aggOf=m=>{if(byM[m])return res_(Object.assign({},byM[m]));const h=obj(hist[m])?hist[m]:{},n=k=>+h[k]||0;
-   return res_({rev:n("rev"),team:n("cogs"),other:n("fixed")+n("other")+n("behalf"),tax:n("tax"),div:sum(FOUNDERS,n),vat:0,ptax:0});};
+   return res_({rev:n("rev"),team:n("cogs"),other:n("fixed")+n("other")+n("behalf"),tax:n("tax"),div:sum(FOUNDERS,n),vat:0,ptax:0,fee:0});};
   // A line that is paid on a founder's word — a hand mark no statement has reached, or the row still unfiled in
   // «Разбор» that took such a mark's place — is in no block of the table yet and no longer on the line. It is the
   // month's fact all the same: left out, «Оплачено» made the month look better by the whole payout until the
@@ -4776,6 +4984,7 @@ const Live=(()=>{
   const rT=res_(Object.assign({},rest));
   ROWS.concat(["result"]).forEach(k=>{blocks[k]={fact:r2(fact[k]),rest:r2(rT[k]),total:r2(fact[k]+rT[k]),usual:r2(usual(k))};});
   blocks.rev.vat=r2(fact.vat+restVat);blocks.div.ptaxFact=r2(fact.ptax);blocks.div.ptaxRest=r2(restPtax);
+  blocks.fee={fact:r2(fact.fee),rest:0,total:r2(fact.fee),usual:r2(usual("fee"))};
   // What the month itself has accrued in taxes, by every rule that counts: from its facts, and from the plan for
   // the rest of it. The row «Налоги» above holds only what is PAID or DUE in the month.
   const accrued=sum(RULES.filter(counts),rule=>factsOf(rule,first,monthEnd).g)+sum(accr,c=>ruleBy[c.rule]&&counts(ruleBy[c.rule])&&c.day>=first&&c.day<=monthEnd?c.v:0);
@@ -4855,12 +5064,21 @@ const Live=(()=>{
    Object.keys(months).forEach(m=>{if(m<began||m>ymT)return;const o=months[m];o.off={in:0,out:0,nIn:0,nOut:0,by:{}};SECS.forEach(k=>{o.off.by[k]={rows:[],gbp:0};});
     const w=inb.filter(r=>r.d.slice(0,7)===m&&!isProv(r)&&!own(r)&&!r.maybe&&!r.twin&&!r.rep);o.wait={n:w.length,gbp:r2(sum(w,r=>Math.abs(+r.a||0)))};});
    const tookOf=new Map();wds.forEach(it=>it.took.forEach((v,id)=>{tookOf.set(id,(tookOf.get(id)||0)+v);}));
-   pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||!KEYS.includes(r.c))return;let a=r.a,amt=r2(Math.abs(r.o?r.o.a:r.a)),part=null;
+   pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||!KEYS.includes(r.c)||r.fw)return;let a=r.a,amt=r2(Math.abs(r.o?r.o.a:r.a)),part=null;
     if(used.has(r.id)){const t=tookOf.get(r.id)||0,full=Math.abs(r.a);if(!(t>0)||r.ret||!FOUNDERS.includes(r.c))return;const rest=r2(full-t);if(!(rest>=0.005))return;
      const of=amt,n=r2(of*rest/full);a=rest;amt=n;part={of,took:r2(of-n)};}
     const k=secOfRow(r),z=o.off.by[k];
     z.rows.push(Object.assign({id:r.id,d:r.d,name:nameOfRow(r),amt,cur:r.o?r.o.cur:"GBP",gbp:r2(a),bank:r.b,prov:r.prov,back:r.ret},part?{part}:{}));z.gbp=r2(z.gbp+a);
     if(k==="inflows"){o.off.in=r2(o.off.in+a);o.off.nIn++;}else{o.off.out=r2(o.off.out+a);o.off.nOut++;}});}
+  // F. The bank's fees of a month that has come (the owner's decision of 19 October 2026: «считать их по каждому банку
+  // отдельно»): by[ym].fees = {gbp, n, banks[{bank, gbp, nat[{cur, n}]}]} - what the month's statements say each bank
+  // took, in pounds and in its own currencies, in the order of BANKS. Facts only, shown and in no figure of the plan:
+  // the plan forecasts no fee (a founder may write one, and it is then a line like any other). Absent where a month
+  // holds none - every month before October 2026 - and in a month that has not come.
+  {const FM=Object.create(null),rank=b=>{const i=BANKS.indexOf(b);return i<0?BANKS.length:i;};
+   fees.forEach(x=>{const m=x.d.slice(0,7);if(!months[m]||m>ymT)return;const o=FM[m]||(FM[m]={gbp:0,n:0,b:Object.create(null)}),k=o.b[x.b]||(o.b[x.b]={gbp:0,nat:Object.create(null)});
+    o.gbp+=x.g;o.n++;k.gbp+=x.g;k.nat[x.cur]=(k.nat[x.cur]||0)+x.n;});
+   Object.keys(FM).forEach(m=>{const o=FM[m];months[m].fees={gbp:r2(o.gbp),n:o.n,banks:Object.keys(o.b).sort((x,y)=>rank(x)-rank(y)||(x<y?-1:x>y?1:0)).map(b=>({bank:b,gbp:r2(o.b[b].gbp),nat:Object.keys(o.b[b].nat).sort().map(c=>({cur:c,n:r2(o.b[b].nat[c])}))}))};});}
   // R1. A row that is about to repeat must not count a later month twice: the later months that already hold a
   // one-off row of the same label are named here, for the tick to switch the repeat off in them. What is left of a
   // line paid in part (carry) is never such a row, dated or not: it is a debt beside the month's own line, not that
@@ -5248,12 +5466,12 @@ const Live=(()=>{
  // one the rule answers for — which is what rule.from has to become. `rule` is model.taxes.rules[i].
  const perAt=(per,key)=>perOf(per,key.length===4?key+"-12":key[4]==="Q"?key.slice(0,4)+"-"+pad(+key[5]*3):key);
  const fromOf=(rule,k)=>rule&&rule.first?dueOf(rule,perStep(rule.per,perAt(rule.per,String(rule.first)),k)):"";
- return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName,byName,daily};
+ return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName,byName,daily,fee};
 })();
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,fee:Live.fee,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
  // (whatIf: what a list of trial changes does to the plan's figures - nothing on the screen moves; trial: the one on it.)
  whatIf(list){return Trial.ask(list);},get trial(){return Trial.peek();},
  model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
@@ -6881,7 +7099,8 @@ const Today=(()=>{
  // words. The two bars share a scale, so spending is read against income at a glance. Everything in it is facts
  // and written rows; nothing is averaged.
  function month(){
-  const B=M.month.blocks,ym=M.month.ym,name=MONF[+ym.slice(5)-1],m=mon(ym),out=k=>round2(B.team[k]+B.other[k]+B.tax[k]+B.div[k]);
+  // (Spending holds the bank's fees too - facts only, from October 2026: the plan forecasts none.)
+  const B=M.month.blocks,ym=M.month.ym,name=MONF[+ym.slice(5)-1],m=mon(ym),fee=B.fee||{fact:0,rest:0,total:0},out=k=>round2(B.team[k]+B.other[k]+B.tax[k]+B.div[k]+fee[k]);
   const inc=B.rev,oT=out("total"),oF=out("fact"),top=Math.max(1,inc.total,oT),w=v=>Math.max(0,Math.min(100,v/top*100)).toFixed(2);
   const bar=(f,t,label)=>`<div class="td-bar3" role="img" aria-label="${label}"><i style="width:${w(f)}%"></i><i class="td-h" style="width:${w(Math.max(0,t-f))}%"></i></div>`;
   const part=(k,label)=>`${label} ${lv(`m.${k}.total`,B[k].total,fmtK(B[k].total))}`;
@@ -6893,7 +7112,7 @@ const Today=(()=>{
     <div class="td-cap">получено ${lv("m.rev.fact",inc.fact,fmt(inc.fact))} из ${fmt(inc.total)}${inc.vat>0.5?` · в т.ч. VAT ${lv("m.rev.vat",inc.vat,fmtK(inc.vat))}`:""}</div></div>
    <div class="td-band"><div class="td-bh"><b>Расход за ${m}</b><span class="td-bv">${lv("m.out.total",oT,fmt(oT))}</span></div>${bar(oF,oT,`Оплачено ${fmt(oF)} из ${fmt(oT)}`)}
     <div class="td-cap">оплачено ${lv("m.out.fact",oF,fmt(oF))} из ${fmt(oT)}</div>
-    <div class="td-cap">${part("team","команда")} · ${part("tax","платежи налогов")} · ${part("div","дивиденды")}${B.div.ptaxFact+B.div.ptaxRest>0.5?` (в т.ч. личные налоги ${lv("m.div.ptax",round2(B.div.ptaxFact+B.div.ptaxRest),fmtK(B.div.ptaxFact+B.div.ptaxRest))})`:""} · ${part("other","прочее")}</div></div>
+    <div class="td-cap">${part("team","команда")} · ${part("tax","платежи налогов")} · ${part("div","дивиденды")}${B.div.ptaxFact+B.div.ptaxRest>0.5?` (в т.ч. личные налоги ${lv("m.div.ptax",round2(B.div.ptaxFact+B.div.ptaxRest),fmtK(B.div.ptaxFact+B.div.ptaxRest))})`:""} · ${part("other","прочее")}${fee.total>=0.005?` · комиссии ${lv("m.fee.total",fee.total,fmt(fee.total,fee.total<100?2:0))}`:""}</div></div>
    <div class="td-band td-res"><div class="td-bh"><b>Результат</b><span class="td-bv${r<0?" neg":""}">${lv("m.result.total",r,sign(r))}</span></div>
     <div class="td-cap">${M.empty&&Math.abs(B.result.rest)<0.5?"пока только факты":"по плану за месяц"} · обычно ${lv("m.result.usual",B.result.usual,sign(B.result.usual))}</div></div>
    <p class="note">${fact?fact+`${M.month.inInbox?`, в т.ч. в разборе ${fmt(M.month.inInbox)}`:""}${M.month.byWord&&M.month.through?`, отмечено вручную ${fmt(M.month.byWord)}`:""}. `:""}${M.month.before.in||M.month.before.out?`Хвост ${MONGF[+M.month.before.ym.slice(5)-1]}, которого выписки ещё не показали (${[M.month.before.in?"+"+fmt(M.month.before.in):"",M.month.before.out?"−"+fmt(M.month.before.out):""].filter(Boolean).join(" и ")}), в этот месяц не входит. `:""}Выплаты команде часто уходят в первые дни следующего месяца. Налоги здесь — только платежи${M.month.accrued>0.5?`; начисленное за ${m}, ${lv("m.accrued",M.month.accrued,tx(M.month.accrued))}, — в блоке «Налоги»`:""}.</p>
@@ -7259,7 +7478,8 @@ window.addEventListener("dragover",ev=>{if(hasFiles(ev))ev.preventDefault();});
 window.addEventListener("dragleave",ev=>{if(!hasFiles(ev))return;dragN=Math.max(0,dragN-1);if(!dragN)veil().hidden=true;});
 window.addEventListener("drop",ev=>{if(!hasFiles(ev))return;ev.preventDefault();dragN=0;veil().hidden=true;const f=[...ev.dataTransfer.files];if(f.length)handleFiles(f);});
 let rsT=null;window.addEventListener("resize",()=>{clearTimeout(rsT);rsT=setTimeout(()=>{if(ui.tab==="today")Today.resize();if(ui.tab==="dashboard")renderDash();if(ui.tab==="reports")renderRepOut();if(ui.tab==="cash")Cash.resize();},200);});
-window.__tx={parsePdfLines,parseGrid,parseCSV,feed(p,name,made){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",acn:p.acn||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check,left:p.left||"",made:+made||0};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
+// (`agg` is a month of «Месяцы» as the page counts it from the table - for the checks, and read only.)
+window.__tx={parsePdfLines,parseGrid,parseCSV,agg,feed(p,name,made){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",acn:p.acn||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check,left:p.left||"",made:+made||0};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
 window.__cash=Cash.test;
 const h=(location.hash||"").slice(1);
 if(h==="cash-days"){Cash.view("days");setTab("cash");}else if(TABS.includes(h)&&h!=="today")setTab(h);

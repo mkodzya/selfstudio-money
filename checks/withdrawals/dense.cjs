@@ -8,14 +8,20 @@
 //   U   an upload with a memory in force gives the model the walk of develop would give for rows nobody remembers?  (not held - counted only)
 //   N, D the plan and the table are read as they are with N and D written out (lib.cjs, `named`, `toOwn`), byte for byte
 //   W   what lib.cjs, `wCheck`, holds of every record and every rest (W1, W2)
+//   P   (19 October 2026) a table that holds no fee is read as develop before the fees read it (pre.cjs), byte for
+//       byte but for what the fees add (lib.cjs, `bareFee`)
+//   G   what lib.cjs, `gCheck`, holds of the fees, where the table holds one (each fee once; every account and every line
+//       other than a withdrawal as with the fees' words taken out); D and W count a row without its fee
 // Every other life is given what the owner decided on 17 October 2026, by a stream of its own: a withdrawal or two
 // named after a founder and nobody's by choice (N), and moves to a founder's Daily or Monthly account (D), before
-// October and in it. Records (W1) come by themselves: the marks are put on withdrawals of the past, near rows.
+// October and in it. Records (W1) come by themselves: the marks are put on withdrawals of the past, near rows. A
+// third of the lives are given the bank's fees (19 October 2026), by a stream of their own: founders' rows that say
+// a fee Wise folded into them, and now and then a fee row of its own (gen.cjs, `fees`).
 // usage: ENGINES=<folder> node checks/withdrawals/dense.cjs <seeds> [steps]
 const E = __dirname;   // (written by the fourth independent reading of the rule)
-const { rng, FOUNDERS, day, T } = require(E + '/gen.cjs');
-const { ms, ledger, clone, item, mk, filed, wd, row, plan3, bal, reach, engines, bare, named, toOwn, wCheck, FX } = require(E + '/lib.cjs');
-const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
+const { rng, FOUNDERS, day, T, fees } = require(E + '/gen.cjs');
+const { ms, ledger, clone, item, mk, filed, wd, row, plan3, bal, reach, engines, bare, bareFee, named, toOwn, wCheck, FX, worth, hasFee, gCheck } = require(E + '/lib.cjs');
+const { NEW, DEV, PRE } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
 const { C, wr, raw, page, see, keep } = mk(Live);
 const SEEDS = +process.argv[2] || 200, STEPS = +process.argv[3] || 14, BY = 'Mika', T0 = ms('2026-10-01T08:00:00Z');
 const stat = {}, bad = {}, up = (k, n = 1) => { stat[k] = (stat[k] || 0) + n; };
@@ -28,7 +34,7 @@ const view = (it) => JSON.stringify([it.done && it.done.by, it.wd.got, it.rows, 
 const figs = (M) => JSON.stringify([M.now, M.marksGbp, M.month.blocks.div.fact]);
 const waiting = (M) => wdsOf(M).filter((it) => it.mark && it.saw);
 const flat = (X) => { const Z = clone(X); bare(Z).items.forEach((it) => { if (it.wd) { delete it.wd.from; delete it.wd.to; } }); return JSON.stringify(Z); };
-const conserve = (M, L) => { const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), all = wdsOf(M);
+const conserve = (M, L) => { const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), worth(r)])), all = wdsOf(M);
   if (all.some((it) => it.wd.got > it.rows.reduce((s, id) => s + (amt[id] || 0), 0) + 0.011)) return 'a withdrawal holds more than its rows';
   if (all.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';
   const rows = new Set(); all.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = all.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0); if (tot > cap + 0.011) return `the withdrawals hold ${tot} of rows worth ${cap}`; return ''; };
@@ -44,6 +50,7 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     div.forEach((r) => { if (!r.whose && X() < 0.4) r.name = xp([SAY[xp(FOUNDERS)], ' ' + SAY[xp(FOUNDERS)].toUpperCase()]); });
     for (let i = xi(1, 3); i > 0; i--) { const k = xp(FOUNDERS), v = xp([60, 150, 400]), r = filed('dly' + i, day(T, xi(-16, 0)), -v, k, xp(['daily', 'monthly', '']), { at: T0 + xi(0, 11) * 864e5 + i });
       r.o.t = xp([`${v},00 GBP перемещено сюда: ${SAY[k]} Daily`, `Moved ${v}.00 GBP to ${SAY[k]} Monthly`, r.l || 'daily', `Card transaction of ${v}.00 GBP issued by Lunch Place`]); allTx.push(r); } }
+  if (process.env.ON !== 'dev' && seed % 3 === 1) fees(seed, { div }, allTx, [bal('Wise', 'GBP', 0, T)]);
   allTx.sort((a, b) => a.at - b.at);
   let shown = Math.max(2, Math.floor(nR * 0.5)), tx = allTx.slice(0, shown), now = ms(T + 'T09:00:00Z');
   let P = plan3({ banks: [bal('Wise', 'GBP', 60000, day(T, -12))], div }), L = ledger(tx, []), M = C(L, P, T);
@@ -52,7 +59,9 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     if (process.env.ON === 'dev') return;
     const L2 = toOwn(L), P2 = named(P);
     if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(JSON.parse(JSON.stringify(Live.compute(clone(L2), clone(P2), T, { H: 30 })))) !== JSON.stringify(M)) fail('N/D: not the model with them written out (' + tag + ')', seed); }
-    const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed); };
+    const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed);
+    if (hasFee(L)) { up('G'); const gb = gCheck(clone(M), L, P, T, Live, up); if (gb.length) fail(gb[0] + ' (' + tag + ')', seed); }
+    else { up('P'); if (JSON.stringify(bareFee(clone(M))) !== JSON.stringify(JSON.parse(JSON.stringify(PRE.compute(clone(L), clone(P), T, { H: 30 }))))) fail('P: not the model of develop before the fees (' + tag + ')', seed); } };
   for (let q = 0; q < 2; q++) { const open = wdsOf(M).filter((it) => it.open && it.on); if (!open.length) break; P = wr(P, 'mark', pick(open), T, now + q, BY); check('first marks'); }
   let lastKind = 'start', tableSince = false;
   for (let step = 0; step < STEPS; step++) {

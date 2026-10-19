@@ -25,11 +25,18 @@
 //   C. «Оплачено», a statement, «Чей вывод» on one row is «Чей вывод», «Оплачено», the statement: the same plan and
 //      the same model - where no other withdrawal waits with a mark, and where one does but neither order left a
 //      memory. Where one did, the pair is counted and nothing is asked of it.
+//   P. (19 October 2026) A table that holds no fee is read as develop before the fees read it (pre.cjs, 008462e),
+//      byte for byte but for the fields the fees add (lib.cjs, `bareFee`) - at every step, memory or not.
+//   G. What lib.cjs, `gCheck`, holds of the fees, at every step whose table holds one: each fee counted once, in its
+//      month and its bank; none outside the plan; every account the same money, and every line other than a withdrawal
+//      closed and paid the same, as with the fees' words taken out.
+//      And D, W and the rest count a row at its worth - without the fee inside it. F is not asked of such a table.
+// A third of the lives are given the fees by a stream of their own (gen.cjs, `fees`).
 // The counters printed at the end say how often each was looked at - and how often there was anything to move.
 // usage: ENGINES=<folder> [BIAS=1] [STEPS=n] [ON=dev] node checks/withdrawals/lives.cjs <lives> [rich]
 const SEEDS = +process.argv[2] || 300, RICH = process.argv[3] === 'rich', STEPS = +process.env.STEPS || 9;
-const { ms, ledger, clone, item, mk, round2, filed, wd, engines, bare, named, toOwn, wCheck, FX } = require('./lib.cjs');
-const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;   // ON=dev: the same lives on the page before the rule - B must fail there
+const { ms, ledger, clone, item, mk, round2, filed, wd, engines, bare, bareFee, named, toOwn, wCheck, FX, worth, hasFee, gCheck } = require('./lib.cjs');
+const { NEW, DEV, PRE } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;   // ON=dev: the same lives on the page before the rule - B must fail there
 const { make, FOUNDERS, day, T, rng } = require('./gen.cjs');
 const { C, wr, raw, page, see, keep } = mk(Live), d = mk(DEV);
 const BY = 'Mika', T0 = ms('2026-10-01T08:00:00Z');
@@ -50,7 +57,7 @@ const keyOf = (it) => String(it.occ ? it.occ.chain : it.row || it.id) + '|' + (i
 // it is made in the card of another month of the same row
 const self = (it) => JSON.stringify([it.date, it.amt, it.cur, it.whose, it.on, it.bank]);
 const conserve = (M, L) => {
-  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), all = wdsOf(M), ws = all.filter((it) => it.cur === 'GBP');
+  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), worth(r)])), all = wdsOf(M), ws = all.filter((it) => it.cur === 'GBP');
   if (ws.some((it) => it.wd.got > it.rows.reduce((s, id) => s + (amt[id] || 0), 0) + 0.011)) return 'a withdrawal holds more than its rows';
   if (all.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';
   if (all.every((it) => it.cur === 'GBP')) { const rows = new Set(); ws.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = ws.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0); if (tot > cap + 0.011) return `the withdrawals hold ${tot} of rows worth ${cap}`; }
@@ -58,7 +65,7 @@ const conserve = (M, L) => {
 };
 const ON_DEV = process.env.ON === 'dev', raw2 = (L, P) => JSON.parse(JSON.stringify(Live.compute(clone(L), clone(P), T, { H: 30 })));
 for (let seed = 1; seed <= SEEDS; seed++) {
-  const g = make(seed, { marks: seed % 3 === 0 ? 'old' : 'none', rich: RICH, news: seed % 2 === 0 }), { pick, int, chance } = g, YR = rng(seed * 31 + 7);
+  const g = make(seed, { marks: seed % 3 === 0 ? 'old' : 'none', rich: RICH, news: seed % 2 === 0, fees: !ON_DEV && seed % 3 === 1 }), { pick, int, chance } = g, YR = rng(seed * 31 + 7);
   // the table, shown as it was uploaded: rows come in batches by their moment
   const allTx = g.L.tx.slice().sort((a, b) => a.at - b.at), allInb = g.L.inbox.slice();
   let shown = Math.max(1, Math.floor(allTx.length * (0.3 + 0.4 * g.R()))), tx = allTx.slice(0, shown), inb = allInb.slice(), now = ms(T + 'T09:00:00Z');
@@ -71,6 +78,8 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     const L2 = toOwn(L), P2 = named(P);
     if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(raw2(L2, P2)) !== JSON.stringify(M)) fail('N/D: not the model of the plan and table with them written out (' + tag + ')', seed); }
     const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed);
+    if (hasFee(L)) { up('G'); const gb = gCheck(clone(M), L, P, T, Live, up); if (gb.length) fail(gb[0] + ' (' + tag + ')', seed); if (!hasMem(P)) up('F not asked: a fee'); else up('steps with a memory'); return; }
+    up('P'); if (JSON.stringify(bareFee(clone(M))) !== JSON.stringify(JSON.parse(JSON.stringify(PRE.compute(clone(L), clone(P), T, { H: 30 }))))) fail('P: not the model of develop before the fees, with no fee in the table (' + tag + ')', seed);
     if (!hasMem(P)) { if (M.items.some((it) => it.wd && it.wd.rec)) up('F not asked: a record'); else { up('F'); const b = JSON.stringify(d.C(L2, P2, T)); if (strip(M) !== b) fail('F: not develop\'s model with no memory (' + tag + ')', seed); } } else up('steps with a memory');
   };
   check('start');

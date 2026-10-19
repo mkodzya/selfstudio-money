@@ -351,7 +351,9 @@ a deploy:
   the checks `rv-wdmark` and `rv-wdday` hold the others and the page's own
   hand. (Since 17 October 2026 the first is asked of a plan read with N and D
   written out, and where no withdrawal is a record - `checks/withdrawals/`,
-  README.) What the second rule does not reach - a row that is no founder's
+  README; since 19 October 2026 also where the table holds no bank's fee, and
+  a table that holds none is held to develop before the fees, `008462e`, byte
+  for byte.) What the second rule does not reach - a row that is no founder's
   taking, a part of a marked withdrawal, a marked withdrawal that holds a
   row of another account than its own (another bank's, or another
   currency's of its own bank) - is in `docs/handoff.md`, the entry of
@@ -372,7 +374,9 @@ a deploy:
   is typed or pressed - rule 1 of the page stands, the plan holds only what
   a founder wrote. A row that withdrawals took in part stands there with its
   rest, in its own currency (the owner's decision of 17 October 2026: what
-  was taken and the rest make the row exactly). A founder's transfer to his
+  was taken and the rest make the row exactly - since 19 October 2026 the row
+  without the bank's fee inside it, which is no founder's money). A founder's
+  transfer to his
   daily account made before October 2026 is his taking, inside the
   withdrawal that holds it (`wd.by`), and never a cost of the studio; from
   1 October 2026 a move to a founder's Daily or Monthly account, or back
@@ -391,7 +395,9 @@ a deploy:
   a rename in the card writes no owner. Never `f`. **A withdrawal
   written as a record** (W1, the same day) - somebody's, marked plainly
   «Оплачено» for a day that has come - takes its founder's rows near its
-  date before the walk deals anything, whatever their upload time. It is
+  date before the walk deals anything, whatever their upload time (each at
+  its amount without the bank's fee inside it - the rule of 19 October
+  below). It is
   held to the four things above: what it takes is no other withdrawal's,
   it holds no more than its sum, and its mark is closed by its rows and
   counts in «Денег сейчас» neither twice nor not at all. What it takes
@@ -404,6 +410,35 @@ a deploy:
   balance's day its memory holds (`D2` in the engine says how).
   `checks/withdrawals/` hold it with the rest (its README, and
   `cases.cjs`), and the check `records` on the page.
+- **A bank's fee is a line of its own, per bank** (the owner's decision of
+  19 October 2026: «убери комиссию отдельной строкой. давай вообще иметь
+  отдельную строку как банковские комиссии и считать их по каждому банку
+  отдельно»). From 1 October 2026 `Live.fee` is the one test of what part of
+  a statement row is a bank's fee - the whole row (Tochka's and Mosta's
+  «Комиссия за …» that names a bank's own operation, «Wise Charges for: …»,
+  Barclays' month's charges; never an agent's commission or a payee's
+  «service charges») or a part of it (Wise's «(fee: X CUR)», Mosta's «…,
+  комиссия X ·») - and the engine, «Разбор», «Таблица», «Месяцы» and «Отчёты»
+  all ask it. A row counts for its withdrawal, its block and «Дивиденды»
+  without its fee; a line other than a withdrawal is closed by the row's whole
+  amount or by the amount without the fee, and is paid the whole - a founder
+  writes what he will pay, and the fee left with it; the fee counts once, in
+  «Банковские комиссии» of its bank; a fee row of its own is a
+  fee whatever block it was filed in; an own transfer's fee counts, the
+  transfer itself nowhere. Facts - what moves a balance - keep every row
+  whole: what the accounts hold does not move by it (what can: a marked
+  withdrawal not yet taken in full has the fee more to go, and a taking of a
+  balance's own day that another line now holds is inside or after that
+  balance by its line - `docs/handoff.md`). **Nothing stored changes for
+  it**: a statement row keeps the amount and the key it was filed with - that
+  key is how a file read again is known, and a fee stored as a row of its own,
+  or an amount without the fee, would bring the same money in twice - the fee
+  is read off the row's text, and opening the page writes nothing; a record's
+  memory written before the fees (1.13.0) is read without them. The plan
+  forecasts no fee. **A change that lets a fee into a founder's figure or a
+  block, or counts one twice, breaks this**: the check `fees` and
+  `checks/withdrawals/` (cases 6-9, the properties P and G) hold it. `FEES` is its
+  one-line switch; `docs/handoff.md`, rule 14 and the entry of 19 October.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two

@@ -189,6 +189,16 @@
 // Vanya's mark live, so that its double count before W1 is seen, and a rename in the card writes no owner; «daily» -
 // a move back from a Daily account, a direct debit under «daily», and a move that «Разбор» never pairs with a
 // client's payment. What the engine alone holds of it is in checks/withdrawals/cases.cjs.
+//
+// THE OWNER'S DECISION OF 19 OCTOBER 2026 (docs/handoff.md, the entry of that day) - a bank's fee is a line of its own,
+// per bank, and no fee is a founder's money - has its check at the very end, «fees»: made-up October statements of the
+// four banks in the shapes each words a fee; the record whose fees made it «часть … из …»; every block net of its fees;
+// the fees in «Касса», «Сегодня», «Месяцы», «Отчёты» and «Таблица»; «Денег сейчас» and «Можно вывести» against the page
+// with the fee's switch off; September byte for byte; the false friends; and a file develop 008462e had read, read
+// again. What it changed in older checks is rewritten where it stood, with the old arithmetic in a comment: «p1» (the
+// month has a seventh row, the bank's fees), rule G of `inv` (the result is less the fees) and `want` (spending holds
+// them); and `inv` has a rule F of its own, and counts a withdrawal's rows without their fees (rule 23). What the engine
+// alone holds of it is in checks/withdrawals (cases.cjs, case 6, and the properties P and G).
 import http from 'node:http';
 import fs from 'node:fs';
 import { chromium } from 'playwright';
@@ -254,6 +264,32 @@ const AT2 = ms('2026-10-06T10:00:00Z');
 const TAP = ms('2026-10-06T11:00:00Z');
 const AT3 = ms('2026-10-06T13:00:00Z');
 const round2 = (v) => Math.round(v * 100) / 100;
+// The owner's decision of 19 October 2026 (F), written out here a second time, apart from the page: from 1 October
+// 2026 a row of the statements (not of the sheet), money that LEFT its account, is a bank's fee of its own when its
+// text begins «Комиссия за» and an operation of a bank, or «Wise Charges for: …», or, on Barclays, is the month's
+// charges - beginning «CHARGES» or «COMMISSION CHARGES», then a PERIOD or nothing, with no payment, transfer, bill or
+// card, no code Barclays gives a payment and no firm in it (the review of 19 October 2026) - never one its statement
+// calls a payment by card, direct debit or standing order, nor one naming an agent, an intermediary or a reward;
+// else it holds a fee inside when its text says «(fee: X CUR)» in its own currency,
+// or, on Mosta, «Перевод …, комиссия X ·» - less than the row. n: the fee in the row's currency; g: in pounds, the row's
+// own pounds in the same share.
+const feeIn = (r) => {
+  if (!r || typeof r.d !== 'string' || r.d < '2026-10-01' || r.s === 'sheet' || !r.o || !(+r.o.a < 0)) return null;
+  const a = +r.o.a, t = String(typeof r.o.t === 'string' && r.o.t.trim() ? r.o.t : r.o.p || ''), cur = String(r.o.cur || 'GBP').toUpperCase(), g0 = Math.abs(+r.a || 0);
+  const paid = /card transaction|card payment|direct debit|standing order|транзакция по карте|оплата картой|покупка по карте|прямое списание|прямое дебетование|постоянное поручение/i.test(t);
+  const lo = t.trim().toLowerCase().replace(/\s+/g, ' '), words = lo.split(/[^a-z0-9]+/).filter(Boolean);
+  const barc = r.b === 'Barclays' && /^(commission )?charges( |$)/.test(lo) && (/^(commission )?charges$/.test(lo) || words.includes('period'))
+    && !words.some((w) => ['payment', 'transfer', 'bill', 'card', 'refund', 'bbp', 'sto', 'dd', 'ddr', 'fpo', 'fpi', 'bgc', 'tfr', 'chq', 'deb', 'ltd', 'limited', 'plc', 'llp', 'inv', 'invoice'].includes(w));
+  const ops = /^комиссия за (осуществлени|операци|перевод|пополнени|обслуживани|ведени|выдач|сняти|исполнени|платеж|платёж|зачислени|списани|конвертаци|покупку валют|покупки валют|продажу валют|продажи валют|валютн|смс|sms|выпуск|перевыпуск|подключени|пакет|расчетн|расчётн|кассов|внесени|инкассаци|выписк|справк|эквайринг|сопровождени|проведени|прием|приём|отправк|возврат)/.test(lo);
+  const agent = /агент|посредни|вознагражд|комитент|комиссионер|принципал/.test(lo);
+  if (!paid && !agent && (ops || /^wise charges for\b/.test(lo) || barc)) return { whole: true, n: round2(-a), g: round2(g0) };
+  let n = 0;
+  for (const m of t.matchAll(/\(fee:\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z]{3})\s*\)/gi)) if (m[2].toUpperCase() === cur) n += +m[1].replace(/,/g, '');
+  const mo = r.b === 'Mosta' ? /^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[.,]\d+)?)/i.exec(t) : null;
+  if (mo) n += +mo[1].replace(',', '.');
+  n = round2(n);
+  return n > 0 && n < -a ? { whole: false, n, g: round2(g0 * n / -a) } : null;
+};
 const sheet = (id, d, a, c, l, more = {}) => ({ id, d, a, c, b: 'Wise', l, v: 0, s: 'sheet', key: 'k|' + id, ...more });
 const filed = (id, d, amt, c, l, more = {}) => {
   const { cur = 'GBP', b = 'Wise', at = AT1, v = 0 } = more;
@@ -486,7 +522,9 @@ const held = { runs: 0, bad: [] };
 // sum - nor do the withdrawals together hold more than the rows they share; 22 «Можно
 // вывести» never asks more of a day than that day holds after taxes and the cushion; 24 VAT accrued from facts is
 // the ledger's own figure; 25–27 one bill per tax period, a closed period reserves nothing, a rule that is off,
-// away or unconfirmed counts nowhere; 31 no key names a founder. And G: the month's columns add up.
+// away or unconfirmed counts nowhere; 31 no key names a founder. And G: the month's columns add up. And F (the owner's
+// decision of 19 October 2026): a bank's fee is a line of its own - each fee counted once, in its month and its bank;
+// none in a block, a withdrawal or the list outside the plan; a row in them without the fee it holds.
 const addM = (ym, k) => { const n = +ym.slice(0, 4) * 12 + +ym.slice(5, 7) - 1 + k; return Math.floor(n / 12) + '-' + String((n % 12) + 1).padStart(2, '0'); };
 const addD = (d, k) => new Date(Date.parse(d + 'T00:00:00Z') + k * 864e5).toISOString().slice(0, 10);
 function inv(M, P, L) {
@@ -599,7 +637,8 @@ function inv(M, P, L) {
     // worth nor than its own sum, and the withdrawals together no more than the rows they hold between them -
     // however the rows were dealt, and whatever a mark remembers. (The rows in pounds: a withdrawal in another
     // currency is left out of that half, and one a founder gave a row by hand out of all of it.)
-    const worth = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), Math.abs(+r.a || 0)]));
+    // (a row is worth its pounds WITHOUT the bank's fee inside it, and a fee row of its own nothing - F, 19 October 2026)
+    const worth = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => { const f = feeIn(r); return [String(r.id), !f ? Math.abs(+r.a || 0) : f.whole ? 0 : round2(Math.abs(+r.a || 0) - f.g)]; }));
     const wds = M.items.filter((it) => it.wd && it.rows.length && !it.rows.some((id) => hand.has(String(id))));
     const gbp = wds.filter((it) => it.cur === 'GBP'), of = (ids) => sum(ids.map((id) => worth[id] || 0));
     gbp.forEach((it) => say(it.wd.got <= of(it.rows) + 0.011, `23: the withdrawal ${it.id} holds ${it.wd.got}, more than its rows are worth`));
@@ -642,9 +681,23 @@ function inv(M, P, L) {
   say(M.days.every((D) => !('c' in D) && !('dripIn' in D) && !('inT' in D)) && !('hist' in M.inParts) && !('founders' in M.outParts), 'a day or a part still carries a figure of the history');
   // G
   const mb = M.month.blocks;
-  ['fact', 'rest', 'total'].forEach((f) => say(close(mb.result[f], mb.rev[f] - mb.team[f] - mb.other[f] - mb.tax[f] - mb.div[f], 0.05), `G: the month's ${f} column does not add up`));
+  // (until 19 October 2026 the result was rev − team − other − tax − div; since then the month has a seventh row, the
+  // bank's fees, and the result is less them too: rev − team − other − tax − div − fee)
+  ['fact', 'rest', 'total'].forEach((f) => say(close(mb.result[f], mb.rev[f] - mb.team[f] - mb.other[f] - mb.tax[f] - mb.div[f] - mb.fee[f], 0.05), `G: the month's ${f} column does not add up`));
   say(Object.values(mb).every((x) => close(x.total, x.fact + x.rest, 0.011)) && M.month.M_EXP === mb.result.total, 'G: total is not fact + rest');
   say(M.month.byWord >= 0 && M.month.before.in >= 0 && M.month.before.out >= 0 && M.month.accrued >= -0.001 && mb.div.ptaxFact <= mb.div.fact + 0.011 && mb.div.ptaxRest <= mb.div.rest + 0.011, 'G: a part of the month is negative, or larger than its whole');
+  // F (19 October 2026): the bank's fees are facts - nothing of them is forecast - and the month's row of them is what
+  // the running month's fees by bank say; a month's fees are the sum of its banks'; no month that has not come shows
+  // any. With the table in hand: each month's fees are the fees `feeIn` finds in the rows the page counts, and no row
+  // outside the plan is a fee of its own or stands there at more than its worth.
+  say(!!mb.fee && mb.fee.rest === 0 && mb.fee.total === mb.fee.fact && close(mb.fee.fact, ((M.months.by[ymT] || {}).fees || { gbp: 0 }).gbp, 0.011), 'F: the month\'s fees are not facts, or not its fees by bank');
+  Object.entries(M.months.by).forEach(([m, o]) => { if (!o.fees) return; say(m <= ymT && o.fees.n > 0 && close(o.fees.gbp, sum(o.fees.banks.map((b) => b.gbp)), 0.006 * (o.fees.banks.length + 1)), `F: ${m}'s fees are not the sum of its banks', or the month has not come`); });
+  if (L) { const counts = (L.tx || []).filter((r) => r.c).concat((L.inbox || []).filter((r) => r.c && r.c !== 'skip' && String(r.l || '').trim() && r.auto && !r.twin && !r.maybe && !r.rep)), fm = {};
+    counts.forEach((r) => { const f = feeIn(r); if (f) fm[r.d.slice(0, 7)] = (fm[r.d.slice(0, 7)] || 0) + f.g; });
+    Object.entries(M.months.by).forEach(([m, o]) => { if (m <= ymT) say(close((o.fees || { gbp: 0 }).gbp, fm[m] || 0, 0.006 * (counts.length + 1)), `F: ${m} shows fees of ${(o.fees || { gbp: 0 }).gbp}, its rows hold ${fm[m] || 0}`); });
+    const rowOf = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), r]));
+    Object.values(M.months.by).forEach((o) => { if (!o.off) return; Object.values(o.off.by).forEach((z) => z.rows.forEach((x) => { const r = rowOf[x.id], f = r && feeIn(r); if (!f) return;
+      say(!f.whole && Math.abs(x.gbp) <= round2(Math.abs(+r.a) - f.g) + 0.006, `F: ${x.id} stands outside the plan as a fee of its own, or with its fee`); })); }); }
   // the constructor's months hold every item once
   const placed = {};
   Object.entries(M.months.by).forEach(([m, lists]) => SECS.forEach((k) => {
@@ -1075,7 +1128,9 @@ await run('p1', 'day one (D8): the facts, an empty plan, taxes accrued by the ru
   let P = planP();
   let M = await C(L, P);
   figs(M, { now: 32000, verdict: 'vE', res: 4800, IN: 0, OUT: 0, END: 32000 }, 'nothing is written: the page says what is in the bank and what of it is not the studio\'s, and forecasts nothing');
-  same([M.empty, M.items.map((it) => it.id), M.free.why, Object.values(M.month.blocks).map((b) => b.fact + b.rest)], [true, ['t|vat|2026Q3'], 'noout', [0, 0, 0, 0, 0, 0]], '… the plan is empty, the one line in it is a tax the rules worked out, «Можно вывести» names no sum, the month has no fact and no plan');
+  // (until 19 October 2026 the month had six rows - revenue, team, other, taxes, dividends, result - and six zeros
+  // here; since then a seventh, the bank's fees, and it is nothing too)
+  same([M.empty, M.items.map((it) => it.id), M.free.why, Object.values(M.month.blocks).map((b) => b.fact + b.rest)], [true, ['t|vat|2026Q3'], 'noout', [0, 0, 0, 0, 0, 0, 0]], '… the plan is empty, the one line in it is a tax the rules worked out, «Можно вывести» names no sum, the month has no fact and no plan');
   let v = per(M, 'vat|2026Q3');
   same([v.accF, v.due, v.state, v.left, v.approx, per(M, 'vat|2026Q2'), card(M, 14)], [4800, '2026-11-07', 'open', 4800, true, null, []], 'UK VAT: III кв. is kept — 4,800 accrued, due 7 Nov; II кв. was looked at, found paid (4,700 of 4,800) and is in no figure and no card');
   let u = per(M, 'usn|2026Q3');
@@ -2097,12 +2152,15 @@ const look = (pg, tab = 'today') => pg.evaluate((tab) => {
 function want(M, k, at) {
   // (what was paid outside the plan: the month's two sums, and each section's)
   if (k === 'mon.off.out' || k === 'mon.off.in') return ((M.months.by[at.month] || {}).off || {})[k.slice(8)];
+  // (the bank's fees of the month in view - 19 October 2026)
+  if (k === 'mon.fees') return ((M.months.by[at.month] || {}).fees || {}).gbp;
   if (k.startsWith('mon.') && k !== 'mon.div.ptax' && k !== 'mon.tax.accrued') { const [, list, f] = k.split('.'), mo = M.months.by[at.month] || {}; return f === 'off' ? (((mo.off || {}).by || {})[list] || {}).gbp : (mo[list] || {})[{ exp: 'expected', done: 'done' }[f]]; }
   if (k === 'say') return M.v0 ? 'v0' : M.LOW < 0 ? 'minus' : M.LOW < M.cushion ? 'low' : 'fine';
   const b = M.month.blocks;
   // No figure of the forecast is shown while nothing is written ahead — with the balances typed (vE) or without (v0).
   const vE = M.verdict.id === 'vE' || (M.v0 && M.empty);
-  const out = (f) => round2(b.team[f] + b.other[f] + b.tax[f] + b.div[f]);
+  // (spending: team, other, taxes, dividends - and since 19 October 2026 the bank's fees, facts only)
+  const out = (f) => round2(b.team[f] + b.other[f] + b.tax[f] + b.div[f] + b.fee[f]);
   // «Можно вывести» names a sum (or a zero) only when the balances are there and fresh and the plan holds its costs.
   const named = !!M.free && !['stale', 'noout', 'thin'].includes(M.free.why);
   const freeState = M.v0 ? 'v0' : !named ? M.free.why : Math.floor((M.free.now + 1e-6) / 100) * 100 >= 100 ? 'sum' : 'zero';
@@ -7687,6 +7745,244 @@ await run('daily', 'from 1 October 2026 a move to a founder\'s Daily or Monthly 
   await pg.click('#view-reports [data-repcat="mika"]');
   same([(await pg.$$eval('#repOut tr[data-reprow]', (l) => l.map((tr) => tr.dataset.reprow))).sort(), !!(await pg.$('#rep-daily'))], [['c03', 'c04'], true], '«Отчёты», Mika\'s block, October: the same two rows, and the same words');
   await pg.context().close();
+});
+
+// =====================================================================================================================
+// THE OWNER'S DECISION OF 19 OCTOBER 2026 (docs/handoff.md, the entry of that day). After 1.13.0 October's «Дивиденды»
+// showed a line «… · вне плана · часть £… из £…»: a withdrawal written as a record was closed by two Wise transfers
+// whose amounts held Wise's fees, so the two came to a few pounds over the record, and W2 showed the over as the
+// founder's rest. «убери комиссию отдельной строкой. давай вообще иметь отдельную строку как банковские комиссии и
+// считать их по каждому банку отдельно». Decided - F: from 1 October 2026 a bank's fee is a cost of its own,
+// «Банковские комиссии», counted per bank; a payment counts for its withdrawal and its block WITHOUT the fee inside it
+// (a line other than a withdrawal is closed by its whole amount or by the amount without the fee, and paid the whole -
+// the review of 19 October 2026, checks/withdrawals case 8); a fee row of its own counts only as a fee, whatever block
+// it was filed in; an own transfer's fee counts, the transfer itself nowhere. Money in and out of a bank does not
+// change - only the line it is on. Every figure and every text below is made up, in the shapes the four banks'
+// statements word a fee.
+// =====================================================================================================================
+const UPF = ms('2026-10-15T09:00:00Z'), C1F = ms('2026-10-01T08:00:00Z'), W14 = ms('2026-10-14T16:00:00Z'), MK14 = ms('2026-10-14T16:05:00Z');
+const said = (r, t) => { r.o.t = t; return r; };
+// October of four banks, uploaded on 15 Oct. Wise: Vanya's two transfers of 12 Oct with Wise's fees inside (3.20,
+// 5.25); a payment to Person K (2.10); a card payment in euros (€0.70); a courier (0.40), an ad bought for a client
+// (0.90), HMRC (0.50); a conversion between own accounts (3.60) and its euro side; a move to Mika's Daily account
+// (0.50); Misha's transfer (0.30); and two card payments that only seem to speak of a fee. Barclays: the month's
+// charges, 18.50. Tochka: two fees of their own, ₽590 and ₽1,180; a client's payment and a salary that only mention
+// one. Mosta: the fee of a top-up, $25, of its own; a transfer with $5 of fee inside. September: the sheet, and a
+// statement row whose text says a fee - before October, so no fee is read off it.
+const feeTx = () => [
+  sheet('s-k', '2026-09-10', 2000, 'cogs', 'Person K'), sheet('s-bc', '2026-09-30', 17, 'fixed', 'Barc charges', { b: 'Barclays' }), sheet('s-m', '2026-09-12', 900, 'misha', ''), sheet('s-r', '2026-09-15', 800, 'rev', 'Client R', { b: 'Tochka' }),
+  said(filed('sepW', '2026-09-28', -100.4, 'other', 'Thing', { at: AT1 }), 'Sent money to Thing Ltd (fee: 0.40 GBP)'),
+  said(filed('vA', '2026-10-12', -1603.2, 'vanya', '', { at: UPF }), 'Sent money to Vanya Example (fee: 3.20 GBP)'),
+  said(filed('vB', '2026-10-12', -805.25, 'vanya', '', { at: UPF }), 'Sent money to Vanya Example (fee: 5.25 GBP)'),
+  said(filed('pK', '2026-10-06', -1502.1, 'cogs', 'Person K', { at: UPF }), 'Sent money to Person K (fee: 2.10 GBP)'),
+  said(filed('tE', '2026-10-05', -58.7, 'fixed', 'Tool E', { cur: 'EUR', at: UPF }), 'Card transaction of 58.00 EUR issued by Tool E (fee: 0.70 EUR)'),
+  said(filed('co', '2026-10-07', -40.4, 'other', 'Courier', { at: UPF }), 'Sent money to Courier Co (fee: 0.40 GBP)'),
+  said(filed('bh', '2026-10-08', -300.9, 'behalf', 'Client Q — ads', { at: UPF }), 'Sent money to Ad Network (fee: 0.90 GBP)'),
+  said(filed('hm', '2026-10-09', -500.5, 'tax', 'HMRC', { at: UPF }), 'Sent money to HMRC (fee: 0.50 GBP)'),
+  said(filed('cv', '2026-10-03', -1003.6, 'skip', '', { at: UPF }), 'Converted 1,000.00 GBP to 1,170.00 EUR (fee: 3.60 GBP)'),
+  said(filed('cvE', '2026-10-03', 1170, 'skip', '', { cur: 'EUR', at: UPF }), 'Converted 1,000.00 GBP to 1,170.00 EUR'),
+  said(filed('dM', '2026-10-04', -200.5, 'mika', 'daily', { at: UPF }), 'Moved 200.00 GBP to Mika Daily (fee: 0.50 GBP)'),
+  said(filed('mM', '2026-10-14', -300.3, 'misha', '', { at: UPF }), 'Sent money to Misha Example (fee: 0.30 GBP)'),
+  said(filed('cf', '2026-10-10', -4.5, 'other', 'Coffee Fee Bar', { at: UPF }), 'Card transaction of 4.50 GBP issued by Coffee Fee Bar'),
+  said(filed('km', '2026-10-11', -25, 'other', 'Shop', { at: UPF }), 'Card transaction of 25.00 GBP issued by Комиссионный магазин'),
+  said(filed('bc', '2026-10-02', -18.5, 'fixed', 'Barc charges', { b: 'Barclays', at: UPF }), 'CHARGES ACCOUNT FEES PERIOD 01SEP 30SEP'),
+  said(filed('tv', '2026-10-06', -590, 'other', 'Точка', { b: 'Tochka', cur: 'RUB', at: UPF }), 'Комиссия за осуществление валютного контроля по документу № 41'),
+  said(filed('ts', '2026-10-09', -1180, 'fixed', 'Bank fees', { b: 'Tochka', cur: 'RUB', at: UPF }), 'Комиссия за операцию "Международный перевод" по документу № 42'),
+  said(filed('tc', '2026-10-13', 118000, 'rev', 'Client R', { b: 'Tochka', cur: 'RUB', at: UPF }), 'Оплата за услуги по договору № 7 от 01.09.2026'),
+  said(filed('tp', '2026-10-14', -59000, 'cogs', 'Person T', { b: 'Tochka', cur: 'RUB', at: UPF }), 'Перечисление заработной платы по реестру № 3. Сумма комиссии не взимается'),
+  said(filed('mf', '2026-10-06', -25, 'fixed', 'Bank fees', { b: 'Mosta', cur: 'USD', at: UPF }), 'Комиссия за пополнение кошелька · BRL_WIRE_ONRAMP'),
+  said(filed('mp', '2026-10-06', -500, 'cogs', 'Person M', { b: 'Mosta', cur: 'USD', at: UPF }), 'Перевод 495 USDT, комиссия 5 · OMNIBUS_CRYPTO_TRANSFER'),
+  ...[['Wise', 'GBP'], ['Wise', 'EUR'], ['Barclays', 'GBP'], ['Tochka', 'RUB'], ['Mosta', 'USD']].map(([b, c]) => reach(b, '2026-10-16', c, UPF)),
+];
+const feeBanks = () => [bal('Wise', 'GBP', 60000, '2026-10-01'), bal('Wise', 'EUR', 2000, '2026-10-01'), bal('Barclays', 'GBP', 9000, '2026-10-01'), bal('Tochka', 'RUB', 500000, '2026-10-01'), bal('Mosta', 'USD', 4000, '2026-10-01')];
+// The plan: the team and a tool the statements close, Person Z still to pay, and «Vanya» 2,400 - written on 14 Oct,
+// after the statement that holds his transfers was uploaded, and marked «Оплачено» for 12 Oct (W1, 17 October 2026).
+const feePlan = () => plan3({ banks: feeBanks(),
+  team: [row('tK', 'Person K', 1500, '2026-10-06', { blk: 'cogs', c0: C1F }), row('tM', 'Person M', 495, '2026-10-06', { blk: 'cogs', bank: 'Mosta', cur: 'USD', c0: C1F }), row('tZ', 'Person Z', 3000, '2026-10-28', { blk: 'cogs', c0: C1F })],
+  other: [row('oE', 'Tool E', 58, '2026-10-05', { blk: 'fixed', cur: 'EUR', c0: C1F })],
+  div: [row('wR', 'Vanya', 2400, '2026-10-12', { blk: 'div', c0: W14, m: { t: W14, by: 'Mika' }, paid: { on: '2026-10-12', at: MK14, by: 'Mika' } })] });
+// The page with the fee's switch turned off: the page as it was until 19 October 2026 (the engine of develop
+// 008462e byte for byte, but for the two fields of the fees - checks/withdrawals, P).
+async function noFee() {
+  const src = fs.readFileSync(PUB + '/money/index.html', 'utf8'), on = ' const FEES=true;';
+  ok(src.includes(on), 'F has its one-line switch in the page');
+  const ctx = await browser.newContext(CALM);
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await ctx.route('**/money/index.html', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: src.replace(on, ' const FEES=false;') }));
+  const pg = await ctx.newPage();
+  pg.on('pageerror', (e) => errs.push(`no fee: PAGEERROR ${e.message}`));
+  await pg.clock.install({ time: new Date(AT17) });
+  await pg.goto(BASE + '/money/index.html');
+  await pg.waitForFunction(() => window.__money && window.__cash && window.__cash.state());
+  return { pg, C: async (L, P, day = D17, o = { H: 30 }) => JSON.parse(await pg.evaluate(([l, p, t, o]) => JSON.stringify(window.__money.compute(l, p, t, o)), [L, P, day, o])) };
+}
+
+await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 2026: every block, every withdrawal and «Дивиденды» count a payment without its fee; a fee row of its own is a fee and nothing else; an own transfer\'s fee counts and the transfer nowhere; «Денег сейчас» and «Можно вывести» do not move; September is as it was', async () => {
+  // ---- which rows are fees: the one test (Live.fee), on the shapes of the four banks and on the false friends ----
+  const asked = [
+    { d: '2026-10-12', b: 'Wise', a: 1603.2, o: { a: -1603.2, cur: 'GBP', t: 'Sent money to Vanya Example (fee: 3.20 GBP)' } },
+    { d: '2026-10-05', b: 'Wise', a: 50.17, o: { a: -58.7, cur: 'EUR', t: 'Card transaction of 58.00 EUR issued by Tool E (fee: 0.70 EUR)' } },
+    { d: '2026-10-05', b: 'Wise', a: 50.17, o: { a: -58.7, cur: 'EUR', t: 'Sent money to Tool E (fee: 0.70 GBP)' } },
+    { d: '2026-10-07', b: 'Wise', a: 0.4, o: { a: -0.4, cur: 'GBP', t: 'Wise Charges for: TRANSFER-77' } },
+    { d: '2026-10-02', b: 'Barclays', a: 18.5, o: { a: -18.5, cur: 'GBP', t: 'CHARGES ACCOUNT FEES PERIOD 01SEP 30SEP' } },
+    { d: '2026-10-02', b: 'Barclays', a: 18.5, o: { a: -18.5, cur: 'GBP', t: 'COMMISSION CHARGES' } },
+    { d: '2026-10-06', b: 'Tochka', a: 5, o: { a: -590, cur: 'RUB', t: 'Комиссия за осуществление валютного контроля по документу № 41' } },
+    { d: '2026-10-09', b: 'Tochka', a: 10, o: { a: -1180, cur: 'RUB', t: 'Комиссия за операцию "Международный перевод" по документу № 42' } },
+    { d: '2026-10-06', b: 'Mosta', a: 18.52, o: { a: -25, cur: 'USD', t: 'Комиссия за пополнение кошелька · BRL_WIRE_ONRAMP' } },
+    { d: '2026-10-06', b: 'Mosta', a: 370.37, o: { a: -500, cur: 'USD', t: 'Перевод 495 USDT, комиссия 5 · OMNIBUS_CRYPTO_TRANSFER' } },
+    // false friends: money IN, a salary, a café, a consignment shop, a card payment and a bill on Barclays, a month before
+    // October, a row of the sheet, money in that says a fee, a fee as large as the row
+    { d: '2026-10-13', b: 'Tochka', a: 1000, o: { a: 118000, cur: 'RUB', t: 'Оплата за услуги по договору № 7 от 01.09.2026' } },
+    { d: '2026-10-14', b: 'Tochka', a: 500, o: { a: -59000, cur: 'RUB', t: 'Перечисление заработной платы по реестру № 3. Сумма комиссии не взимается' } },
+    { d: '2026-10-10', b: 'Wise', a: 4.5, o: { a: -4.5, cur: 'GBP', t: 'Card transaction of 4.50 GBP issued by Coffee Fee Bar' } },
+    { d: '2026-10-11', b: 'Wise', a: 25, o: { a: -25, cur: 'GBP', t: 'Card transaction of 25.00 GBP issued by Комиссионный магазин' } },
+    { d: '2026-10-11', b: 'Tochka', a: 2, o: { a: -236, cur: 'RUB', t: 'Оплата картой: Комиссия за всё, кафе' } },
+    { d: '2026-10-11', b: 'Barclays', a: 9, o: { a: -9, cur: 'GBP', t: 'CARD PAYMENT TO CHARGES CAFE ON 11 OCT' } },
+    { d: '2026-10-11', b: 'Barclays', a: 90, o: { a: -90, cur: 'GBP', t: 'BILL PAYMENT TO J CHARGES REF PERIOD 3' } },
+    // (the review of 19 October 2026: a landlord's service charges by bill payment and by standing order, a firm called
+    // «Charges …», an agent's commission - each was read as the bank's fee, and left its block for good)
+    { d: '2026-10-11', b: 'Barclays', a: 1250, o: { a: -1250, cur: 'GBP', t: 'ACME PROPERTY MGMT SERVICE CHARGES PERIOD Q4 BBP' } },
+    { d: '2026-10-11', b: 'Barclays', a: 2000, o: { a: -2000, cur: 'GBP', t: 'LANDLORD LTD SERVICE CHARGES PERIOD OCT STO' } },
+    { d: '2026-10-11', b: 'Barclays', a: 600, o: { a: -600, cur: 'GBP', t: 'CHARGES CONSULTING LTD INV 7 BBP' } },
+    { d: '2026-10-11', b: 'Tochka', a: 423.73, o: { a: -50000, cur: 'RUB', t: 'Комиссия за привлечение клиента по агентскому договору № 3', p: 'ООО Агент' } },
+    { d: '2026-10-11', b: 'Tochka', a: 169.49, o: { a: -20000, cur: 'RUB', t: 'Комиссия за перевод клиента по агентскому договору № 4' } },
+    { d: '2026-09-28', b: 'Wise', a: 100.4, o: { a: -100.4, cur: 'GBP', t: 'Sent money to Thing Ltd (fee: 0.40 GBP)' } },
+    { d: '2026-10-03', b: 'Wise', a: 50, s: 'sheet', o: { a: -50, cur: 'GBP', t: 'Комиссия за перевод' } },
+    { d: '2026-10-03', b: 'Wise', a: 99.7, o: { a: 99.7, cur: 'GBP', t: 'Received money from Client Q (fee: 0.30 GBP)' } },
+    { d: '2026-10-03', b: 'Wise', a: 5, o: { a: -5, cur: 'GBP', t: 'Sent money to somebody (fee: 9.00 GBP)' } }];
+  const read = await page.evaluate((rows) => rows.map((r) => { const f = window.__money.fee(r); return f && [f.whole, f.bank, f.cur, f.n, f.g]; }), asked);
+  same(read, [[false, 'Wise', 'GBP', 3.2, 3.2], [false, 'Wise', 'EUR', 0.7, 0.6], null, [true, 'Wise', 'GBP', 0.4, 0.4], [true, 'Barclays', 'GBP', 18.5, 18.5], [true, 'Barclays', 'GBP', 18.5, 18.5],
+    [true, 'Tochka', 'RUB', 590, 5], [true, 'Tochka', 'RUB', 1180, 10], [true, 'Mosta', 'USD', 25, 18.52], [false, 'Mosta', 'USD', 5, 3.7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    'Live.fee: Wise\'s «(fee: X CUR)» inside a payment, in the row\'s own currency; a fee row of its own of each bank - Wise\'s, Barclays\' charges, Tochka\'s and Mosta\'s «Комиссия за …»; Mosta\'s fee inside a transfer - and none of the false friends: a client\'s «Оплата за услуги», a salary, a café, a consignment shop, a card payment in a «Комиссия» café, Barclays\' card payment and bill, a landlord\'s service charges by bill and by standing order, a firm called «Charges», an agent\'s «Комиссия за …» twice, a September row, a sheet row, money in, a fee no smaller than its row');
+  same(read, asked.map((r) => { const f = feeIn(r); return f && [f.whole, r.b, String(r.o.cur), f.n, f.g]; }), '… and that is the rule written out apart from the page (feeIn), row for row');
+
+  // ---- the founder's October ----
+  const L = ledger(feeTx()), P = feePlan();
+  serve(L, P);
+  const nf = await noFee(), M = await C(L, P, D17), M0 = await nf.C(L, P);
+  const st = (X, id) => { const it = item(X, id); return [it.state, it.rows, it.wd ? it.wd.got : it.exp, !!(it.wd && it.wd.rec)]; };
+  // «Vanya» 2,400: his transfers of 12 Oct are 1,600 and 800 without Wise's fees - the record is closed by them
+  // exactly, and nothing of his stands outside the plan. Before: 1,603.20 + 805.25 = 2,408.45, the record took 2,400,
+  // and the 8.45 the second had over stood «вне плана · часть £8.45 из £805.25» - the shape of the founder's question.
+  same([st(M, 'wR'), item(M, 'wR').wd.by, offIds(M), offOf(M).by.div.rows.map((r) => [r.id, r.amt, r.gbp, r.part || null])], [['done', ['vA', 'vB'], 2400, true], [{ c: 'vanya', l: '', gbp: 2400 }], ['mM'], [['mM', 300, 300, null]]],
+    '«Vanya» 2,400 is a record of his two transfers counted without their fees - 1,600 + 800, exactly; no «часть» stands outside the plan, and Misha\'s 300.30 stands there at 300, without its 0.30');
+  same([st(M0, 'wR'), offOf(M0).by.div.rows.map((r) => [r.id, r.amt, r.part || null])], [['done', ['vA', 'vB'], 2400, true], [['vB', 8.45, { of: 805.25, took: 796.8 }], ['mM', 300.3, null]]],
+    '… which on the page before was a line of the kind the founder asked about: «часть £8.45 из £805.25»');
+  // Each block without its fees, and the fees their own row: 3.20 + 5.25 + 2.10 + 0.40 + 0.90 + 0.50 + 0.30 + 3.60 +
+  // 0.50 = 16.75 and €0.70 (£0.60) of Wise; Barclays 18.50; Tochka ₽590 + ₽1,180 (£5 + £10); Mosta $25 + $5 (£18.52 +
+  // £3.70) - £73.07 in all. team 2,372.47 − 2.10 − 3.70 = 2,366.67; other 472.99 − 0.60 − 0.40 − 0.90 − 18.50 − 5 − 10
+  // − 18.52 = 419.07; taxes 500.50 − 0.50 = 500; dividends 2,708.75 − 3.20 − 5.25 − 0.30 = 2,700. The result is less
+  // by the own transfers' fees alone, 3.60 + 0.50 = 4.10: −5,054.71 then, −5,058.81 now.
+  const fact = (X) => Object.fromEntries(['rev', 'team', 'other', 'tax', 'div', 'fee', 'result'].map((k) => [k, (X.month.blocks[k] || { fact: null }).fact]));
+  same([fact(M), fact(M0)], [{ rev: 1000, team: 2366.67, other: 419.07, tax: 500, div: 2700, fee: 73.07, result: -5058.81 }, { rev: 1000, team: 2372.47, other: 472.99, tax: 500.5, div: 2708.75, fee: 0, result: -5054.71 }],
+    'October\'s facts: every block without its fees, the fees a row of their own (73.07), the result less the own transfers\' fees (4.10) and nothing else');
+  const fz = M.months.by['2026-10'].fees;
+  same([fz.gbp, fz.n, fz.banks.map((b) => [b.bank, b.gbp, b.nat.map((x) => [x.cur, x.n])]), round2(sum(feeTx().map((r) => (feeIn(r) && r.d >= '2026-10-01' ? feeIn(r).g : 0))))],
+    [73.07, 15, [['Wise', 17.35, [['EUR', 0.7], ['GBP', 16.75]]], ['Barclays', 18.5, [['GBP', 18.5]]], ['Tochka', 15, [['RUB', 1770]]], ['Mosta', 22.22, [['USD', 30]]]], 73.07],
+    'October\'s fees by bank, in each bank\'s own currency and in pounds: Wise £16.75 and €0.70, Barclays £18.50, Tochka ₽1,770, Mosta $30 - fifteen fees, £73.07, the sum of the rows\' fees');
+  // the own transfer and the move to Mika's Daily account: their fees count (3.60, 0.50), they themselves nowhere
+  same([M.items.some((it) => it.rows.some((id) => ['cv', 'cvE', 'dM'].includes(id))), SECS.some((k) => offOf(M).by[k].rows.some((r) => ['cv', 'cvE', 'dM'].includes(r.id))), ['bc', 'tv', 'ts', 'mf'].map((id) => SECS.some((k) => offOf(M).by[k].rows.some((r) => r.id === id)))],
+    [false, false, [false, false, false, false]], 'the conversion between own accounts and the move to Mika\'s Daily account hold no line and stand in no list - their fees are October\'s fees; the four fee rows of their own stand in no list either');
+  // Money in and out of the banks did not move, nor did what is free to take out: the same balances, the same line.
+  same([[M.now, M.free.now, M.free.why, M.IN, M.OUT, M.marksGbp], M.accounts.map((a) => [a.key, a.est])], [[M0.now, M0.free.now, M0.free.why, M0.IN, M0.OUT, M0.marksGbp], M0.accounts.map((a) => [a.key, a.est])],
+    '«Денег сейчас», «Можно вывести», what comes and goes and every account are what the page before the fees said: the fees had left the banks, and only their line is new');
+  same([M.now, M.free.now], [72650.84, 64650.84], '… «Денег сейчас» 72,650.84, «Можно вывести» 64,650.84');
+  // A withdrawal still open that holds a taking with a fee inside has that fee more to go: the fee is no taking. «Вывод»
+  // 1,000, everybody's, for 14 Oct, written on 1 Oct: it takes Misha's 300 - without the 0.30 - and has 700 to go; the
+  // page before took 300.30 and left 699.70. So «Можно вывести» is lower by exactly 0.30.
+  const Pw = feePlan(); Pw.div.push(row('wV', 'Вывод', 1000, '2026-10-14', { blk: 'div', c0: C1F }));
+  const Mw = await C(L, Pw, D17), Mw0 = await nf.C(L, Pw);
+  same([item(Mw, 'wV').wd.got, item(Mw0, 'wV').wd.got, round2(Mw0.free.now - Mw.free.now), Mw.now === Mw0.now], [300, 300.3, 0.3, true],
+    'an open «Вывод» holds Misha\'s 300 without its 0.30 - 700 to go, not 699.70 - and «Можно вывести» is lower by that 0.30; «Денег сейчас» is the same');
+  // A line other than a withdrawal, written at the amount that left the bank, is closed by its row as before the fees
+  // (the review of 19 October 2026): «Person X» 1,000 and Wise's 1,000 «(fee: 30.00 GBP)» - without the fee 970, short
+  // of −max(£2, 2%) of the line. Held to 970 the line waited for 30 more, the fee stood twice in October's spending
+  // (30 a fee, 30 the line's rest) and «Можно вывести» was 30 lower. Now: closed; spending 970 + 30 = 1,000 - what left
+  // the bank, as on the page before; «Можно вывести» as there.
+  const Lx = ledger([said(filed('gx', '2026-10-08', -1000, 'cogs', 'Person X', { at: UPF }), 'Sent money to Person X (fee: 30.00 GBP)'), reach('Wise', '2026-10-16', 'GBP', UPF)]);
+  const Px = plan3({ banks: [bal('Wise', 'GBP', 60000, '2026-10-01')], team: [row('tX', 'Person X', 1000, '2026-10-08', { blk: 'cogs', c0: C1F })] });
+  const Mx = await C(Lx, Px, D17), Mx0 = await nf.C(Lx, Px), spent = (X) => round2(['team', 'other', 'tax', 'div', 'fee'].reduce((a, k) => a + ((X.month.blocks[k] || {}).total || 0), 0));
+  same([item(Mx, 'tX').state, Mx.month.blocks.team.fact, Mx.month.blocks.fee.fact, spent(Mx), Mx.free.now], [item(Mx0, 'tX').state, 970, 30, spent(Mx0), Mx0.free.now],
+    'a line written at the amount that left the bank is closed by its row: COGS 970 and the fee 30 make the 1,000 the page before counted, and «Можно вывести» is what it was');
+  // September, the sheet's, is what it was, to the byte - and so is the statement row of 28 Sep whose text says a fee
+  // (both pages hold the same table: it was served before either opened)
+  const pg = await open('fees', AT17), sep1 = await pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sep2 = await nf.pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sepO = JSON.parse(sep1);
+  same([sep1 === sep2, sepO.cogs, sepO.fixed, sepO.other, sepO.misha, sepO.rev, sepO.fee], [true, 2000, 17, 100.4, 900, 800, 0],
+    'September in «Месяцы» is what the page before the fees counted, byte for byte: the sheet\'s rows, and the statement row of 28 Sep at its whole 100.40 - no fee before October');
+  await nf.pg.context().close();
+
+  // ---- on the screen ----
+  // «Касса», October: the fees are a line among the month's costs, after «Прочие расходы», with the split by bank
+  await goCash(pg);
+  await holds(pg, 'October with the bank\'s fees', 'cash');
+  same([await text(pg, '#cs-fees h2 .note'), await text(pg, '#cs-fees-by'), await pg.$('#cs-sec-div tr[data-cs-out="vB"]'), await text(pg, '#cs-off')],
+    ['£73.07', 'Wise £16.75 + €0.70 (£17.35) · Barclays £18.50 · Tochka ₽1,770 (£15.00) · Mosta $30 (£22.22). По выпискам: эти деньги уже ушли со счетов, план комиссии не прогнозирует.', null,
+      'Оплачено вне плана в октябре: ушло £1,670 (7 платежей), пришло £1,000 (1 платёж). Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.'],
+    '«Касса»: «Банковские комиссии £73.07» with each bank\'s share in its own currency, in plain words; no «часть» in «Дивиденды»; outside the plan the rows stand without their fees, and the fee rows of their own are not there (7 rows, £1,670 - before 12 and £1,732)');
+  same(await pg.evaluate(() => { const s = [...document.querySelectorAll('#cs-two > .stack:last-child > section')].map((e) => e.id); return s.indexOf('cs-fees') === s.indexOf('cs-sec-other') + 1; }), true, '… standing after «Прочие расходы», among the costs');
+  await calm(pg, '«Касса» with the bank\'s fees', 'cash');
+  // «Сегодня»: spending holds the fees, and its line of parts says them
+  await pg.click('.nav [data-tab="today"]');
+  const S = await holds(pg, 'October with the bank\'s fees');
+  same([S.fig('m.fee.total'), S.fig('m.out.total'), /· комиссии £73\.07$/.test(plain(await pg.$eval('#view-today .td-month .td-band:nth-child(3) .td-cap:last-child', (e) => e.textContent)))], [73.07, 9058.81, true],
+    '«Сегодня»: «Расход за октябрь» £9,058.81 holds the fees, and its parts end «комиссии £73.07»');
+  // «Месяцы», October: a cost of its own, by bank
+  await pg.click('.nav [data-tab="dashboard"]');
+  await pg.click('#view-dashboard [data-scope="month"]');
+  await pg.selectOption('#periodSel', '2026-10');
+  const dashRow = (name) => pg.$$eval('#view-dashboard .dash tbody tr', (l, name) => { const tr = l.find((x) => x.cells[0].textContent.trim() === name); return tr ? [...tr.cells].slice(1, 3).map((c) => c.textContent.trim()) : null; }, name);
+  same([await text(pg, '#dash-fees-by'), await dashRow('Банковские комиссии'), await dashRow('Total costs'), await dashRow('COGS')], ['Wise £16.75 + €0.70 (£17.35) · Barclays £18.50 · Tochka ₽1,770 (£15.00) · Mosta $30 (£22.22)', ['£73.07', '£0'], ['£2,858.81', '£2,117.40'], ['£2,366.67', '£2,000']],
+    '«Месяцы»: «Банковские комиссии» is a cost of its own, by bank - £73.07 in October, nothing in September; COGS without its fees');
+  await pg.click('#view-dashboard [data-focus="f:vanya"]');
+  same((await pg.$$eval('#view-dashboard tr[data-reprow]', (l) => l.map((tr) => [tr.dataset.reprow, tr.cells[3].textContent.trim()]))).sort(), [['vA', '£1,600.00'], ['vB', '£800.00']], '«Месяцы», Vanya in October: his two transfers, without the fees');
+  // «Отчёты», this month: the fees a category, by bank; a founder's report holds no fee
+  await pg.click('.nav [data-tab="reports"]');
+  await pg.selectOption('#rep-preset', 'month');
+  // (the column says a block to the pound: October's fees are £73.07 - 17.35 + 18.50 + 15.00 + 22.22 - and so «£73»;
+  // the review of 19 October 2026 found «£70» written here, which no rounding of 73.07 gives)
+  same([await text(pg, '#rep-n-fee'), await text(pg, '#rep-fees')], ['£73', 'Банковские комиссии по банкам: Wise £16.75 + €0.70 (£17.35) · Barclays £18.50 · Tochka ₽1,770 (£15.00) · Mosta $30 (£22.22). Платежи, в которых была комиссия, — здесь без неё.'],
+    '«Отчёты»: «Банковские комиссии» beside the blocks (£73 - the column says a block to the pound), and its split by bank');
+  await pg.click('#view-reports [data-repcat="vanya"]');
+  same([(await pg.$$eval('#repOut tr[data-reprow]', (l) => l.map((tr) => [tr.dataset.reprow, tr.cells[1].textContent.trim(), tr.cells[4].textContent.trim()]))).sort(), await pg.$('#rep-fees')], [[['vA', 'Vanya', '£1,600.00'], ['vB', 'Vanya', '£800.00']], null],
+    '«Отчёты», Vanya\'s block: his two transfers without the fees, and no fee');
+  // «Таблица»: a payment says the fee inside it; a fee row of its own stands among the fees, not in its block
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  const blk = (k) => pg.$$eval(`#view-ledger .blk.${k} tbody tr[data-row]`, (l) => l.map((tr) => [tr.dataset.row, tr.cells[1].textContent.replace(/\s+/g, ' ').trim()]));
+  same([await blk('vanya'), (await blk('fixed')).map((x) => x[0]), (await blk('other')).map((x) => x[0]).sort(), (await blk('fee')).length, await text(pg, '#led-fees .bt .sum')],
+    [[['vA', '£1,600.00 в т.ч. комиссия банка £3.20'], ['vB', '£800.00 в т.ч. комиссия банка £5.25']], ['tE'], ['cf', 'co', 'km'], 15, '£73.07'],
+    '«Таблица»: Vanya\'s transfers at 1,600 and 800, each saying its fee in plain words; the fee rows of their own are in no block but among the bank\'s fees - fifteen fees, £73.07');
+  await pg.context().close();
+
+  // ---- a statement read now: a fee row of its own is filed as a fee, and a file read again adds nothing ----
+  // Develop 008462e read this file (Wise prints the fee as a row of its own) into two rows, each with its fee folded
+  // in and the statement's id in its key - as `old` below holds them. The page as it is reads the same file and finds
+  // both: no new row, and the amounts and the keys are what they were; a later file over the same days adds only
+  // what is new. (Done by hand when this was written: that page, given the file, stored exactly `old`.)
+  const pair = [['FEE-TRANSFER-71', '2026-10-12', -3.2, 'Wise Charges for: TRANSFER-71', '', ''], ['TRANSFER-71', '2026-10-12', -1600, 'Sent money to Vanya Example', '', 'Vanya Example'], ['FEE-TRANSFER-72', '2026-10-12', -5.25, 'Wise Charges for: TRANSFER-72', '', ''], ['TRANSFER-72', '2026-10-12', -800, 'Sent money to Vanya Example', '', 'Vanya Example']];
+  const csv1 = wiseCsv(pair), csv2 = wiseCsv([['CARD-73', '2026-10-13', -12, 'Card transaction of 12.00 GBP issued by Lunch Place', '', '']].concat(pair));
+  const old = (id, a) => ({ id: 'old-' + id, f: 'f0', d: '2026-10-12', b: 'Wise', ac: '', dir: -1, a: -a, o: { a, cur: 'GBP', t: 'Sent money to Vanya Example', p: 'Vanya Example', h: '', fix: true }, key: 'Wise|2026-10-12|' + a + '|GBP|' + id, s: 'file', at: UPF, c: '', l: '', v: 0, auto: false, twin: null });
+  const read2 = (pg, c) => pg.evaluate((c) => { const r = window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'wise.csv'), 'wise.csv'); return [r.added, r.dup, window.__money.model({ H: 30 }).inbox.n]; }, c);
+  const pgR = await scene('fees-read', ledger([], [old('TRANSFER-71', -1603.2), old('TRANSFER-72', -805.25)]), feePlan(), { at: AT17 });
+  const again = await read2(pgR, csv1), later = await read2(pgR, csv2);
+  same([again, later], [[0, 2, 2], [1, 2, 3]],
+    'the file develop 008462e had read, read again now: both payments are found by their keys - no new row; a later file over the same days brings only the card payment');
+  // the same file, as the page as it is reads it: the same ids, amounts and keys - the fee inside each payment - and
+  // the text saying the fee as Wise words it, so that the fee is read off the text; read twice, nothing new
+  const pgN = await scene('fees-read-new', ledger([]), feePlan(), { at: AT17 });
+  const parsed = await pgN.evaluate((c) => window.__tx.parseGrid(window.__tx.parseCSV(c), 'wise.csv').rows.map((r) => [r.tid, r.a, r.t]), csv1);
+  const first = await read2(pgN, csv1), second = await read2(pgN, csv1);
+  same([parsed, first, second], [[['TRANSFER-71', -1603.2, 'Sent money to Vanya Example (fee: 3.20 GBP)'], ['TRANSFER-72', -805.25, 'Sent money to Vanya Example (fee: 5.25 GBP)']], [2, 0, 2], [0, 2, 2]],
+    'read by the page as it is: the same ids and amounts, the fee inside, and the text saying it; read again, nothing new');
+  // a fee row of its own, read now, is filed by «Разбор» itself - as a cost a fee counts in, never as a transfer
+  await pgN.evaluate((c) => { window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'tochka.csv'), 'tochka.csv'); },
+    'Дата,Сумма,Валюта,Направление,Назначение платежа,Контрагент\n09.10.2026,1180.00,RUB,Исходящий,"Комиссия за перевод собственных средств по документу № 43",ТОЧКА\n10.10.2026,30000.00,RUB,Входящий,"Оплата за услуги по договору № 8",ООО Клиент\n');
+  await pgN.click('.nav [data-tab="inbox"]');
+  const recog = await pgN.$$eval('#view-inbox .recog tbody tr', (l) => l.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+  same([recog.filter((c) => c[1].startsWith('Tochka')).map((c) => [c[3], c[4], c[5]]), recog.some((c) => /Клиент/.test(c[2])), await pgN.$$eval('#view-inbox .op', (l) => l.filter((e) => /Клиент/.test(e.textContent)).length)],
+    [[['£10.00', 'Fixed', 'Bank fees']], false, 1], '«Разбор» files Tochka\'s «Комиссия за перевод собственных средств» as a bank\'s fee - recognised, a cost, never a transfer between own accounts; the client\'s «Оплата за услуги» waits to be sorted as before');
+  await pgR.context().close();
+  await pgN.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

@@ -16,9 +16,19 @@
 //      «вне плана» (W2), as W1 left it - not dealt on to the next withdrawal, as the walk deals the rows it gives.
 //   5. A memory that names a taking its withdrawal could not be given - news of an earlier day took the room first -
 //      keeps no record from that taking; else the seeing and the keeping around no change made it a record (K broke).
-// usage: ENGINES=<folder> node checks/withdrawals/cases.cjs        (new.cjs is asked; dev.cjs is not)
-const { ms, filed, ledger, bal, wd, plan3, mk, engines, clone, bare } = require('./lib.cjs');
-const { NEW } = engines(), { C, wr, page, see, keep } = mk(NEW);
+//   6. (the owner's decision of 19 October 2026, F) The founder's own October, on made-up sums: a record closed by two
+//      Wise transfers whose fees Wise folded into them came to a few pounds over its sum, and the over stood «вне
+//      плана · часть … из …» as his money. Counted without the fees they make the record exactly: no rest, no fee in
+//      «Дивиденды»; the fees are a line of their own, per bank. A fee row of its own in a founder's block is no taking.
+//      Fails on develop before the fees (pre.cjs): ENGINE=pre runs the cases there.
+//   7.-9. What the review of the fees (19 October 2026) found, each failing without its fix: a record's memory written
+//      by the page before the fees (1.13.0, on prod) gave the record less than its sum, and its «часть» stood «вне
+//      плана» for good (7); a line written at the amount that left the bank waited for the fee inside it, and the fee
+//      was counted twice (8); and Live.fee took a landlord's service charges on Barclays, a firm called «Charges …» and
+//      an agent's «Комиссия за привлечение клиента …» for bank fees (9). 7 and 8 fail on pre.cjs too: it reads no fee.
+// usage: ENGINES=<folder> [ENGINE=pre] node checks/withdrawals/cases.cjs        (new.cjs is asked; dev.cjs is not)
+const { ms, filed, ledger, bal, wd, plan3, mk, engines, clone, bare, feeOf } = require('./lib.cjs');
+const { NEW, PRE } = engines(), ASKED = process.env.ENGINE === 'pre' ? PRE : NEW, { C, wr, page, see, keep } = mk(ASKED);
 let n = 0, bad = 0;
 const same = (got, want, what) => { n++; const g = JSON.stringify(got), w = JSON.stringify(want); if (g === w) return; bad++; console.log('FAIL', what, '\n   got ', g, '\n   want', w); };
 const item = (M, id) => M.items.find((i) => i.id === id);
@@ -100,6 +110,130 @@ const asRec = (P, id) => { const r = P.div.find((x) => x.id === id), w = r && r.
   same([item(M0, 'x').rows, item(M0, 'r').rows, !!item(M0, 'r').wd.rec, M0.now, M0.marksGbp], [['n'], ['b', 'a'], true, 49650, 0], '5: news of 30 Sep fills «Вывод»; «Миша» is a record of the 290 and the 60 its memory could not give: 49,650');
   const M1 = C(L, keep(clone(P), see(P)), T);
   same(flat(M1) === flat(M0), true, '5: … and the seeing and the keeping around no change leave the model as it is');
+}
+// 6. Wise 40,000 typed for 1 Oct. «Vanya» 2,400 (12 Oct) written on 14 Oct at 16:00 and marked paid for the 12th;
+// «Вывод» 500, everybody's, for 14 Oct, written on 1 Oct. Uploaded on 15 Oct: Vanya's 1,603.20 and 805.25 of 12 Oct,
+// «(fee: 3.20 GBP)» and «(fee: 5.25 GBP)», and a fee row of its own of 9, «Комиссия за перевод …», filed in Misha's
+// block on 14 Oct. Without the fees Vanya's transfers are 1,600 + 800 = 2,400: the record holds both whole and is
+// done; nothing of his stands outside the plan (before: 2,408.45 - the record took 2,400 and 8.45 of the 805.25 stood
+// «вне плана · часть £8.45 из £805.25»). The month's dividends are 2,400, its fees 3.20 + 5.25 + 9 = 17.45, all
+// Wise's. The fee row is no taking: «Вывод» holds nothing (before: 9 of it, and 491 to go - so «Можно вывести» is
+// lower by those 9 now: a fee is not a founder's money, and the withdrawal still has its 500 to go). «Денег сейчас»
+// is the same: 40,000 − 1,603.20 − 805.25 − 9 = 37,582.55.
+{
+  const T = '2026-10-17', U = ms('2026-10-15T09:00:00Z'), W = ms('2026-10-14T16:00:00Z');
+  const fe = (r, t) => { r.o.t = t; return r; };
+  const L = ledger([fe(filed('vA', '2026-10-12', -1603.2, 'vanya', '', { at: U }), 'Sent money to Vanya Example (fee: 3.20 GBP)'), fe(filed('vB', '2026-10-12', -805.25, 'vanya', '', { at: U }), 'Sent money to Vanya Example (fee: 5.25 GBP)'),
+    fe(filed('mf', '2026-10-14', -9, 'misha', '', { at: U }), 'Комиссия за перевод по документу № 12')]);
+  const P = plan3({ banks: [bal('Wise', 'GBP', 40000, '2026-10-01', { at: ms('2026-10-01T17:00:00Z') })],
+    team: [{ id: 'tz', name: 'Person Z', amt: 3000, cur: 'GBP', bank: 'Wise', date: '2026-10-28', on: true, blk: 'cogs', c0: ms('2026-10-01T08:00:00Z') }],
+    div: [wd('wR', 2400, '2026-10-12', { name: 'Vanya', c0: W, m: { t: W, by: BY }, paid: { on: '2026-10-12', at: W + 300000, by: BY } }), wd('wA', 500, '2026-10-14', { name: 'Вывод', c0: ms('2026-10-01T08:00:00Z') })] });
+  const M = C(L, P, T), off = M.months.by['2026-10'].off.by.div.rows, fz = M.months.by['2026-10'].fees || { gbp: 0, banks: [] };
+  same([item(M, 'wR').rows, item(M, 'wR').wd.got, !!item(M, 'wR').wd.rec, item(M, 'wR').state, off.map((r) => [r.id, r.gbp])], [['vA', 'vB'], 2400, true, 'done', []],
+    '6: «Vanya» is a record of his two transfers, counted without their fees - 2,400 exactly; nothing of his stands «вне плана»');
+  same([M.month.blocks.div.fact, (M.month.blocks.fee || {}).fact, fz.gbp, fz.banks.map((b) => [b.bank, b.gbp])], [2400, 17.45, 17.45, [['Wise', 17.45]]],
+    '6: October\'s dividends are 2,400; its fees 17.45 - 3.20 + 5.25 inside the transfers and the fee row of 9 - all Wise\'s');
+  same([item(M, 'wA').wd.got, item(M, 'wA').rows, M.now], [0, [], 37582.55], '6: the fee row filed in Misha\'s block is no taking - «Вывод» holds nothing; «Денег сейчас» 37,582.55: the fees left the bank');
+}
+// 7. (the review of the fees, 19 October 2026) A record's memory written by the page before the fees - 1.13.0, on prod
+// - holds the record's rows at what they gave WITH the fee inside. «Misha» 1,500 (12 Oct) is a record of his Wise
+// transfers A 306.20 «(fee: 1.20 GBP)» and B 1,197.80 «(fee: 2.80 GBP)» of 12 Oct; the page before took A whole and
+// 1,193.80 of B, so its memory says [A 306.20, B 1,193.80], and B's 4.00 stood «вне плана · часть». Read with the fees,
+// A gives 305 - its fee is no taking - and the 1.20 it gave of its fee must go to B, which the record held in part: B
+// gives 1,195, its whole without the fee, and the record is 1,500 again with no rest «вне плана» - exactly what a
+// memory written with the fees says ([305, 1195]). Held to the old figure, B gave 1,193.80 and «часть £1.20 из £1,195»
+// stood «вне плана» for good: the seeing and the keeping wrote [305, 1193.80] and never healed it. Two ways such a
+// memory is written: (a) the card moved the record's day past today (case 2's way); (b) a tie by hand taken off
+// another line set a nearer row loose, and the record's mark cannot count - a memory of a balance's day (case 1's).
+// Wise 50,000 - typed for 10 Oct in (a), for 12 Oct in (b); the transfers left after it either way: 48,496.00.
+{
+  const O = mk(engines().PRE), U = ms('2026-10-12T10:00:00Z');
+  const fe = (r, t) => { r.o.t = t; return r; };
+  const AB = (at) => [fe(filed('A', '2026-10-12', -306.2, 'misha', '', { at }), 'Sent money to Misha Example (fee: 1.20 GBP)'), fe(filed('B', '2026-10-12', -1197.8, 'misha', '', { at }), 'Sent money to Misha Example (fee: 2.80 GBP)')];
+  const rests = (M) => ((((M.months.by['2026-10'] || {}).off || { by: {} }).by.div) || { rows: [] }).rows.filter((r) => r.part).map((r) => [r.id, r.amt]);
+  const fig = (M) => [M.now, M.marksGbp, item(M, 'r').rows, item(M, 'r').wd.got, rests(M)];
+  const memOfR = (P) => P.div.find((x) => x.id === 'r').paid.saw.rows.map((x) => x[1]);
+  // (a) - its day moved past today
+  {
+    const T = '2026-10-17', L = ledger(AB(U));
+    const P = plan3({ banks: [bal('Wise', 'GBP', 50000, '2026-10-10', { at: ms('2026-10-10T17:00:00Z') })],
+      div: [wd('r', 1500, '2026-10-12', { name: 'Misha', c0: ms('2026-10-12T10:01:00Z'), paid: { on: '2026-10-12', at: ms('2026-10-12T10:02:00Z'), by: BY } })] });
+    const m0 = O.C(L, P, T), Q = O.wr(P, 'set', item(m0, 'r'), { date: '2026-10-20' }, ms('2026-10-17T12:00:00Z'), BY);
+    same([asRec(Q, 'r'), memOfR(Q)], [true, [306.2, 1193.8]], '7a: the page before the fees wrote the record\'s memory with the fee inside: [306.20, 1,193.80]');
+    const M = C(L, Q, T);
+    same(fig(M), [48496, 0, ['A', 'B'], 1500, []], '7a: read with the fees, that memory gives the record 305 + 1,195 = 1,500 - no «часть» stands «вне плана»');
+    const K = keep(clone(Q), see(Q));
+    same([fig(C(L, K, T)), memOfR(K)], [[48496, 0, ['A', 'B'], 1500, []], [305, 1195]], '7a: … and the seeing and the keeping around no change write it as the fees read it: [305, 1195]');
+  }
+  // (b) - a memory of a balance's day: «Вывод» held Misha's 1,500 of 11 Oct by hand, and is deleted
+  {
+    const T = '2026-10-13', U2 = ms('2026-10-13T11:00:00Z'), C8 = ms('2026-10-13T08:00:00Z');
+    const L = ledger(AB(U2).concat([filed('g', '2026-10-11', -1500, 'misha', '', { at: U2 })]));
+    const P = plan3({ banks: [bal('Wise', 'GBP', 50000, '2026-10-12', { at: ms('2026-10-13T09:00:00Z') })],
+      div: [wd('a', 1500, '2026-10-11', { name: 'Вывод', tx: ['g'], c0: C8 }), wd('r', 1500, '2026-10-11', { name: 'Misha', c0: C8, paid: { on: '2026-10-12', at: ms('2026-10-13T10:00:00Z'), by: BY } })] });
+    const m0 = O.C(L, P, T), Q = O.wr(P, 'del', item(m0, 'a'));
+    same([asRec(Q, 'r'), memOfR(Q)], [true, [306.2, 1193.8]], '7b: the page before the fees wrote the memory of the balance\'s day with the fee inside: [306.20, 1,193.80]');
+    same(fig(C(L, Q, T)), [48496, 0, ['A', 'B'], 1500, []], '7b: read with the fees, the record is made of its two takings of that day again, 305 + 1,195 - no «часть»');
+  }
+}
+// 8. (the review of the fees, 19 October 2026) A line other than a withdrawal written at the amount that left the
+// bank closes as it did before the fees. A founder writes what he will pay - the sheet and the helper's «как в
+// прошлый раз» say amounts with the fee inside - and the bank's fee left with it. Counted only without the fee, a
+// line closed no more where the fee was larger than −max(£2, 2%) of it: it waited for the fee, the fee stood twice in
+// the month's «Расход» (once a fee, once the line's rest) and «Можно вывести» was lower by it. So a line closes on a
+// row whose whole amount or whose amount without the fee fits it, and what it has been paid is the whole amount: the
+// month counts each row without its fee in its block and the fee once. Mosta $150 «Перевод 145 USDT, комиссия 5»
+// against «Person M» $150; Wise 52.50 «(fee: 2.50 GBP)» against «Courier» 52.50; 1,000 «(fee: 30.00 GBP)» against
+// «Person X» 1,000; two of 150 «(fee: 5.00 GBP)» against «Person Y» 300 (150 is paid of it by the first, the second
+// closes it); 52.50 «(fee: 2.50 GBP)» tied by hand to «Tools» 52.50; and $110 «Перевод 100 USDT, комиссия 10» against
+// «Person N» $100, written at what the person gets. Spending: team 1,441.48 + other 100 + fees 56.11 = 1,597.59 -
+// what the rows took from the banks, as the page before the fees counted it (team 1,492.59 + other 105). Before
+// this review five of the six waited, and «Можно вывести» was 36,316.67, lower by 48.70.
+{
+  const T = '2026-10-17', U = ms('2026-10-15T09:00:00Z'), C1 = ms('2026-10-01T08:00:00Z');
+  const fe = (r, t) => { r.o.t = t; return r; }, ln = (id, name, amt, date, more) => ({ id, name, amt, cur: 'GBP', bank: 'Wise', date, on: true, c0: C1, m: { t: C1, by: BY }, ...more });
+  const L = ledger([
+    fe(filed('mp', '2026-10-06', -150, 'cogs', 'Person M', { b: 'Mosta', cur: 'USD', at: U }), 'Перевод 145 USDT, комиссия 5 · OMNIBUS_CRYPTO_TRANSFER'),
+    fe(filed('mn', '2026-10-07', -110, 'cogs', 'Person N', { b: 'Mosta', cur: 'USD', at: U }), 'Перевод 100 USDT, комиссия 10 · OMNIBUS_CRYPTO_TRANSFER'),
+    fe(filed('co', '2026-10-07', -52.5, 'other', 'Courier', { at: U }), 'Sent money to Courier Co (fee: 2.50 GBP)'),
+    fe(filed('pX', '2026-10-08', -1000, 'cogs', 'Person X', { at: U }), 'Sent money to Person X (fee: 30.00 GBP)'),
+    fe(filed('hT', '2026-10-09', -52.5, 'other', 'Tool H', { at: U }), 'Sent money to Tool H Ltd (fee: 2.50 GBP)'),
+    fe(filed('y1', '2026-10-06', -150, 'cogs', 'Person Y', { at: U }), 'Sent money to Person Y (fee: 5.00 GBP)'),
+    fe(filed('y2', '2026-10-08', -150, 'cogs', 'Person Y', { at: U }), 'Sent money to Person Y (fee: 5.00 GBP)')]);
+  const P = plan3({ banks: [bal('Wise', 'GBP', 40000, '2026-10-01'), bal('Mosta', 'USD', 4000, '2026-10-01')],
+    team: [ln('tM', 'Person M', 150, '2026-10-06', { blk: 'cogs', bank: 'Mosta', cur: 'USD' }), ln('tN', 'Person N', 100, '2026-10-07', { blk: 'cogs', bank: 'Mosta', cur: 'USD' }),
+      ln('tX', 'Person X', 1000, '2026-10-08', { blk: 'cogs' }), ln('tY', 'Person Y', 300, '2026-10-06', { blk: 'cogs' })],
+    other: [ln('oC', 'Courier', 52.5, '2026-10-07', { blk: 'other' }), ln('oH', 'Tools', 52.5, '2026-10-09', { blk: 'other', tx: ['hT'] })] });
+  const M = C(L, P, T), B = M.month.blocks;
+  same(['tM', 'tN', 'tX', 'tY', 'oC', 'oH'].map((id) => item(M, id).state), ['done', 'done', 'done', 'done', 'done', 'done'],
+    '8: every line written at the amount that left the bank is closed by its row - and so is one written at what the person gets');
+  same([B.team.fact, B.team.rest, B.other.fact, B.other.rest, (B.fee || {}).fact, Math.round((B.team.total + B.other.total + B.tax.total + B.div.total + ((B.fee || {}).total || 0)) * 100) / 100],
+    [1441.48, 0, 100, 0, 56.11, 1597.59], '8: each block without its fees, no line waits for a fee, and October\'s spending is 1,597.59 - what left the banks, the fees counted once');
+  same([M.now, M.free.now], [41365.37, 36365.37], '8: «Денег сейчас» 41,365.37 and «Можно вывести» 36,365.37 - as before the fees');
+}
+// 9. (the review of the fees, 19 October 2026) What is a bank's fee of its own, and what only looks like one. A
+// landlord's service charges paid by bill or standing order on Barclays name «CHARGES» and «PERIOD» but begin with the
+// payee, and carry Barclays' code for a payment; a firm called «Charges Consulting» begins with the word; an agent's
+// commission begins «Комиссия за …». None is the bank's: filed so, each left its block - Fixed, COGS - for «Банковские
+// комиссии» for good, since a fee row of its own counts as a fee whatever block it was filed in. Barclays' own charges
+// begin with «CHARGES» (or «COMMISSION CHARGES») and name a PERIOD or nothing more; a bank's «Комиссия за …» names one
+// of the bank's operations - an agent, an intermediary or a reward is never the bank's. Live.fee and the rule written
+// out apart (feeOf, lib.cjs) agree, row for row.
+{
+  const r = (b, cur, a, t) => ({ d: '2026-10-09', b, a: Math.abs(a) / ({ GBP: 1, RUB: 118, USD: 1.35 })[cur], s: 'file', c: 'fixed', l: 'Thing', o: { a, cur, t } });
+  const rows = [
+    r('Barclays', 'GBP', -18.5, 'CHARGES ACCOUNT FEES PERIOD 01SEP 30SEP'), r('Barclays', 'GBP', -18.5, 'COMMISSION CHARGES'), r('Barclays', 'GBP', -21, 'COMMISSION CHARGES PERIOD 01OCT 31OCT'),
+    r('Tochka', 'RUB', -590, 'Комиссия за осуществление валютного контроля по документу № 41'), r('Tochka', 'RUB', -1180, 'Комиссия за операцию "Международный перевод" по документу № 42'),
+    r('Tochka', 'RUB', -1180, 'Комиссия за перевод собственных средств по документу № 43'), r('Mosta', 'USD', -25, 'Комиссия за пополнение кошелька · BRL_WIRE_ONRAMP'), r('Wise', 'GBP', -0.4, 'Wise Charges for: TRANSFER-77'),
+    // the false friends
+    r('Barclays', 'GBP', -1250, 'ACME PROPERTY MGMT SERVICE CHARGES PERIOD Q4 BBP'), r('Barclays', 'GBP', -2000, 'LANDLORD LTD SERVICE CHARGES PERIOD OCT STO'),
+    r('Barclays', 'GBP', -600, 'CHARGES CONSULTING LTD INV 7 BBP'), r('Barclays', 'GBP', -300, 'CHARGES PERIOD SERVICES FPO'),
+    r('Tochka', 'RUB', -50000, 'Комиссия за привлечение клиента по агентскому договору № 3'), r('Tochka', 'RUB', -20000, 'Комиссия за перевод клиента по агентскому договору № 4'),
+    r('Tochka', 'RUB', -9000, 'Комиссия за продажу товара комитента по договору № 5')];
+  const got = rows.map((x) => !!(ASKED.fee && ASKED.fee(x)));
+  same(got, [true, true, true, true, true, true, true, true, false, false, false, false, false, false, false],
+    '9: Barclays\' own charges, the banks\' own «Комиссия за …» and Wise\'s are fees of their own; a landlord\'s service charges, a firm called «Charges», an agent\'s and a consignor\'s commission are not');
+  same(rows.map((x) => !!feeOf(x)), got, '9: … and the rule written out apart from the page (feeOf) says the same, row for row');
 }
 console.log(bad ? `${bad} of ${n} failed` : `all ${n} held`);
 process.exit(bad ? 1 : 0);
