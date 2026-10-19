@@ -1514,13 +1514,17 @@ const DAILY_SAY="С октября 2026 переводы на Daily и Monthly �
 // A founder's row with no label is a transfer to themselves — the dividend. The labelled ones are what the studio paid for them.
 // («Daily и Monthly» is what the sheet kept before October 2026: from then on a move to those accounts is no row here.)
 const FG={div:"Дивиденды (переводы себе)",tax:"Личные налоги (HMRC)",daily:"Daily и Monthly",tr:"Транспорт",other:"Прочие расходы"};
-// A row of a founder's block that the bank shows as a payment by card - its statement names the card's holder - is
-// something bought with the studio's card: the founder's expense («Daily и расходы»), with a label or without one.
-// Only a row with no label and no card holder is a transfer to himself («Дивиденды»). (The owner's decision of
-// 19 October 2026: «это не выводы прямые а расходы которые относятся к Ване».) It is the reports' split alone: in the
-// plan every row of a founder's block is his taking, as before. A subscription paid with a founder's card is not here
-// at all when its name is known - «Разбор» files Figma, Nord and the rest by name before it looks at whose card it is.
-const cardSpend=r=>!!(r&&r.o&&String(r.o.h||"").trim());
+// A row of a founder's block that the bank shows as a payment by card is something bought with the studio's card:
+// the founder's expense («Daily и расходы»), with a label or without one. Only a row with no label that is no payment
+// by card is a transfer to himself («Дивиденды»). (The owner's decision of 19 October 2026: «это не выводы прямые а
+// расходы которые относятся к Ване».) It is the reports' split alone: in the plan every row of a founder's block is
+// his taking, as before. A subscription paid with a founder's card is not here at all when its name is known -
+// «Разбор» files Figma, Nord and the rest by name before it looks at whose card it is.
+// The statement's own words tell it («Card transaction of … issued by …», «Транзакция по карте на сумму …, списана …»),
+// not the name on the card: a row keeps that name only while it is in «Разбор», and a row of the table has none. (So
+// it was in 1.15.0, which asked the name, and found no row it could reach.)
+const CARD=/card transaction|card payment|транзакция по карте|оплата картой|покупка по карте/i;
+const cardSpend=r=>!!(r&&r.o)&&CARD.test([r.o.p,r.o.t].filter(x=>typeof x==="string").join(" "));
 const fGroup=r=>{if(r.c==="tax")return FG.tax;const l=(r.l||"").trim().toLowerCase();if(!l)return cardSpend(r)?FG.other:FG.div;
  return /daily|monthly|^jar$/.test(l)?FG.daily:/^(tfl|uber|lime|bolt|taxi|transport|car|auto|journey)$/.test(l)?FG.tr:FG.other;};
 // The bank's fees (the owner's decision of 19 October 2026: «убери комиссию отдельной строкой. давай вообще иметь

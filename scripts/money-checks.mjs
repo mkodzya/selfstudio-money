@@ -8131,26 +8131,41 @@ await run('fees-comma', 'a bank\'s fee written with a decimal comma - «(fee: 1,
 });
 
 // A founder's card payment without a label is his expense, not a transfer to himself (the owner's decision of
-// 19 October 2026: «это не выводы прямые а расходы которые относятся к Ване»).
-await run('rv-cardspend', 'in «Месяцы» a founder\'s card payment with no label counts in «Daily и расходы», and only a transfer with no label and no card holder in «Дивиденды»; «Выводы всего» stays the same', async () => {
-  const card = (r, h) => ({ ...r, o: { ...r.o, h } });
-  const led = ledger([
-    filed('v1', '2026-10-02', -1000, 'vanya', ''),
-    card(filed('v2', '2026-10-03', -20, 'vanya', ''), 'IVAN PETROV'),
-    filed('v3', '2026-10-04', -5, 'vanya', 'tfl'),
-    // a card payment with the bank's fee inside, written as Wise writes it - with a decimal comma
-    card(said(filed('v4', '2026-10-05', -21.56, 'vanya', ''), 'Card transaction of 21.56 GBP issued by Shop (fee: 1,56 GBP)'), 'IVAN PETROV'),
-  ]);
+// 19 October 2026: «это не выводы прямые а расходы которые относятся к Ване»). The page tells a payment by card by
+// the statement's words: a row of the table keeps no name of the card's holder. 1.15.0 asked that name, and this
+// check, which put it on rows of the table by hand, passed while no real row was reached - so the rows here are
+// as the table holds them, and one comes the whole way: a Wise statement, «Разбор», «В таблицу».
+await run('rv-cardspend', 'in «Месяцы» a founder\'s card payment with no label counts in «Daily и расходы», and only a transfer with no label that is no card payment in «Дивиденды»; «Выводы всего» stays the same', async () => {
+  const led = {
+    ...ledger([
+      said(filed('v1', '2026-10-02', -1000, 'vanya', ''), 'Sent money to Ivan Petrov'),
+      // Wise's statement in Russian, as the founders download it
+      said(filed('v2', '2026-10-03', -20, 'vanya', ''), 'Транзакция по карте на сумму 23,50 EUR, списана Lime*Ride'),
+      filed('v3', '2026-10-04', -5, 'vanya', 'tfl'),
+      // a card payment with the bank's fee inside, written as Wise writes it - with a decimal comma
+      said(filed('v4', '2026-10-05', -21.56, 'vanya', ''), 'Card transaction of 21.56 GBP issued by Shop (fee: 1,56 GBP)'),
+    ]),
+    holders: { 'ivan petrov': 'vanya' },
+  };
   const pg = await scene('card spend', led, planP());
+  // A card payment that comes by a statement: «Разбор» files it in Vanya's block by the name on the card, with no
+  // label, and the row goes to the table without that name.
+  const csv = 'TransferWise ID,Date,Amount,Currency,Description,Payment Reference,Payer Name,Payee Name,Merchant,Card Holder Full Name\nCARD-1,07-10-2026,-12.00,GBP,Card transaction of 12.00 GBP issued by Corner Cafe,,,,Corner Cafe,IVAN PETROV';
+  same(await feed(pg, csv), ['Wise', 1], 'a Wise statement with a card payment of £12 by IVAN PETROV, 7 Oct, is read');
+  await pg.click('.nav [data-tab="inbox"]');
+  await pg.click('#view-inbox .op [data-accept]');
+  await puts('led', 1);
+  const row = store.led.doc.tx.find((r) => r.d === '2026-10-07');
+  same(row ? [row.c, row.l] : null, ['vanya', ''], '… and filed from «Разбор» in Vanya\'s block, with no label');
   await pg.click('.nav [data-tab="dashboard"]');
   await pg.click('#view-dashboard [data-scope="month"]');
   await pg.selectOption('#periodSel', '2026-10');
   await pg.click('#view-dashboard [data-focus="f:vanya"]');
   const kpis = Object.fromEntries(await pg.$$eval('#view-dashboard .kpis .kpi', (l) => l.map((k) => [k.querySelector('.lbl').textContent.trim(), k.querySelector('.val').textContent.trim()])));
-  same([kpis['Выводы всего'], kpis['Дивиденды'], kpis['Daily и расходы']], ['£1,045', '£1,000', '£45'],
-    'Vanya, October (a bank\'s fee inside a payment is split out from October 2026): £1,000 sent to himself is «Дивиденды»; the £20 paid with his card, no label, the £5 «tfl» and the £20 of a card payment of £21.56 whose £1.56 is the bank\'s fee are «Daily и расходы» - the fee stands in «Банковские комиссии», not in his figures');
+  same([kpis['Выводы всего'], kpis['Дивиденды'], kpis['Daily и расходы']], ['£1,057', '£1,000', '£57'],
+    'Vanya, October (a bank\'s fee inside a payment is split out from October 2026): £1,000 sent to himself is «Дивиденды»; the £20 paid with his card, no label, the £5 «tfl», the £20 of a card payment of £21.56 whose £1.56 is the bank\'s fee and the £12 of the statement are «Daily и расходы» - the fee stands in «Банковские комиссии», not in his figures');
   const list = (await texts(pg, '#view-dashboard .card:has(h2:text-matches("Daily и расходы по подписям")) .hb .hl'));
-  same(list.sort(), ['tfl', 'без подписи'], '… and the list of expenses by label holds the card payment, as «без подписи»');
+  same(list.sort(), ['tfl', 'без подписи'], '… and the list of expenses by label holds the card payments, as «без подписи»');
   await pg.context().close();
 });
 
