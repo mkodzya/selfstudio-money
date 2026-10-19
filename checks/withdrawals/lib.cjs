@@ -75,8 +75,11 @@ const toOwn = (L) => { let n = 0; const fix = (r) => (isDaily(r) ? (n++, { ...r,
 //     payment, transfer, bill or card, no code Barclays gives a payment and no firm (the review of 19 October 2026) -
 //     never one the statement calls a payment by card, direct debit or standing order, nor one that names an agent,
 //     an intermediary or a reward; else it holds a fee inside when its text says «(fee: X CUR)» in its own
-//     currency, or, on Mosta, «Перевод …, комиссия X ·» - less than the row. `feeOf(r)` → null | {whole, n (the
-//     row's currency), g (pounds: the row's own pounds in the same share)}.
+//     currency, or, on Mosta, «Перевод …, комиссия X ·» - less than the row; X with a decimal comma or a decimal dot
+//     (`figOf`, below), Mosta's ending at a space, «·» or the text's end. A row with a «(fee: …)» that is not a figure
+//     and a code of three letters, or with a figure in its own currency that `figOf` cannot read, says no fee at all
+//     (the review of 19 October 2026). `feeOf(r)` → null | {whole, n (the row's currency), g (pounds: the row's own
+//     pounds in the same share)}.
 // `worth(r)` is what a withdrawal may hold of a row in pounds: nothing of a fee row of its own, the row without its
 // fee where one is inside. `nat(r)` is the row in its own currency without the fee. `hasFee(L)`: does the table hold
 // any fee at all - where it does not, the page reads it as develop before the fees did (pre.cjs), byte for byte.
@@ -95,21 +98,49 @@ const barcFee = (t) => { const s = t.trim().toLowerCase(), words = s.split(/[^a-
   if (!/^(commission\s+)?charges(\s|$)/.test(s) || words.some((w) => BARC_PAY.includes(w))) return false;
   return /^(commission\s+)?charges$/.test(s) || words.includes('period'); };
 const textOf = (r) => { const o = r && r.o && typeof r.o === 'object' ? r.o : {}; return String(typeof o.t === 'string' && o.t.trim() ? o.t : o.p == null ? '' : o.p); };
+// The figure of a fee (19 October 2026, found on the test stand before prod: Wise's statement in Russian writes
+// «(fee: 1,85 GBP)» with a decimal COMMA, and the page read it as 185). `figOf` reads the shapes a figure may have, one
+// by one, and nothing else - a figure of no shape here is none, and a row whose fee's figure is none says no fee:
+//   12 · 1234.5 · 1.234            digits; a dot written once is the decimal mark, whatever follows it
+//   1,5 · 0,38                     a comma written once, then one or two digits: the decimal mark
+//   1,234.56 · 1.234,56            thousands in groups of three by one mark, then the other of comma and dot: the decimal
+//   1 234.56 · 1 234,56            thousands by a space (plain, no-break U+00A0 or narrow no-break U+202F), then a dot,
+//                                  or a comma with one or two digits
+//   1 234 · 1,234,567 · 1.234.567  thousands alone: by spaces, or by a comma or a dot written twice or more
+// «1,234» is none - a thousand, or one and a bit? - and so are groups not of three and two kinds of thousands mark.
+const SP = '[ \\u00a0\\u202f]';
+const FIGS = [[/^\d+$/, ''], [/^\d+\.\d+$/, '.'], [/^\d+,\d{1,2}$/, ','],
+  [/^\d{1,3}(?:,\d{3})+\.\d+$/, '.'], [/^\d{1,3}(?:\.\d{3})+,\d+$/, ','],
+  [new RegExp('^\\d{1,3}(?:' + SP + '\\d{3})+\\.\\d+$'), '.'], [new RegExp('^\\d{1,3}(?:' + SP + '\\d{3})+,\\d{1,2}$'), ','],
+  [new RegExp('^\\d{1,3}(?:' + SP + '\\d{3})+$'), ''], [/^\d{1,3}(?:,\d{3}){2,}$/, ''], [/^\d{1,3}(?:\.\d{3}){2,}$/, '']];
+// (each shape with the mark it reads as the decimal one - every other mark in it is a thousands mark; '': all are)
+const figOf = (v) => { const s = String(v == null ? '' : v).trim(), hit = FIGS.find(([re]) => re.test(s)); if (!hit) return null;
+  const d = hit[1], i = d ? s.lastIndexOf(d) : s.length;
+  const x = Number(s.slice(0, i).replace(/[^0-9]/g, '') + (d ? '.' + s.slice(i + 1) : '')); return Number.isFinite(x) ? x : null; };
+// (the figure as the fee's words hold it: digits with single marks between them - «1 234,56» whole, not the code after it)
+const FIG = '(\\d+(?:[ \\u00a0\\u202f.,]\\d+)*)';
+// (every «(fee: …)» of a text, and what one must hold to be read: a figure and a code - nothing before, between or after
+// them but spaces; Mosta's figure ends at a space, «·» or the end of the text - «комиссия 1e-7» is not «комиссия 1»)
+const FEE_WORDS = /\(fee:([^)]*)\)/gi, WISE_FEE = new RegExp('^\\s*' + FIG + '\\s*([a-z]{3})\\s*$', 'i');
+const MOSTA_FEE = new RegExp('^\\s*перевод\\s[^·]*?,\\s*комиссия\\s+' + FIG + '(?=\\s|·|$)', 'i');
 const feeOf = (r) => {
   if (!r || typeof r.d !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(r.d) || r.d < '2026-10-01' || r.s === 'sheet' || !r.o || typeof r.o !== 'object') return null;
   const a = +r.o.a; if (!(a < 0)) return null;
   const t = textOf(r), bank = String(r.b || ''), cur = String(r.o.cur || 'GBP').toUpperCase(), g0 = Math.abs(+r.a || 0);
   const agent = /агент|посредни|вознагражд|комитент|комиссионер|принципал/i.test(t);
   if (!PAIDW.test(t) && !agent && (ruBankFee(t) || /^\s*wise charges for\b/i.test(t) || (bank === 'Barclays' && barcFee(t)))) return { whole: true, n: round2(-a), g: round2(g0) };
-  let n = 0; for (const m of t.matchAll(/\(fee:\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z]{3})\s*\)/gi)) if (m[2].toUpperCase() === cur) n += +m[1].replace(/,/g, '');
-  const ms2 = bank === 'Mosta' ? /^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[.,]\d+)?)/i.exec(t) : null; if (ms2) n += +ms2[1].replace(',', '.');
+  // (fee's words that are no figure and code, or a figure in the row's own currency that is none: the row says no fee
+  // at all - never a guess, and never the other fees of its text without them)
+  let n = 0;
+  for (const m of t.matchAll(FEE_WORDS)) { const q = WISE_FEE.exec(m[1]); if (!q) return null; if (q[2].toUpperCase() === cur) { const x = figOf(q[1]); if (x === null) return null; n += x; } }
+  const ms2 = bank === 'Mosta' ? MOSTA_FEE.exec(t) : null; if (ms2) { const x = figOf(ms2[1]); if (x === null) return null; n += x; }
   n = round2(n); return n > 0 && n < -a ? { whole: false, n, g: round2(g0 * n / -a) } : null; };
 // (each the signed amount less the fee, rounded to the penny as it stands - a half penny of an amount with more places
 // than a statement prints goes the way the signed sum rounds - and then without its sign)
 const worth = (r) => { const f = feeOf(r), a = +(r && r.a) || 0; return !f ? Math.abs(a) : f.whole ? 0 : Math.abs(round2(a - Math.sign(a) * f.g)); };
 const nat = (r) => { const f = feeOf(r), a = +(r && r.o && r.o.a) || 0; return !f ? Math.abs(a) : f.whole ? 0 : Math.abs(round2(a + f.n)); };
 const hasFee = (L) => (L.tx || []).concat(L.inbox || []).some((r) => !!feeOf(r));
-const unfee = (L) => { let n = 0; const fix = (r) => { const f = feeOf(r); if (!f) return r; n++; const t = f.whole ? 'Thing' : textOf(r).replace(/\(fee:[^)]*\)/gi, '').replace(/,\s*комиссия\s+\d+(?:[.,]\d+)?/i, ''); return { ...r, o: { ...r.o, t } }; };
+const unfee = (L) => { let n = 0; const fix = (r) => { const f = feeOf(r); if (!f) return r; n++; const t = f.whole ? 'Thing' : textOf(r).replace(/\(fee:[^)]*\)/gi, '').replace(new RegExp(',\\s*комиссия\\s+' + FIG + '(?=\\s|·|$)', 'i'), ''); return { ...r, o: { ...r.o, t } }; };
   const Q = { ...L, tx: (L.tx || []).map(fix), inbox: (L.inbox || []).map(fix) }; return n ? Q : L; };
 // G - what the scripts hold of the fees, on any model of a table that holds one: the fees the model counts in a month
 // (months.by[ym].fees, and month.blocks.fee of the running month) are the fees `feeOf` finds in the rows the page
@@ -233,4 +264,4 @@ const wCheck = (M, L, T, FX, up, P, memory) => {
   }
   return bad;
 };
-module.exports = { ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, bare, bareFee, mk, engines, C0, AT1, FX, named, toOwn, isDaily, nameOf, wCheck, FND, feeOf, worth, nat, hasFee, unfee, gCheck };
+module.exports = { ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, bare, bareFee, mk, engines, C0, AT1, FX, named, toOwn, isDaily, nameOf, wCheck, FND, feeOf, figOf, worth, nat, hasFee, unfee, gCheck };

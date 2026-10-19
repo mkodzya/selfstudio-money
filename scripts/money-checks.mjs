@@ -273,6 +273,24 @@ const round2 = (v) => Math.round(v * 100) / 100;
 // else it holds a fee inside when its text says «(fee: X CUR)» in its own currency,
 // or, on Mosta, «Перевод …, комиссия X ·» - less than the row. n: the fee in the row's currency; g: in pounds, the row's
 // own pounds in the same share.
+// X, the fee's figure (`feeFig`; 19 October 2026, found on the test stand before prod: Wise's statement in Russian writes
+// «(fee: 1,85 GBP)» with a decimal COMMA, and the page read it as 185 - the comma taken for a thousands mark). Split into
+// groups of digits and the marks between them (a comma, a dot, a space; a no-break or a narrow no-break space is a
+// space): the last mark is the decimal one when it is written once and is a dot, or a comma with one or two digits
+// after it, or the later of a comma and a dot where both stand; every other mark is a thousands mark - one kind, between
+// groups of three, and never a lone comma («1,234»: a thousand, or one and a bit?). Anything else is no figure, and a
+// row whose fee's figure is none says no fee.
+const feeFig = (v) => {
+  const s = String(v == null ? '' : v).trim().replace(/[\u00a0\u202f]/g, ' ');
+  if (!/^\d+(?:[ .,]\d+)*$/.test(s)) return null;
+  const parts = s.split(/([ .,])/), nums = parts.filter((x, i) => i % 2 === 0), marks = parts.filter((x, i) => i % 2 === 1);
+  const last = marks[marks.length - 1], tail = nums[nums.length - 1];
+  const dec = !!marks.length && last !== ' ' && marks.indexOf(last) === marks.length - 1 && ((marks.includes(',') && marks.includes('.')) || last === '.' || tail.length <= 2);
+  const th = dec ? marks.slice(0, -1) : marks, ip = dec ? nums.slice(0, -1) : nums;
+  if (th.length && (new Set(th).size > 1 || (!dec && th.length === 1 && th[0] === ',') || ip[0].length > 3 || ip.slice(1).some((g) => g.length !== 3))) return null;
+  const x = Number(ip.join('') + (dec ? '.' + tail : ''));
+  return Number.isFinite(x) ? x : null;
+};
 const feeIn = (r) => {
   if (!r || typeof r.d !== 'string' || r.d < '2026-10-01' || r.s === 'sheet' || !r.o || !(+r.o.a < 0)) return null;
   const a = +r.o.a, t = String(typeof r.o.t === 'string' && r.o.t.trim() ? r.o.t : r.o.p || ''), cur = String(r.o.cur || 'GBP').toUpperCase(), g0 = Math.abs(+r.a || 0);
@@ -283,10 +301,21 @@ const feeIn = (r) => {
   const ops = /^комиссия за (осуществлени|операци|перевод|пополнени|обслуживани|ведени|выдач|сняти|исполнени|платеж|платёж|зачислени|списани|конвертаци|покупку валют|покупки валют|продажу валют|продажи валют|валютн|смс|sms|выпуск|перевыпуск|подключени|пакет|расчетн|расчётн|кассов|внесени|инкассаци|выписк|справк|эквайринг|сопровождени|проведени|прием|приём|отправк|возврат)/.test(lo);
   const agent = /агент|посредни|вознагражд|комитент|комиссионер|принципал/.test(lo);
   if (!paid && !agent && (ops || /^wise charges for\b/.test(lo) || barc)) return { whole: true, n: round2(-a), g: round2(g0) };
+  // (every «(fee: …)» is read whole - a figure, digits with single marks between them so that «1 234,56» is taken
+  // whole, and a code of three letters, nothing else; one that is not, or a figure in the row's own currency that
+  // feeFig cannot read, says no fee for the row at all. Mosta's figure ends at a space, «·» or the end of the text:
+  // «комиссия 1e-7» or «комиссия 1,5%» is no fee - the review of 19 October 2026)
   let n = 0;
-  for (const m of t.matchAll(/\(fee:\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z]{3})\s*\)/gi)) if (m[2].toUpperCase() === cur) n += +m[1].replace(/,/g, '');
-  const mo = r.b === 'Mosta' ? /^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[.,]\d+)?)/i.exec(t) : null;
-  if (mo) n += +mo[1].replace(',', '.');
+  for (const m of t.matchAll(/\(fee:([^)]*)\)/gi)) {
+    const q = /^\s*(\d+(?:[ \u00a0\u202f.,]\d+)*)\s*([a-z]{3})\s*$/i.exec(m[1]);
+    if (!q) return null;
+    if (q[2].toUpperCase() !== cur) continue;
+    const x = feeFig(q[1]);
+    if (x === null) return null;
+    n += x;
+  }
+  const mo = r.b === 'Mosta' ? /^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[ \u00a0\u202f.,]\d+)*)(?=\s|·|$)/i.exec(t) : null;
+  if (mo) { const x = feeFig(mo[1]); if (x === null) return null; n += x; }
   n = round2(n);
   return n > 0 && n < -a ? { whole: false, n, g: round2(g0 * n / -a) } : null;
 };
@@ -7983,6 +8012,122 @@ await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 20
     [[['£10.00', 'Fixed', 'Bank fees']], false, 1], '«Разбор» files Tochka\'s «Комиссия за перевод собственных средств» as a bank\'s fee - recognised, a cost, never a transfer between own accounts; the client\'s «Оплата за услуги» waits to be sorted as before');
   await pgR.context().close();
   await pgN.context().close();
+});
+
+// =====================================================================================================================
+// 19 OCTOBER 2026, FOUND ON THE TEST STAND BEFORE PROD: a fee written with a decimal comma. Wise's statement in Russian
+// writes the fee inside a payment as «(fee: 1,85 GBP)», and Live.fee took the comma for a thousands mark - 185, a
+// hundred times the fee: October's «Банковские комиссии» of Wise came to thousands of pounds instead of tens. Every
+// check above wrote the fee with a dot. Now one reader, feeNum, reads the figure of Wise's «(fee: X CUR)» and of
+// Mosta's «комиссия X» - a dot, a comma, thousands by a comma, a dot or a space of any of three kinds - and a figure it
+// cannot read for certain («1,234»: a thousand, or one and a bit?) is no fee. The rows of checks/withdrawals case 10,
+// every figure made up, Wise £100,000 and Mosta $4,000 typed for 1 Oct, uploaded on 15 Oct:
+//   wO  own transfer      1,504.15  «Отправлено Self Studio Example Ltd (fee: 4,15 GBP)»        fee 4.15     net 1,500 - in no flow
+//   wC  a contractor        702.45  «Отправлено Person C (fee: 2,45 GBP)»                        fee 2.45     net 700    COGS
+//   wS  card, in dollars    116.72  «Транзакция по карте на сумму 157,00 USD, списана Example Shop (fee: 0,42 GBP)»
+//                                                                                                 fee 0.42     net 116.30 Fixed
+//   wV  Vanya's             451.85  «Отправлено Vanya Example (fee: 1,85 GBP)»                   fee 1.85     net 450   «Дивиденды»
+//   wD  a dot               250.65  «Sent money to Person D (fee: 0.65 GBP)»                     fee 0.65     net 250    COGS
+//   wF  foldFees' words     603.10  «Sent money to Courier F» + « (fee: 3.10 GBP)», toFixed(2)   fee 3.10     net 600    Other
+//   wA  «1 234,56»       41,234.56  «Отправлено Acme Ltd (fee: 1 234,56 GBP)», a no-break space fee 1,234.56 net 40,000 COGS
+//   mT  Mosta, a dot       $300.00  «Перевод 296.10 USDT, комиссия 3.90 · …» - £222.22           fee $3.90 = £2.89 (222.22 × 3.90 / 300), net £219.33  COGS
+//   mU  Mosta, a comma     $120.00  «Перевод 118,80 USDT, комиссия 1,20 · …» - £88.89            fee $1.20 = £0.89 (88.89 × 1.20 / 120), net £88.00    COGS
+// «Vanya» 450, written on 14 Oct and marked «Оплачено» for 12 Oct, is a record of his 451.85 without its fee - 450
+// exactly, and no «часть» stands «вне плана» (read as 185, his row was worth 266.85 and was no record of it). October's
+// fees: Wise 4.15 + 2.45 + 0.42 + 1.85 + 0.65 + 3.10 + 1,234.56 = £1,247.18; Mosta $3.90 + $1.20 = $5.10, £2.89 + £0.89
+// = £3.78; £1,250.96 in all (read the old way: Wise 415 + 245 + 42 + 185 + 0.65 + 3.10 and nothing of «1 234,56» -
+// £890.75). COGS 700 + 250 + 40,000 + 219.33 + 88 = 41,257.33; Other 116.30 + 600 = 716.30; dividends 450; the result
+// −43,674.59 - what left the banks, £44,863.48 from Wise and $420 = £311.11 from Mosta, less the own transfer's 1,500.
+// «Денег сейчас»: £100,000 − 44,863.48 + $3,580 at 1.35 (£2,651.85) = 57,788.37, as on the page with the fee's switch off.
+const commaTx = () => [
+  said(filed('wO', '2026-10-03', -1504.15, 'skip', '', { at: UPF }), 'Отправлено Self Studio Example Ltd (fee: 4,15 GBP)'),
+  said(filed('wC', '2026-10-06', -702.45, 'cogs', 'Person C', { at: UPF }), 'Отправлено Person C (fee: 2,45 GBP)'),
+  said(filed('wS', '2026-10-07', -116.72, 'fixed', 'Tool S', { at: UPF }), 'Транзакция по карте на сумму 157,00 USD, списана Example Shop (fee: 0,42 GBP)'),
+  said(filed('wV', '2026-10-12', -451.85, 'vanya', '', { at: UPF }), 'Отправлено Vanya Example (fee: 1,85 GBP)'),
+  said(filed('wD', '2026-10-08', -250.65, 'cogs', 'Person D', { at: UPF }), 'Sent money to Person D (fee: 0.65 GBP)'),
+  said(filed('wF', '2026-10-09', -603.1, 'other', 'Courier F', { at: UPF }), 'Sent money to Courier F' + ' (fee: ' + (3.1).toFixed(2) + ' GBP)'),
+  said(filed('wA', '2026-10-10', -41234.56, 'cogs', 'Acme Ltd', { at: UPF }), 'Отправлено Acme Ltd (fee: 1\u00a0234,56 GBP)'),
+  said(filed('mT', '2026-10-06', -300, 'cogs', 'Person M', { b: 'Mosta', cur: 'USD', at: UPF }), 'Перевод 296.10 USDT, комиссия 3.90 · OMNIBUS_CRYPTO_TRANSFER'),
+  said(filed('mU', '2026-10-07', -120, 'cogs', 'Person N', { b: 'Mosta', cur: 'USD', at: UPF }), 'Перевод 118,80 USDT, комиссия 1,20 · OMNIBUS_CRYPTO_TRANSFER'),
+  reach('Wise', '2026-10-16', 'GBP', UPF), reach('Mosta', '2026-10-16', 'USD', UPF),
+];
+const commaPlan = () => plan3({ banks: [bal('Wise', 'GBP', 100000, '2026-10-01'), bal('Mosta', 'USD', 4000, '2026-10-01')],
+  div: [row('wR', 'Vanya', 450, '2026-10-12', { blk: 'div', c0: W14, m: { t: W14, by: 'Mika' }, paid: { on: '2026-10-12', at: MK14, by: 'Mika' } })] });
+
+await run('fees-comma', 'a bank\'s fee written with a decimal comma - «(fee: 1,85 GBP)», as Wise\'s statement in Russian writes it - is read as 1.85, not 185; a dot, foldFees\' words, Mosta\'s «комиссия X» and «1 234,56» too; per-bank fees in «Касса», and the founder\'s record closes with no «часть»', async () => {
+  // ---- the reader alone: the page's feeNum, and the reader written out apart from the page (feeFig) ----
+  const figs = [['1.47', 1.47], ['1,47', 1.47], ['0,38', 0.38], ['12', 12], ['1,5', 1.5], ['1.234', 1.234], ['1,234.56', 1234.56], ['1.234,56', 1234.56],
+    ['1 234,56', 1234.56], ['1\u00a0234,56', 1234.56], ['1\u202f234,56', 1234.56], ['1 234.56', 1234.56], ['1\u00a0234', 1234], ['1,234,567.89', 1234567.89],
+    ['1,234', null], ['12,345', null], ['1,2345', null], ['12,34.5', null], ['1 234,567', null], ['1,234,56', null], ['12 34', null], ['1,23 4', null], ['1.5.6', null], ['', null]];
+  same(await page.evaluate((l) => l.map((s) => (window.__money.feeNum ? window.__money.feeNum(s) : 'no reader')), figs.map((x) => x[0])), figs.map((x) => x[1]),
+    'feeNum: a dot, a decimal comma, thousands by a comma, a dot, a space, a no-break and a narrow no-break space are read; «1,234» and every shape not certain is no figure');
+  same(figs.map(([s]) => feeFig(s)), figs.map((x) => x[1]), '… and that is the reader written out apart from the page (feeFig), shape for shape');
+  // ---- each row: its fee, and what it is without it, in its own currency and in pounds ----
+  const L = ledger(commaTx()), P = commaPlan(), rows = L.tx.filter((r) => !String(r.id).startsWith('reach'));
+  const net = (r, f) => [round2(-r.o.a - f.n), round2(r.a - f.g)];
+  const read = await page.evaluate((rows) => rows.map((r) => { const f = window.__money.fee(r); return f && [f.whole, f.bank, f.cur, f.n, f.g]; }), rows);
+  same(read.map((f, i) => (f ? [rows[i].id, ...f, ...net(rows[i], { n: f[3], g: f[4] })] : [rows[i].id, null])),
+    [['wO', false, 'Wise', 'GBP', 4.15, 4.15, 1500, 1500], ['wC', false, 'Wise', 'GBP', 2.45, 2.45, 700, 700], ['wS', false, 'Wise', 'GBP', 0.42, 0.42, 116.3, 116.3],
+      ['wV', false, 'Wise', 'GBP', 1.85, 1.85, 450, 450], ['wD', false, 'Wise', 'GBP', 0.65, 0.65, 250, 250], ['wF', false, 'Wise', 'GBP', 3.1, 3.1, 600, 600],
+      ['wA', false, 'Wise', 'GBP', 1234.56, 1234.56, 40000, 40000], ['mT', false, 'Mosta', 'USD', 3.9, 2.89, 296.1, 219.33], ['mU', false, 'Mosta', 'USD', 1.2, 0.89, 118.8, 88]],
+    'Live.fee: each fee to the penny - Wise\'s decimal comma, a dot, foldFees\' words, «1 234,56» with a no-break space, Mosta\'s dot and comma - and each row without it');
+  same(read, rows.map((r) => { const f = feeIn(r); return f && [f.whole, r.b, String(r.o.cur), f.n, f.g]; }), '… and that is the rule written out apart from the page (feeIn), row for row');
+  const odd = [['Отправлено Person G (fee: 1,234 GBP)', -1301.23], ['Sent money to Person G (fee: 1,234 GBP) (fee: 0.50 GBP)', -1301.73]].map(([t, a]) => ({ d: '2026-10-09', b: 'Wise', a: -a, s: 'file', c: 'cogs', l: 'Person G', o: { a, cur: 'GBP', t } }));
+  same([await page.evaluate((rows) => rows.map((r) => window.__money.fee(r)), odd), odd.map(feeIn)], [[null, null], [null, null]],
+    '«(fee: 1,234 GBP)» - a thousand, or one and a bit? - says no fee: the row counts whole, never a guess');
+  // (the review of the fix, 19 October 2026) fee's words that are no figure and code beside a fee that is, and Mosta's
+  // «комиссия 1e-7» (String() of a tiny fee, as parseWallet writes it) and «комиссия 1,5%», say no fee - not 0.50, 1 and
+  // 1.5; a fee in another currency is passed over whatever its figure, and Mosta's figure before its code, with a
+  // thousands space or at the end of the text still reads
+  const oddRow = (b, cur, a, t) => ({ d: '2026-10-09', b, a: round2(-a / (cur === 'USD' ? FX.USD : 1)), s: 'file', c: 'cogs', l: 'Person G', o: { a, cur, t } });
+  const odd2 = [oddRow('Wise', 'GBP', -300, 'Sent money to Person G (fee: -1,00 GBP) (fee: 0,50 GBP)'), oddRow('Wise', 'GBP', -300, 'Sent money to Person G (fee: £1,00) (fee: 0,50 GBP)'),
+    oddRow('Wise', 'GBP', -300, 'Sent money to Person G (fee: 1, 00 GBP) (fee: 0,50 GBP)'), oddRow('Mosta', 'USD', -1000, 'Перевод 1000 USDT, комиссия 1e-7 · OMNIBUS_CRYPTO_TRANSFER'),
+    oddRow('Mosta', 'USD', -252, 'Перевод 250,50 USDT, комиссия 1,5% · OMNIBUS_CRYPTO_TRANSFER'),
+    oddRow('Wise', 'GBP', -300, 'Sent money to Person G (fee: 1,234 EUR) (fee: 0,50 GBP)'), oddRow('Mosta', 'USD', -302.75, 'Перевод 300 USDT, комиссия 2,75 USDT · OMNIBUS_CRYPTO_TRANSFER'),
+    oddRow('Mosta', 'USD', -5000, 'Перевод 3 765.5 USDT, комиссия 1 234.5 · OMNIBUS_CRYPTO_TRANSFER'), oddRow('Mosta', 'USD', -105, 'Перевод 100 USDT, комиссия 5')];
+  const nOf = (f) => (f ? f.n : null), want2 = [null, null, null, null, null, 0.5, 2.75, 1234.5, 5];
+  same([(await page.evaluate((rows) => rows.map((r) => window.__money.fee(r)), odd2)).map(nOf), odd2.map((r) => nOf(feeIn(r)))], [want2, want2],
+    '«(fee: -1,00 GBP)», «(fee: £1,00)», «(fee: 1, 00 GBP)» beside a fee say no fee for the row; Mosta\'s «комиссия 1e-7» and «1,5%» no fee; another currency\'s fee passed over; Mosta\'s «2,75 USDT ·», «1 234.5 ·» and «5» at the end read - and feeIn says the same');
+  // a statement's text is kept to 120 characters when its row is filed (text120): two or three «(fee: …)» apart are
+  // kept each once, and the filed row's fee is what the whole text says - before the review one was written twice
+  const long = ['(fee: 1,00 GBP) ' + 'x'.repeat(90) + ' (fee: 0,50 GBP)', 'Sent money (fee: 1,00 GBP) to (fee: 0,50 GBP) ' + 'x'.repeat(100),
+    'Sent money to Person G ' + 'y'.repeat(60) + ' (fee: 0,25 GBP) ' + 'z'.repeat(30) + ' (fee: 0,50 GBP) (fee: 1,25 GBP)'];
+  const kept = await page.evaluate((l) => l.map((s) => (window.__tx.text120 ? window.__tx.text120(s) : 'no text120')), long);
+  const keptFee = await page.evaluate((l) => l.map((t) => { const f = window.__money.fee({ d: '2026-10-09', b: 'Wise', a: 300, s: 'file', c: 'cogs', l: 'Person G', o: { a: -300, cur: 'GBP', t } }); return f && f.n; }), kept);
+  same(kept.map((c, i) => [c.length <= 120, (c.match(/\(fee:[^)]*\)/gi) || []).join(' '), keptFee[i]]),
+    [[true, '(fee: 1,00 GBP) (fee: 0,50 GBP)', 1.5], [true, '(fee: 1,00 GBP) (fee: 0,50 GBP)', 1.5], [true, '(fee: 0,25 GBP) (fee: 0,50 GBP) (fee: 1,25 GBP)', 2]],
+    'text120: a text over 120 characters keeps each of its «(fee: …)» once - its fee 1.50, 1.50 and 2.00 as the whole text says, not 2.50 and 3.00');
+
+  // ---- the model: the founder's record, the fees by bank, every block net ----
+  serve(L, P);
+  const nf = await noFee(), M = await C(L, P, D17), M0 = await nf.C(L, P);
+  same([item(M, 'wR').state, item(M, 'wR').rows, item(M, 'wR').wd.got, !!item(M, 'wR').wd.rec, offIds(M)], ['done', ['wV'], 450, true, []],
+    '«Vanya» 450 is a record of his 451.85 without its fee of 1,85 - 450 exactly; nothing of his stands outside the plan');
+  same([item(M0, 'wR').wd.got, offOf(M0).by.div.rows.map((r) => [r.id, r.amt, r.part || null])], [450, [['wV', 1.85, { of: 451.85, took: 450 }]]],
+    '… where the page with the fee\'s switch off shows the founder\'s «часть £1.85 из £451.85»');
+  const fz = M.months.by['2026-10'].fees || { gbp: 0, n: 0, banks: [] };
+  same([fz.gbp, fz.n, fz.banks.map((b) => [b.bank, b.gbp, b.nat.map((x) => [x.cur, x.n])])], [1250.96, 9, [['Wise', 1247.18, [['GBP', 1247.18]]], ['Mosta', 3.78, [['USD', 5.1]]]]],
+    'October\'s fees by bank: Wise £1,247.18, Mosta $5.10 (£3.78) - nine fees, £1,250.96 (read the old way, Wise\'s were £890.75)');
+  same(['rev', 'team', 'other', 'tax', 'div', 'fee', 'result'].map((k) => (M.month.blocks[k] || { fact: null }).fact), [0, 41257.33, 716.3, 0, 450, 1250.96, -43674.59],
+    'October\'s facts: COGS 41,257.33, Other 716.30, dividends 450 - each without its fees - the fees £1,250.96 once, the result −43,674.59');
+  same([[M.now, M.free.now, M.IN, M.OUT, M.marksGbp], M.accounts.map((a) => [a.key, a.est])], [[M0.now, M0.free.now, M0.IN, M0.OUT, M0.marksGbp], M0.accounts.map((a) => [a.key, a.est])],
+    '«Денег сейчас», «Можно вывести», what comes and goes and every account are what the page with the fee\'s switch off says');
+  same(M.now, 57788.37, '… «Денег сейчас» 57,788.37');
+  await nf.pg.context().close();
+
+  // ---- on the screen ----
+  const pg = await open('fees-comma', AT17);
+  await goCash(pg);
+  await holds(pg, 'October with fees written with a comma', 'cash');
+  same([await text(pg, '#cs-fees h2 .note'), await text(pg, '#cs-fees-by'), await pg.$('#cs-sec-div tr[data-cs-out="wV"]')],
+    ['£1,250.96', 'Wise £1,247.18 · Mosta $5.10 (£3.78). По выпискам: эти деньги уже ушли со счетов, план комиссии не прогнозирует.', null],
+    '«Касса»: «Банковские комиссии £1,250.96» - Wise £1,247.18, Mosta $5.10 (£3.78) - and no «часть» in «Дивиденды»');
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="ledger"]');
+  const blk = (k) => pg.$$eval(`#view-ledger .blk.${k} tbody tr[data-row]`, (l) => l.map((tr) => [tr.dataset.row, tr.cells[1].textContent.replace(/\s+/g, ' ').trim()]));
+  same([await blk('vanya'), (await blk('fee')).length, await text(pg, '#led-fees .bt .sum')], [[['wV', '£450.00 в т.ч. комиссия банка £1.85']], 9, '£1,250.96'],
+    '«Таблица»: Vanya\'s transfer at £450.00, «в т.ч. комиссия банка £1.85» - not £185; nine fees, £1,250.96');
+  await pg.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));

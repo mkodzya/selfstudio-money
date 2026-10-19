@@ -418,8 +418,13 @@ a deploy:
   «Комиссия за …» that names a bank's own operation, «Wise Charges for: …»,
   Barclays' month's charges; never an agent's commission or a payee's
   «service charges») or a part of it (Wise's «(fee: X CUR)», Mosta's «…,
-  комиссия X ·») - and the engine, «Разбор», «Таблица», «Месяцы» and «Отчёты»
-  all ask it. A row counts for its withdrawal, its block and «Дивиденды»
+  комиссия X ·»; X with a decimal comma or a dot, read by `Live.feeNum` -
+  Wise's statement in Russian writes «1,85», which until the fix of
+  19 October 2026 was read as 185; a figure that cannot be read for certain
+  («1,234»), or fee's words that are no figure and code, is no fee for the
+  row) - and the engine, «Разбор», «Таблица», «Месяцы» and «Отчёты» all ask
+  it. A text cut to 120 characters when its row is filed keeps each of its
+  fee's words once (`text120`). A row counts for its withdrawal, its block and «Дивиденды»
   without its fee; a line other than a withdrawal is closed by the row's whole
   amount or by the amount without the fee, and is paid the whole - a founder
   writes what he will pay, and the fee left with it; the fee counts once, in
@@ -436,9 +441,10 @@ a deploy:
   is read off the row's text, and opening the page writes nothing; a record's
   memory written before the fees (1.13.0) is read without them. The plan
   forecasts no fee. **A change that lets a fee into a founder's figure or a
-  block, or counts one twice, breaks this**: the check `fees` and
-  `checks/withdrawals/` (cases 6-9, the properties P and G) hold it. `FEES` is its
-  one-line switch; `docs/handoff.md`, rule 14 and the entry of 19 October.
+  block, or counts one twice, breaks this**: the checks `fees` and
+  `fees-comma` and `checks/withdrawals/` (cases 6-11, the properties P and G)
+  hold it. `FEES` is its one-line switch; `docs/handoff.md`, rule 14 and the
+  entry of 19 October.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two
