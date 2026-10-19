@@ -8130,6 +8130,30 @@ await run('fees-comma', 'a bank\'s fee written with a decimal comma - «(fee: 1,
   await pg.context().close();
 });
 
+// A founder's card payment without a label is his expense, not a transfer to himself (the owner's decision of
+// 19 October 2026: «это не выводы прямые а расходы которые относятся к Ване»).
+await run('rv-cardspend', 'in «Месяцы» a founder\'s card payment with no label counts in «Daily и расходы», and only a transfer with no label and no card holder in «Дивиденды»; «Выводы всего» stays the same', async () => {
+  const card = (r, h) => ({ ...r, o: { ...r.o, h } });
+  const led = ledger([
+    filed('v1', '2026-10-02', -1000, 'vanya', ''),
+    card(filed('v2', '2026-10-03', -20, 'vanya', ''), 'IVAN PETROV'),
+    filed('v3', '2026-10-04', -5, 'vanya', 'tfl'),
+    // a card payment with the bank's fee inside, written as Wise writes it - with a decimal comma
+    card(said(filed('v4', '2026-10-05', -21.56, 'vanya', ''), 'Card transaction of 21.56 GBP issued by Shop (fee: 1,56 GBP)'), 'IVAN PETROV'),
+  ]);
+  const pg = await scene('card spend', led, planP());
+  await pg.click('.nav [data-tab="dashboard"]');
+  await pg.click('#view-dashboard [data-scope="month"]');
+  await pg.selectOption('#periodSel', '2026-10');
+  await pg.click('#view-dashboard [data-focus="f:vanya"]');
+  const kpis = Object.fromEntries(await pg.$$eval('#view-dashboard .kpis .kpi', (l) => l.map((k) => [k.querySelector('.lbl').textContent.trim(), k.querySelector('.val').textContent.trim()])));
+  same([kpis['Выводы всего'], kpis['Дивиденды'], kpis['Daily и расходы']], ['£1,045', '£1,000', '£45'],
+    'Vanya, October (a bank\'s fee inside a payment is split out from October 2026): £1,000 sent to himself is «Дивиденды»; the £20 paid with his card, no label, the £5 «tfl» and the £20 of a card payment of £21.56 whose £1.56 is the bank\'s fee are «Daily и расходы» - the fee stands in «Банковские комиссии», not in his figures');
+  const list = (await texts(pg, '#view-dashboard .card:has(h2:text-matches("Daily и расходы по подписям")) .hb .hl'));
+  same(list.sort(), ['tfl', 'без подписи'], '… and the list of expenses by label holds the card payment, as «без подписи»');
+  await pg.context().close();
+});
+
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
 console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : '') + (SHARD ? ` (part ${SHARD.k} of ${SHARD.of})` : ''));
 await browser.close();
