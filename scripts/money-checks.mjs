@@ -8130,6 +8130,28 @@ await run('fees-comma', 'a bank\'s fee written with a decimal comma - «(fee: 1,
   await pg.context().close();
 });
 
+// A founder's card payment without a label is his expense, not a transfer to himself (the owner's decision of
+// 19 October 2026: «это не выводы прямые а расходы которые относятся к Ване»).
+await run('rv-cardspend', 'in «Месяцы» a founder\'s card payment with no label counts in «Daily и расходы», and only a transfer with no label and no card holder in «Дивиденды»; «Выводы всего» stays the same', async () => {
+  const card = (r, h) => ({ ...r, o: { ...r.o, h } });
+  const led = ledger([
+    filed('v1', '2026-09-10', -1000, 'vanya', ''),
+    card(filed('v2', '2026-09-12', -20, 'vanya', ''), 'IVAN PETROV'),
+    filed('v3', '2026-09-14', -5, 'vanya', 'tfl'),
+  ]);
+  const pg = await scene('card spend', led, planP());
+  await pg.click('.nav [data-tab="dashboard"]');
+  await pg.click('#view-dashboard [data-scope="month"]');
+  await pg.selectOption('#periodSel', '2026-09');
+  await pg.click('#view-dashboard [data-focus="f:vanya"]');
+  const kpis = Object.fromEntries(await pg.$$eval('#view-dashboard .kpis .kpi', (l) => l.map((k) => [k.querySelector('.lbl').textContent.trim(), k.querySelector('.val').textContent.trim()])));
+  same([kpis['Выводы всего'], kpis['Дивиденды'], kpis['Daily и расходы']], ['£1,025', '£1,000', '£25'],
+    'Vanya, September: £1,000 sent to himself is «Дивиденды»; the £20 paid with his card, no label, and the £5 «tfl» are «Daily и расходы»; «Выводы всего» is all three');
+  const list = (await texts(pg, '#view-dashboard .card:has(h2:text-matches("Daily и расходы по подписям")) .hb .hl'));
+  same(list.sort(), ['tfl', 'без подписи'], '… and the list of expenses by label holds the card payment, as «без подписи»');
+  await pg.context().close();
+});
+
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
 console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : '') + (SHARD ? ` (part ${SHARD.k} of ${SHARD.of})` : ''));
 await browser.close();
