@@ -20,6 +20,11 @@
 //   N, D. The plan and the table are read as they are with N and D written out (lib.cjs, `named`, `toOwn`), byte for
 //      byte; and F is asked of them, and only where no withdrawal is a record (W1): those are counted.
 //   W. What lib.cjs, `wCheck`, holds of every record and every rest (W1, W2).
+//   P. (19 October 2026) A table that holds no fee is read as develop before the fees read it (pre.cjs), byte for byte
+//      but for what the fees add (lib.cjs, `bareFee`).
+//   G. What lib.cjs, `gCheck`, holds of the fees, where the table holds one (each fee once; every account and every line
+//      other than a withdrawal as with the fees' words taken out) - and there D and W count a row without its
+//      fee, and F is not asked. A third of the lives are given the fees by a stream of their own (gen.cjs, `fees`).
 // Every other life is given what the owner decided on 17 October 2026, by a stream of its own (`news`): withdrawals
 // named after a founder (N); a founder's withdrawal of the balance's days written after the rows that make it and
 // marked - one of the balance's own day among them now and then (W1); a record written before its rows came, whose
@@ -30,9 +35,9 @@
 // and how often the page of before (ON=dev) would have moved a figure - there S must fail.
 // usage: ENGINES=<folder> [STEPS=n] [ON=dev] node checks/withdrawals/sameday.cjs <lives>
 const SEEDS = +process.argv[2] || 400, STEPS = +process.env.STEPS || 8;
-const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines, bare, named, toOwn, wCheck, FX } = require('./lib.cjs');
-const { NEW, DEV } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
-const { rng, FOUNDERS, day } = require('./gen.cjs');
+const { ms, ledger, clone, mk, filed, reach, bal, wd, row, plan3, engines, bare, bareFee, named, toOwn, wCheck, FX, worth, hasFee, gCheck } = require('./lib.cjs');
+const { NEW, DEV, PRE } = engines(), Live = process.env.ON === 'dev' ? DEV : NEW;
+const { rng, FOUNDERS, day, fees } = require('./gen.cjs');
 const { C, wr, page, see, keep } = mk(Live), d = mk(DEV);
 const T = '2026-10-13', BY = 'Mika', C0 = ms('2026-10-01T08:00:00Z');
 const stat = {}, bad = {}, up = (k, n = 1) => { stat[k] = (stat[k] || 0) + n; };
@@ -47,7 +52,7 @@ const keyOf = (it) => String(it.occ ? it.occ.chain : it.row || it.id) + '|' + (i
 const self = (it) => JSON.stringify([it.date, it.amt, it.cur, it.whose, it.on, it.bank]);
 const abroad = (M, L) => { const acct = Object.fromEntries(L.tx.map((r) => [String(r.id), r.b + '|' + ((r.o && r.o.cur) || 'GBP')])); return wdsOf(M).some((it) => it.mark && it.rows.some((id) => acct[id] && acct[id] !== it.bank + '|' + it.cur)); };
 const conserve = (M, L) => {
-  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), Math.abs(r.a)])), all = wdsOf(M), ws = all.filter((it) => it.cur === 'GBP');
+  const amt = Object.fromEntries(L.tx.concat(L.inbox).map((r) => [String(r.id), worth(r)])), all = wdsOf(M), ws = all.filter((it) => it.cur === 'GBP');
   if (ws.some((it) => it.wd.got > it.rows.reduce((s, id) => s + (amt[id] || 0), 0) + 0.011)) return 'a withdrawal holds more than its rows';
   if (all.some((it) => it.wd.got > it.amt + 0.011)) return 'a withdrawal holds more than its sum';
   if (all.every((it) => it.cur === 'GBP')) { const rows = new Set(); ws.forEach((it) => it.rows.forEach((id) => rows.add(id))); const tot = ws.reduce((s, it) => s + it.wd.got, 0), cap = [...rows].reduce((s, id) => s + (amt[id] || 0), 0); if (tot > cap + 0.011) return `the withdrawals hold ${tot} of rows worth ${cap}`; }
@@ -84,6 +89,7 @@ function make(seed) {
   }
   if (chance(0.6)) tx.push(reach('Wise', chance(0.7) ? T : asOf, 'GBP', UP + 50));
   if (seed % 2 === 0) news(seed, div, tx, asOf, AT, UP);
+  if (process.env.ON !== 'dev' && seed % 3 === 1) fees(seed, { div }, tx, banks);
   return { L: ledger(tx, []), P: plan3({ banks, div }), R, pick, int, chance, asOf, UP };
 }
 function news(seed, div, tx, asOf, AT, UP) {
@@ -127,6 +133,8 @@ for (let seed = 1; seed <= SEEDS; seed++) {
       L2 = toOwn(L); P2 = named(P);
       if (L2 !== L || P2 !== P) { up('N/D written out'); if (JSON.stringify(JSON.parse(JSON.stringify(Live.compute(clone(L2), clone(P2), T, { H: 30 })))) !== JSON.stringify(M)) fail('N/D: not the model with them written out (' + tag + ')', seed); }
       const w = wCheck(clone(M), L, T, FX, up, P, hasMem(P)); if (w.length) fail(w[0] + ' (' + tag + ')', seed);
+      if (hasFee(L)) { up('G'); const gb = gCheck(clone(M), L, P, T, Live, up); if (gb.length) fail(gb[0] + ' (' + tag + ')', seed); if (!hasMem(P)) up('F not asked: a fee'); else up('steps with a memory'); return; }
+      up('P'); if (JSON.stringify(bareFee(clone(M))) !== JSON.stringify(JSON.parse(JSON.stringify(PRE.compute(clone(L), clone(P), T, { H: 30 }))))) fail('P: not the model of develop before the fees (' + tag + ')', seed);
     }
     if (!hasMem(P)) { if (M.items.some((it) => it.wd && it.wd.rec)) up('F not asked: a record'); else { up('F'); if (strip(M) !== JSON.stringify(d.C(L2, P2, T))) fail('F: not the model of before with no memory (' + tag + ')', seed); } } else { up('steps with a memory'); if (dayMem(P)) up('steps with a memory of a balance\'s day'); }
   };

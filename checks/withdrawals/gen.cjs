@@ -5,7 +5,8 @@ const FOUNDERS = ['mika', 'misha', 'vanya'];
 const day = (base, k) => new Date(Date.parse(base + 'T00:00:00Z') + k * 864e5).toISOString().slice(0, 10);
 const T = '2026-10-13';
 const T0 = ms('2026-10-01T08:00:00Z');   // plan rows are written around here
-// opts: { marks: 'old' | 'none' } - 'old' puts marks without a memory on some withdrawals
+// opts: { marks: 'old' | 'none' } - 'old' puts marks without a memory on some withdrawals; news: the decisions of
+// 17 October 2026 (`news`); fees: the bank's fees of 19 October 2026 (`fees`) - each by a stream of its own
 function make(seed, opts = {}) {
   const R = rng(seed), pick = (a) => a[Math.floor(R() * a.length)], int = (lo, hi) => lo + Math.floor(R() * (hi - lo + 1)), chance = (p) => R() < p;
   const banks = [bal('Wise', 'GBP', 60000, day(T, -int(3, 12)))];
@@ -46,6 +47,7 @@ function make(seed, opts = {}) {
     if (chance(0.15) && tx.length) { const r = P.div.find((x) => !x.rec && !x.ptax); if (r) r.tx = [pick(tx).id]; }
   }
   if (opts.news) news(seed, P, tx, banks);
+  if (opts.fees) fees(seed, P, tx, banks);
   return { L: ledger(tx, inb), P, R, pick, int, chance };
 }
 // What the owner decided on 17 October 2026, put into a plan and its table by a stream of its own - so that a seed
@@ -90,4 +92,44 @@ function news(seed, P, tx, banks) {
     tx.push(r);
   }
 }
-module.exports = { make, rng, FOUNDERS, day, T, T0 };
+// What the owner decided on 19 October 2026 (F: a bank's fee is a line of its own, and no fee is a founder's money),
+// put into a table by a stream of its own - drawn after `news`, so that a seed makes the same plan and the same rows
+// as before but for these:
+//  · now and then a founder's payment out from October, or another cost, says a fee Wise folded into it -
+//    «(fee: 2.95 GBP)» at the end of its text: the amount is as it was, the fee inside it;
+//  · a record's row that came to a little over the record's sum (`news`: «a fee folded in») says, most of the time,
+//    that the over WAS the fee - so that the record and its row meet without it;
+//  · moves to a Daily account and card payments say one too (a move's fee is a cost; the move is still no taking);
+//  · and now and then a fee row of its own is filed - «Wise Charges for: …», «Комиссия за …» - in a founder's block or
+//    as a cost: a fee, and nothing else - no taking, no row outside the plan;
+//  · (the review of 19 October 2026; drawn last, and only where the plan itself is handed over) now and then a line of
+//    the team and the transfer that pays it with Wise's fee inside - the line written at the amount that left the bank,
+//    as the sheet and «как в прошлый раз» say it, or at what the person got: a line is closed by either and paid by
+//    the whole, so it stands as it does with the fee's words taken out (G).
+function fees(seed, P, tx, banks) {
+  const R = rng(seed * 13 + 2027), pick = (a) => a[Math.floor(R() * a.length)], int = (lo, hi) => lo + Math.floor(R() * (hi - lo + 1)), chance = (p) => R() < p;
+  const recAmt = Object.fromEntries((P.div || []).filter((r) => /^rec\d+$/.test(String(r.id))).map((r) => [String(r.id), +r.amt]));
+  tx.forEach((r) => {
+    if (!r.o || !(+r.o.a < 0) || r.d < '2026-10-01' || r.c === 'skip' || r.c === 'rev') return;
+    const cur = r.o.cur || 'GBP', k = cur === 'USD' ? 1.35 : 1, a = Math.abs(+r.o.a), m = /^(rec\d+)-\d+$/.exec(String(r.id));
+    const over = m && recAmt[m[1]] != null ? Math.round((a / k - recAmt[m[1]]) * k * 100) / 100 : 0;
+    let fee = 0;
+    if (over > 0 && over < a / 3 && chance(0.7)) fee = over;
+    else if (chance(0.35)) fee = Math.min(pick([0.35, 0.8, 1.6, 2.95, 3.5, 4.15, 12]), Math.round(a * 0.2 * 100) / 100);
+    if (fee > 0) r.o.t = (r.o.t ? r.o.t + ' ' : 'Sent money to somebody ') + `(fee: ${fee.toFixed(2)} ${cur})`;
+  });
+  for (let i = 0, n = chance(0.4) ? int(1, 2) : 0; i < n; i++) {
+    const b = banks[0], r = filed('fee' + i, day(T, -int(0, 12)), -pick([0.4, 2.5, 9]) * (b.cur === 'USD' ? 1.35 : 1), pick(FOUNDERS.concat(['other', 'fixed'])), '', { b: b.bank, cur: b.cur, at: T0 + int(0, 12) * 864e5 + 77 + i });
+    r.o.t = pick(['Wise Charges for: TRANSFER-' + (100 + i), 'Комиссия за перевод по документу № ' + (10 + i)]);
+    tx.push(r);
+  }
+  if (!Array.isArray(P.team)) return;
+  for (let i = 0, n = chance(0.5) ? int(1, 2) : 0; i < n; i++) {
+    const b = banks[0], [v, fee] = pick([[52.5, 2.5], [150, 5], [1000, 30], [300, 0.9]]), d = day(T, -int(0, 12)), name = 'Person F' + i;
+    P.team.push(row('fl' + i, name, chance(0.7) ? v : v - fee, d, { blk: 'cogs', bank: b.bank, cur: b.cur, c0: T0 - 864e5 }));
+    const r = filed('fr' + i, d, -v, 'cogs', name, { b: b.bank, cur: b.cur, at: T0 + int(1, 12) * 864e5 + 99 + i });
+    r.o.t = `Sent money to ${name} (fee: ${fee.toFixed(2)} ${b.cur})`;
+    tx.push(r);
+  }
+}
+module.exports = { make, rng, FOUNDERS, day, T, T0, fees };
