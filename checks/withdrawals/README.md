@@ -33,8 +33,8 @@ ENGINES=$E ON=dev STEPS=12 $N checks/withdrawals/sameday.cjs 300  # the page bef
 
 These are the runs `docs/handoff.md` quotes; each takes a few minutes on the Mac - one at a time. (The entry of
 17 October 2026 quotes a first pass of the same commands with fewer lives: `lives.cjs` 600 in each of its three
-runs, `dense.cjs` 200, `sameday.cjs` 1000. `ENGINE=pre` runs `cases.cjs` on develop before the fees: cases 6-9 fail
-there.) Known, and older than the fees: K fails in a few lives of `sameday.cjs 4000` on develop before the fees too
+runs, `dense.cjs` 200, `sameday.cjs` 1000. `ENGINE=pre` runs `cases.cjs` on develop before the fees: cases 6-11 fail
+there; on the fees as first merged, 64975ab, cases 10 and 11.) Known, and older than the fees: K fails in a few lives of `sameday.cjs 4000` on develop before the fees too
 (1302, 2012, 2564, 3860 - lives with no fee in them), and with the fees in a few more (`lives.cjs 1500 rich`: 370 and
 496; `sameday.cjs`: 1360 and 2374 - all but 370 fail with the fee's switch off as well): the seeing and the keeping
 around no change rewrite a memory, and its claim on a row takes a second fitting set away from a withdrawal that may
@@ -71,7 +71,11 @@ The owner's decisions of 17 October 2026 (`docs/handoff.md`, the entry of that d
   its own («Комиссия за» and an operation of a bank - `BANK_OPS`, never an agent's commission; «Wise Charges for: …»;
   Barclays' month's charges, which begin «CHARGES» and name a period or nothing, and no payment, Barclays' code for
   one or a firm) or a fee inside a payment («(fee: X CUR)», Mosta's «…, комиссия X ·»), from October, money out,
-  statement rows only. **P**: a table that holds no fee at
+  statement rows only; X with a decimal comma or a dot (`figOf`, written apart from the page's `feeNum` - the comma
+  of Wise's statement in Russian, found on the test stand on 19 October 2026, was read as a thousands mark), and a
+  figure of no certain shape («1,234») is no fee; so is fee's words that are no figure and code («(fee: -1,00 GBP)»)
+  - for the row, never the other fees of its text without them - and Mosta's figure ends at a space, «·» or the
+  text's end («комиссия 1e-7» is no fee, not 1). **P**: a table that holds no fee at
   all is read as develop before the fees read it (`pre.cjs`, 008462e) byte for byte, but for the two fields the fees
   add (`bareFee`: `month.blocks.fee`, `months.by[ym].fees`) - every model, memory or record or not. **G** (`gCheck`):
   where the table holds a fee, every fee is counted once, in its month and its bank, to the penny; no fee row of its
@@ -84,7 +88,8 @@ The owner's decisions of 17 October 2026 (`docs/handoff.md`, the entry of that d
   its `worth` - without the fee inside it, nothing of a fee row of its own. F (the page of before the rule) is not asked of a table with a fee.
   A third of the lives and random plans are given the fees by a stream of their own (`fees` in `gen.cjs`, drawn after
   `news`, so a seed makes the same plan and rows as before but for these): founders' payments and other costs that
-  say a fee Wise folded into them - the amount as it was, the fee inside it; a record's row a little over its sum
+  say a fee Wise folded into them - the amount as it was, the fee inside it, about half of them written with a decimal
+  comma («(fee: 2,95 GBP)», chosen by the row's id, no draw of its own); a record's row a little over its sum
   that says the over was the fee; moves to a Daily account and card payments with a fee; now and then a fee row
   of its own, filed in a founder's block or as a cost; and (drawn last, in `lives.cjs` and `same.mjs`, which hand
   `fees` the plan itself) now and then a line of the team and the transfer that pays it with Wise's fee inside, the
@@ -102,7 +107,17 @@ The owner's decisions of 17 October 2026 (`docs/handoff.md`, the entry of that d
   as it is - gave the record less than its sum and its «часть» stood «вне плана» for good (7: a day moved past today,
   and a memory of a balance's day); a line other than a withdrawal written at the amount that left the bank waited
   for the fee inside it, and the fee was counted twice (8); and `Live.fee` took a landlord's service charges, a firm
-  called «Charges …» and an agent's «Комиссия за …» for bank fees (9, and `feeOf` agrees row for row).
+  called «Charges …» and an agent's «Комиссия за …» for bank fees (9, and `feeOf` agrees row for row). Case 10 is
+  what the test stand showed before prod: Wise's statement in Russian writes «(fee: 1,85 GBP)» with a decimal comma,
+  and `Live.fee` read it as 185 - the rows of that statement's shapes (an own transfer, a contractor, a card payment in
+  dollars with the fee in pounds, a founder's transfer under his record), a dot, foldFees' own words, «1 234,56» with
+  a no-break space and Mosta's dot and comma: each fee and each row without it to the penny, the fees by bank, the
+  record with no «часть», and the reader (`feeNum`, `figOf`) shape by shape. It fails on 64975ab and on `pre.cjs`.
+  The review of that fix added to it fee's words that are no figure and code beside a fee that is, and Mosta's
+  «комиссия 1e-7» and «1,5%» - each read as some fee before, no fee now; and case 11: a text over 120 characters with
+  two «(fee: …)» apart was kept (`text120`, as a row is filed) with one of them twice, and the filed row's fee counted
+  twice - each is kept once now, and a text with one fee's words or none is cut exactly as before (20,000 made-up
+  texts). Both fail on the fix as it stood before that review, and on 64975ab.
 Half the lives (and half the random plans of `same.mjs`) are given these by a stream of their own, so that a seed
 makes the same plan as before but for them (`news` in `gen.cjs`; `dense.cjs` and `sameday.cjs` have their own):
 withdrawals named after a founder, sometimes with «общий» chosen by hand; records written after their rows and
@@ -111,21 +126,23 @@ label, before October and in it, moves back from them, card payments, direct deb
 label; and (`sameday.cjs`) a record written before its rows came, whose nearer row another line holds by hand.
 `ON=dev` asks none of these (the page of before knows nothing of them) and is there for B and S to fail.
 
-- `engine.mjs` - the engine of a page as a node module.
+- `engine.mjs` - the engine of a page as a node module, and the page's `text120` beside it where the page has one
+  (`null` on a page before 64975ab).
 - `lib.cjs` - rows, plans and ledgers made by hand; `bare(M)`, which takes out of a model every field the page
   has gained since the page of before, so that the rest is compared byte for byte (a new field of the model is
   added there, or these runs report it as a difference); `mk(Live)`: `wr` and `page` change a plan the page's way
   (see, change, keep - `Plan.edit`), `raw` is the bare writer: a page from before the rule; the decisions of
   17 October 2026 written out apart from the page - `named`, `toOwn`, `isDaily`, `wCheck`; and the fees of
-  19 October 2026 - `feeOf`, `worth`, `nat`, `hasFee`, `unfee`, `gCheck`, and `bareFee` (what the fees add to a
-  model; `bare` takes it out too).
+  19 October 2026 - `feeOf` (and `figOf`, a fee's figure), `worth`, `nat`, `hasFee`, `unfee`, `gCheck`, and `bareFee`
+  (what the fees add to a model; `bare` takes it out too).
 - `gen.cjs` - seeded random plans and ledgers; `news` and `fees` are the streams of 17 and 19 October 2026.
 - `cases.cjs` - the reviews' cases, by hand; it asks the page as it is (`new.cjs`) alone - case 7 has `pre.cjs` write
-  the memory it reads.
+  the memory it reads; case 11 asks `new.cjs`'s `text120` (`pre.cjs`'s with `ENGINE=pre`).
 
 A change to how withdrawals are dealt (`D2` in the engine, W1 among it, `Live.write.see` and `.keep`), or to whether
 a row of a balance's day is inside that balance (`B`, `tookMark`), or to which rows are a founder's (`Live.daily`), or
 to what of a row is a bank's fee (`Live.fee`), is not finished until these runs say `every property held`, `0 differ`
-and `all … held` - and the checks `rv-wdmark`, `rv-wdday`, `records`, `rest`, `daily` and `fees` are green in CI. The
+and `all … held` - and the checks `rv-wdmark`, `rv-wdday`, `records`, `rest`, `daily`, `fees` and `fees-comma` are
+green in CI. The
 one exception is K in the lives named above as known, which is put to the owner (`docs/handoff.md`, «Решения,
 которые ждут Мику», 14); K failing in any other life is a change not finished.

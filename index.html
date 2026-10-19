@@ -1355,8 +1355,11 @@ const seenKey=r=>{const k=keyOf(r);return k.length>=4?r.b+"|"+(r.o.a<0?"out":"in
 // Looked up as the map's own key only: a label «constructor» or «__proto__» must not be answered by Object's.
 const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.hasOwnProperty.call(a,k.toLowerCase())?a[k.toLowerCase()]:"";return typeof v==="string"&&v?v:k;};
 // (A statement's text is kept to 120 characters. The bank's fee it states, «(fee: 0.40 GBP)», is kept whole at its
-// end: since 19 October 2026 that is how the fee inside a payment is known - Live.fee.)
-const text120=s=>{s=String(s||"");if(s.length<=120)return s;const f=(s.match(/\(fee:[^)]*\)/gi)||[]).join(" ");return f&&!s.slice(0,120).includes(f)?s.slice(0,Math.max(0,119-f.length))+" "+f:s.slice(0,120);};
+// end: since 19 October 2026 that is how the fee inside a payment is known - Live.fee. Where the first 120 hold every
+// one of its fee's words, they are the text; else the text without them, cut, and all of them after it, each once - a
+// text with two «(fee: …)» apart had one of them written twice, and Live.fee counted it twice: the review of
+// 19 October 2026. A text with one or none is cut exactly as before.)
+const text120=s=>{s=String(s||"");if(s.length<=120)return s;const re=/\(fee:[^)]*\)/gi,fz=s.match(re)||[],h=s.slice(0,120);if((h.match(re)||[]).length===fz.length)return h;const f=fz.join(" ");return s.replace(re,"").slice(0,Math.max(0,119-f.length))+" "+f;};
 const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:text120(r.o.t||r.o.p)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;t.o.balIn=+r.o.balIn||+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
@@ -3670,7 +3673,8 @@ const Cash=(()=>{
 //    and W2 showed the over as the founder's rest. From 1 October 2026 a bank's fee is a cost of the studio of its own, per bank, and
 //    no part of the payment it rode on (`fee`, Live.fee - the one test, read off the stored text: nothing stored is
 //    rewritten, and a statement row keeps the amount and the key it was filed with, so a file read again is known as
-//    it was). In `read`: a row of the pool with a fee inside is there at its amount WITHOUT the fee, in pounds and in
+//    it was). A fee's figure is read with a decimal comma or a dot (`feeNum`; Wise in Russian writes «(fee: 1,85 GBP)»,
+//    which until the fix of 19 October 2026 was read as 185 - the comma taken for a thousands mark). In `read`: a row of the pool with a fee inside is there at its amount WITHOUT the fee, in pounds and in
 //    its own currency (and so is anyRow's copy, for a line tied to it by hand) - so the withdrawals and their records
 //    (N, W1, W2, wd.by), the tax periods it pays, the month's blocks and the rows outside the plan all count it net.
 //    A line other than a withdrawal is closed by such a row when its WHOLE amount or its amount without the fee fits
@@ -3841,7 +3845,8 @@ const Live=(()=>{
  //     its block, left Fixed and COGS for good.);
  //   · or a part of it (`whole` false): «(fee: 0.40 GBP)» in its text, in the row's own currency (Wise's words for a
  //     fee inside a payment; foldFees writes the same of a fee it folds), or, on a row of Mosta, a transfer that says
- //     its fee inside, «Перевод 495 USDT, комиссия 5 · …» - in the row's currency, and less than the row.
+ //     its fee inside, «Перевод 495 USDT, комиссия 5 · …» - in the row's currency, and less than the row. The figure
+ //     of either is read by `feeNum` below, with a decimal comma or a decimal dot.
  // n is the fee in the row's own currency, g in pounds - the row's own pounds in the same share, so that a row's
  // amount without the fee and its fee make the row exactly, in its currency and in pounds. A client's payment («Оплата
  // за услуги …») is money IN and never a fee; a salary, a card payment in a café called «Coffee», a payment to a
@@ -3853,11 +3858,34 @@ const Live=(()=>{
   FEE_NOT=/\b(payment|transfer|bill|card|refund|bbp|sto|dd|ddr|fpo|fpi|bgc|tfr|chq|deb|ltd|limited|plc|llp|inv|invoice)\b/i,
   FEE_ROW=/^\s*комиссия\s+за\s+(осуществлени|операци|перевод|пополнени|обслуживани|ведени|выдач|сняти|исполнени|плат[её]ж|зачислени|списани|конвертаци|(покупк|продаж)[уи]\s+валют|валютн|смс|sms|выпуск|перевыпуск|подключени|пакет|расч[её]тн|кассов|внесени|инкассаци|выписк|справк|эквайринг|сопровождени|проведени|при[её]м|отправк|возврат)/i,
   FEE_AGENT=/агент|посредни|вознагражд|комитент|комиссионер|принципал/i;
+ // The figure of a fee inside a payment, as its statement writes it (`feeNum`: a number, or null where it cannot be
+ // read for certain). Wise's statement in Russian writes a decimal COMMA - «(fee: 1,85 GBP)» -, its English one, foldFees
+ // and Mosta's reader a dot - «(fee: 1.85 GBP)» -, so the table holds both. (Until the fix of 19 October 2026 the comma
+ // was taken for a thousands mark: «1,85» read as 185, a fee a hundred times too large. Found on the test stand, before
+ // prod.) A thousands mark - a comma, a dot, a space, a no-break or a narrow no-break space - stands only between groups
+ // of three digits, one kind in a figure; the decimal mark is the later of a comma and a dot where both stand, a dot
+ // written once, or a comma written once with one or two digits after it and nothing more. Anything else - «1,234» (a
+ // thousand, or one and a bit?), groups not of three, two kinds of thousands mark - is not read: a row whose fee's
+ // figure is not read says no fee at all, and counts whole, as before the fees. Never a guess.
+ const FEE_NUM=/^\d+(?:[ \u00a0\u202f.,]\d+)*$/;
+ const feeNum=v=>{const s=String(v==null?"":v).trim();if(!FEE_NUM.test(s))return null;
+  const lc=s.lastIndexOf(","),ld=s.lastIndexOf("."),at=Math.max(lc,ld),dm=at<0?"":s[at],tail=at<0?"":s.slice(at+1);
+  const dec=at>=0&&/^\d+$/.test(tail)&&s.indexOf(dm)===at&&((lc>=0&&ld>=0)||dm==="."||tail.length<=2);
+  const int=dec?s.slice(0,at):s,ks=int.replace(/\d/g,"").replace(/[\u00a0\u202f]/g," ");
+  if(ks&&((!dec&&ks===",")||new Set(ks).size>1||!/^\d{1,3}(?:\D\d{3})+$/.test(int)))return null;
+  const n=+(int.replace(/\D/g,"")+(dec?"."+tail:""));return isFinite(n)?n:null;};
  const fee=r=>{if(!FEES||!obj(r)||!isD(r.d)||r.d<FEE_FROM||r.s==="sheet"||!obj(r.o))return null;const a=+r.o.a;if(!isFinite(a)||!(a<0))return null;
   const t=String(typeof r.o.t==="string"&&r.o.t.trim()?r.o.t:r.o.p==null?"":r.o.p),bank=String(r.b||""),oc=String(r.o.cur||"GBP").toUpperCase(),cur=CURS.includes(oc)?oc:"GBP",g0=Math.abs(+r.a||0);
   if(!PAID.test(t)&&!FEE_AGENT.test(t)&&(FEE_ROW.test(t)||FEE_WISE.test(t)||(bank==="Barclays"&&FEE_BARC.test(t)&&!FEE_NOT.test(t))))return{whole:true,bank,cur,n:r2(-a),g:r2(g0)};
-  let n=0,m;const re=/\(fee:\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z]{3})\s*\)/gi;while((m=re.exec(t)))if(m[2].toUpperCase()===oc)n+=+m[1].replace(/,/g,"");
-  if(bank==="Mosta"&&(m=/^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[.,]\d+)?)/i.exec(t)))n+=+m[1].replace(",",".");
+  // (every «(fee: …)» of the text is read, and read whole: a figure - digits with the marks between them that feeNum
+  // reads, «1 234,56» whole - and a code of three letters, nothing else. One that is not - «(fee: -1,00 GBP)»,
+  // «(fee: £1,00)» -, or a figure in the row's own currency that feeNum cannot read, says no fee for the row at all,
+  // never the other fees of its text without it. Mosta's figure ends at a space, «·» or the text's end: «комиссия
+  // 1e-7» (parseWallet writes a fee as String() does) or «комиссия 1,5%» is no fee, never 1 or 1.5. The review of
+  // 19 October 2026.)
+  let n=0,m,x,q;const re=/\(fee:([^)]*)\)/gi;
+  while((m=re.exec(t))){if(!(q=/^\s*(\d+(?:[ \u00a0\u202f.,]\d+)*)\s*([a-z]{3})\s*$/i.exec(m[1])))return null;if(q[2].toUpperCase()===oc){if((x=feeNum(q[1]))==null)return null;n+=x;}}
+  if(bank==="Mosta"&&(m=/^\s*перевод\s[^·]*?,\s*комиссия\s+(\d+(?:[ \u00a0\u202f.,]\d+)*)(?=\s|·|$)/i.exec(t))){if((x=feeNum(m[1]))==null)return null;n+=x;}
   n=r2(n);return n>0&&n<-a?{whole:false,bank,cur,n,g:r2(g0*n/-a)}:null;};
 
  // ---- the periods of a tax ----
@@ -5466,12 +5494,12 @@ const Live=(()=>{
  // one the rule answers for — which is what rule.from has to become. `rule` is model.taxes.rules[i].
  const perAt=(per,key)=>perOf(per,key.length===4?key+"-12":key[4]==="Q"?key.slice(0,4)+"-"+pad(+key[5]*3):key);
  const fromOf=(rule,k)=>rule&&rule.first?dueOf(rule,perStep(rule.per,perAt(rule.per,String(rule.first)),k)):"";
- return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName,byName,daily,fee};
+ return{compute,upgrade,today,passed,vatFor,fromOf,write,blank,single,day:dayOf,LISTS,SECS,perName,byName,daily,fee,feeNum};
 })();
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,fee:Live.fee,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,fee:Live.fee,feeNum:Live.feeNum,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
  // (whatIf: what a list of trial changes does to the plan's figures - nothing on the screen moves; trial: the one on it.)
  whatIf(list){return Trial.ask(list);},get trial(){return Trial.peek();},
  model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
@@ -7478,8 +7506,9 @@ window.addEventListener("dragover",ev=>{if(hasFiles(ev))ev.preventDefault();});
 window.addEventListener("dragleave",ev=>{if(!hasFiles(ev))return;dragN=Math.max(0,dragN-1);if(!dragN)veil().hidden=true;});
 window.addEventListener("drop",ev=>{if(!hasFiles(ev))return;ev.preventDefault();dragN=0;veil().hidden=true;const f=[...ev.dataTransfer.files];if(f.length)handleFiles(f);});
 let rsT=null;window.addEventListener("resize",()=>{clearTimeout(rsT);rsT=setTimeout(()=>{if(ui.tab==="today")Today.resize();if(ui.tab==="dashboard")renderDash();if(ui.tab==="reports")renderRepOut();if(ui.tab==="cash")Cash.resize();},200);});
-// (`agg` is a month of «Месяцы» as the page counts it from the table - for the checks, and read only.)
-window.__tx={parsePdfLines,parseGrid,parseCSV,agg,feed(p,name,made){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",acn:p.acn||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check,left:p.left||"",made:+made||0};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
+// (`agg` is a month of «Месяцы» as the page counts it from the table - for the checks, and read only; `text120` is
+// how a statement's text is kept when its row is filed - pure, for the checks too.)
+window.__tx={parsePdfLines,parseGrid,parseCSV,agg,text120,feed(p,name,made){const rec={id:uid(),name,bank:p.bank,cur:p.defCur,acc:p.acc||"",acn:p.acn||"",total:p.rows.length,from:"",to:"",pdf:!!p.pdf,check:p.check,left:p.left||"",made:+made||0};const fresh=(p.ownAccs||[]).filter(n=>!S.own.includes(n));if(fresh.length)S.own.push(...fresh);Object.assign(rec,ingest(p,rec,"file"));S.files.unshift(rec);ui.lastTr=settle();renderAll();return rec;}};
 window.__cash=Cash.test;
 const h=(location.hash||"").slice(1);
 if(h==="cash-days"){Cash.view("days");setTab("cash");}else if(TABS.includes(h)&&h!=="today")setTab(h);
