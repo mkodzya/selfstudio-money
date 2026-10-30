@@ -70,7 +70,7 @@ The owner's decisions of 17 October 2026 (`docs/handoff.md`, the entry of that d
   bank, and no fee is a founder's money) - `feeOf` in `lib.cjs` writes the rule out apart from the page: a fee row of
   its own («Комиссия за» and an operation of a bank - `BANK_OPS`, never an agent's commission; «Wise Charges for: …»;
   Barclays' month's charges, which begin «CHARGES» and name a period or nothing, and no payment, Barclays' code for
-  one or a firm) or a fee inside a payment («(fee: X CUR)», Mosta's «…, комиссия X ·»), from October, money out,
+  one or a firm; since 30 October 2026, on Revolut, «Revolut Business Fee») or a fee inside a payment («(fee: X CUR)», Mosta's «…, комиссия X ·»), from October, money out,
   statement rows only; X with a decimal comma or a dot (`figOf`, written apart from the page's `feeNum` - the comma
   of Wise's statement in Russian, found on the test stand on 19 October 2026, was read as a thousands mark), and a
   figure of no certain shape («1,234») is no fee; so is fee's words that are no figure and code («(fee: -1,00 GBP)»)

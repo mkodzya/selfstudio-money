@@ -426,7 +426,8 @@ a deploy:
   отдельно»). From 1 October 2026 `Live.fee` is the one test of what part of
   a statement row is a bank's fee - the whole row (Tochka's and Mosta's
   «Комиссия за …» that names a bank's own operation, «Wise Charges for: …»,
-  Barclays' month's charges; never an agent's commission or a payee's
+  Barclays' month's charges, and since 30 October 2026 Revolut's «Revolut
+  Business Fee» on a row of Revolut; never an agent's commission or a payee's
   «service charges») or a part of it (Wise's «(fee: X CUR)», Mosta's «…,
   комиссия X ·»; X with a decimal comma or a dot, read by `Live.feeNum` -
   Wise's statement in Russian writes «1,85», which until the fix of

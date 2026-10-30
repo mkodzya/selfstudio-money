@@ -300,7 +300,8 @@ const feeIn = (r) => {
     && !words.some((w) => ['payment', 'transfer', 'bill', 'card', 'refund', 'bbp', 'sto', 'dd', 'ddr', 'fpo', 'fpi', 'bgc', 'tfr', 'chq', 'deb', 'ltd', 'limited', 'plc', 'llp', 'inv', 'invoice'].includes(w));
   const ops = /^комиссия за (осуществлени|операци|перевод|пополнени|обслуживани|ведени|выдач|сняти|исполнени|платеж|платёж|зачислени|списани|конвертаци|покупку валют|покупки валют|продажу валют|продажи валют|валютн|смс|sms|выпуск|перевыпуск|подключени|пакет|расчетн|расчётн|кассов|внесени|инкассаци|выписк|справк|эквайринг|сопровождени|проведени|прием|приём|отправк|возврат)/.test(lo);
   const agent = /агент|посредни|вознагражд|комитент|комиссионер|принципал/.test(lo);
-  if (!paid && !agent && (ops || /^wise charges for\b/.test(lo) || barc)) return { whole: true, n: round2(-a), g: round2(g0) };
+  const rev = r.b === 'Revolut' && /^revolut business fee\b/.test(lo);
+  if (!paid && !agent && (ops || /^wise charges for\b/.test(lo) || barc || rev)) return { whole: true, n: round2(-a), g: round2(g0) };
   // (every «(fee: …)» is read whole - a figure, digits with single marks between them so that «1 234,56» is taken
   // whole, and a code of three letters, nothing else; one that is not, or a figure in the row's own currency that
   // feeFig cannot read, says no fee for the row at all. Mosta's figure ends at a space, «·» or the end of the text:
@@ -7901,6 +7902,8 @@ await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 20
     { d: '2026-10-09', b: 'Tochka', a: 10, o: { a: -1180, cur: 'RUB', t: 'Комиссия за операцию "Международный перевод" по документу № 42' } },
     { d: '2026-10-06', b: 'Mosta', a: 18.52, o: { a: -25, cur: 'USD', t: 'Комиссия за пополнение кошелька · BRL_WIRE_ONRAMP' } },
     { d: '2026-10-06', b: 'Mosta', a: 370.37, o: { a: -500, cur: 'USD', t: 'Перевод 495 USDT, комиссия 5 · OMNIBUS_CRYPTO_TRANSFER' } },
+    // (Revolut's month's fee for the business account - the owner's decision of 30 October 2026, «А, считай комиссией банка»)
+    { d: '2026-10-01', b: 'Revolut', a: 25, o: { a: -25, cur: 'GBP', t: 'Revolut Business Fee' } },
     // false friends: money IN, a salary, a café, a consignment shop, a card payment and a bill on Barclays, a month before
     // October, a row of the sheet, money in that says a fee, a fee as large as the row
     { d: '2026-10-13', b: 'Tochka', a: 1000, o: { a: 118000, cur: 'RUB', t: 'Оплата за услуги по договору № 7 от 01.09.2026' } },
@@ -7920,11 +7923,13 @@ await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 20
     { d: '2026-09-28', b: 'Wise', a: 100.4, o: { a: -100.4, cur: 'GBP', t: 'Sent money to Thing Ltd (fee: 0.40 GBP)' } },
     { d: '2026-10-03', b: 'Wise', a: 50, s: 'sheet', o: { a: -50, cur: 'GBP', t: 'Комиссия за перевод' } },
     { d: '2026-10-03', b: 'Wise', a: 99.7, o: { a: 99.7, cur: 'GBP', t: 'Received money from Client Q (fee: 0.30 GBP)' } },
-    { d: '2026-10-03', b: 'Wise', a: 5, o: { a: -5, cur: 'GBP', t: 'Sent money to somebody (fee: 9.00 GBP)' } }];
+    { d: '2026-10-03', b: 'Wise', a: 5, o: { a: -5, cur: 'GBP', t: 'Sent money to somebody (fee: 9.00 GBP)' } },
+    // (… and Revolut's fee on a row filed under another bank: a bank's fee of its own is its own bank's - the row waits to be moved)
+    { d: '2026-10-01', b: 'Wise', a: 25, o: { a: -25, cur: 'GBP', t: 'Revolut Business Fee' } }];
   const read = await page.evaluate((rows) => rows.map((r) => { const f = window.__money.fee(r); return f && [f.whole, f.bank, f.cur, f.n, f.g]; }), asked);
   same(read, [[false, 'Wise', 'GBP', 3.2, 3.2], [false, 'Wise', 'EUR', 0.7, 0.6], null, [true, 'Wise', 'GBP', 0.4, 0.4], [true, 'Barclays', 'GBP', 18.5, 18.5], [true, 'Barclays', 'GBP', 18.5, 18.5],
-    [true, 'Tochka', 'RUB', 590, 5], [true, 'Tochka', 'RUB', 1180, 10], [true, 'Mosta', 'USD', 25, 18.52], [false, 'Mosta', 'USD', 5, 3.7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-    'Live.fee: Wise\'s «(fee: X CUR)» inside a payment, in the row\'s own currency; a fee row of its own of each bank - Wise\'s, Barclays\' charges, Tochka\'s and Mosta\'s «Комиссия за …»; Mosta\'s fee inside a transfer - and none of the false friends: a client\'s «Оплата за услуги», a salary, a café, a consignment shop, a card payment in a «Комиссия» café, Barclays\' card payment and bill, a landlord\'s service charges by bill and by standing order, a firm called «Charges», an agent\'s «Комиссия за …» twice, a September row, a sheet row, money in, a fee no smaller than its row');
+    [true, 'Tochka', 'RUB', 590, 5], [true, 'Tochka', 'RUB', 1180, 10], [true, 'Mosta', 'USD', 25, 18.52], [false, 'Mosta', 'USD', 5, 3.7], [true, 'Revolut', 'GBP', 25, 25], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    'Live.fee: Wise\'s «(fee: X CUR)» inside a payment, in the row\'s own currency; a fee row of its own of each bank - Wise\'s, Barclays\' charges, Tochka\'s and Mosta\'s «Комиссия за …», Revolut\'s «Revolut Business Fee» on a row of Revolut; Mosta\'s fee inside a transfer - and none of the false friends: a client\'s «Оплата за услуги», a salary, a café, a consignment shop, a card payment in a «Комиссия» café, Barclays\' card payment and bill, a landlord\'s service charges by bill and by standing order, a firm called «Charges», an agent\'s «Комиссия за …» twice, a September row, a sheet row, money in, a fee no smaller than its row, Revolut\'s fee on a row filed under Wise');
   same(read, asked.map((r) => { const f = feeIn(r); return f && [f.whole, r.b, String(r.o.cur), f.n, f.g]; }), '… and that is the rule written out apart from the page (feeIn), row for row');
 
   // ---- the founder's October ----
