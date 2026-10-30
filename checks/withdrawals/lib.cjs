@@ -72,7 +72,8 @@ const toOwn = (L) => { let n = 0; const fix = (r) => (isDaily(r) ? (n++, { ...r,
 //     of the statements (not of the sheet), money that LEFT its account, is a fee of its own (`whole`) when its text
 //     begins «Комиссия за» and an operation of a bank (`BANK_OPS`), or «Wise Charges for: …», or, on Barclays, is the
 //     month's charges - it begins «CHARGES» or «COMMISSION CHARGES» and then names a PERIOD or nothing, and names no
-//     payment, transfer, bill or card, no code Barclays gives a payment and no firm (the review of 19 October 2026) -
+//     payment, transfer, bill or card, no code Barclays gives a payment and no firm (the review of 19 October 2026),
+//     or, on Revolut, begins «Revolut Business Fee» (the owner's decision of 30 October 2026) -
 //     never one the statement calls a payment by card, direct debit or standing order, nor one that names an agent,
 //     an intermediary or a reward; else it holds a fee inside when its text says «(fee: X CUR)» in its own
 //     currency, or, on Mosta, «Перевод …, комиссия X ·» - less than the row; X with a decimal comma or a decimal dot
@@ -128,7 +129,7 @@ const feeOf = (r) => {
   const a = +r.o.a; if (!(a < 0)) return null;
   const t = textOf(r), bank = String(r.b || ''), cur = String(r.o.cur || 'GBP').toUpperCase(), g0 = Math.abs(+r.a || 0);
   const agent = /агент|посредни|вознагражд|комитент|комиссионер|принципал/i.test(t);
-  if (!PAIDW.test(t) && !agent && (ruBankFee(t) || /^\s*wise charges for\b/i.test(t) || (bank === 'Barclays' && barcFee(t)))) return { whole: true, n: round2(-a), g: round2(g0) };
+  if (!PAIDW.test(t) && !agent && (ruBankFee(t) || /^\s*wise charges for\b/i.test(t) || (bank === 'Barclays' && barcFee(t)) || (bank === 'Revolut' && /^\s*revolut\s+business\s+fee\b/i.test(t)))) return { whole: true, n: round2(-a), g: round2(g0) };
   // (fee's words that are no figure and code, or a figure in the row's own currency that is none: the row says no fee
   // at all - never a guess, and never the other fees of its text without them)
   let n = 0;

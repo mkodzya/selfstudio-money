@@ -234,14 +234,17 @@ const asRec = (P, id) => { const r = P.div.find((x) => x.id === id), w = r && r.
     r('Barclays', 'GBP', -18.5, 'CHARGES ACCOUNT FEES PERIOD 01SEP 30SEP'), r('Barclays', 'GBP', -18.5, 'COMMISSION CHARGES'), r('Barclays', 'GBP', -21, 'COMMISSION CHARGES PERIOD 01OCT 31OCT'),
     r('Tochka', 'RUB', -590, 'Комиссия за осуществление валютного контроля по документу № 41'), r('Tochka', 'RUB', -1180, 'Комиссия за операцию "Международный перевод" по документу № 42'),
     r('Tochka', 'RUB', -1180, 'Комиссия за перевод собственных средств по документу № 43'), r('Mosta', 'USD', -25, 'Комиссия за пополнение кошелька · BRL_WIRE_ONRAMP'), r('Wise', 'GBP', -0.4, 'Wise Charges for: TRANSFER-77'),
-    // the false friends
+    // (Revolut's month's fee for the business account, on a row of Revolut - the owner's decision of 30 October 2026)
+    r('Revolut', 'GBP', -25, 'Revolut Business Fee'),
+    // the false friends (and Revolut's fee on a row filed under another bank: a bank's fee is its own bank's)
+    r('Wise', 'GBP', -25, 'Revolut Business Fee'),
     r('Barclays', 'GBP', -1250, 'ACME PROPERTY MGMT SERVICE CHARGES PERIOD Q4 BBP'), r('Barclays', 'GBP', -2000, 'LANDLORD LTD SERVICE CHARGES PERIOD OCT STO'),
     r('Barclays', 'GBP', -600, 'CHARGES CONSULTING LTD INV 7 BBP'), r('Barclays', 'GBP', -300, 'CHARGES PERIOD SERVICES FPO'),
     r('Tochka', 'RUB', -50000, 'Комиссия за привлечение клиента по агентскому договору № 3'), r('Tochka', 'RUB', -20000, 'Комиссия за перевод клиента по агентскому договору № 4'),
     r('Tochka', 'RUB', -9000, 'Комиссия за продажу товара комитента по договору № 5')];
   const got = rows.map((x) => !!(ASKED.fee && ASKED.fee(x)));
-  same(got, [true, true, true, true, true, true, true, true, false, false, false, false, false, false, false],
-    '9: Barclays\' own charges, the banks\' own «Комиссия за …» and Wise\'s are fees of their own; a landlord\'s service charges, a firm called «Charges», an agent\'s and a consignor\'s commission are not');
+  same(got, [true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false],
+    '9: Barclays\' own charges, the banks\' own «Комиссия за …», Wise\'s and Revolut\'s are fees of their own - Revolut\'s on a row of Revolut; a landlord\'s service charges, a firm called «Charges», an agent\'s and a consignor\'s commission are not');
   same(rows.map((x) => !!feeOf(x)), got, '9: … and the rule written out apart from the page (feeOf) says the same, row for row');
 }
 // 10. (19 October 2026, found on the test stand before prod) A fee written with a decimal comma. Wise's statement in
