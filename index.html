@@ -1007,9 +1007,9 @@ async function load(){
   if(!r||!r.ok)return gate(r?r.status:0);
   const j=await r.json();applyState(j.doc||{});S.rev=j.rev||0;disk=true;sync("сохранено","ok");
   // Who is signed in: the first name signs a change to the plan, and what the person may do decides what the page
-  // offers. It is waited for - a moment - because the page saves by itself when it opens (transfers between the
-  // studio's own accounts are put away, an older plan is rewritten), and a reader's page must not try. Without an
-  // answer the page is what it was before there were readers; a save the server then refuses says so (put, push).
+  // offers. It is waited for - a moment - because the page saves once by itself when it opens an older plan (it is
+  // rewritten as version 3), and a reader's page must not try. Without an answer the page is what it was before
+  // there were readers; a save the server then refuses says so (put, push).
   // It is asked twice at most, eight seconds each: a page must not hang on it, nor take one lost answer for "may save".
   for(let n=0;n<2&&!ME;n++){
    const stop=new AbortController(),t=setTimeout(()=>stop.abort(),8000);
@@ -1042,7 +1042,10 @@ async function load(){
    if($("#sync").className.indexOf("bad")<0)sync(DISK?"сервер не отвечает — данные только в браузере":"только в этом браузере",DISK?"bad":"wait");
   }
  }
- S.loaded=true;settle();renderAll();
+ // Nothing of «Разбор» is filed here: a transfer between own accounts waiting there is filed by a person's own act
+ // (settle, below), never because a page opened - a save nobody asked for gives every other open window a 409 and
+ // stops it saving until it is reloaded (30 October 2026).
+ S.loaded=true;renderAll();
  // The cash plan is asked for only once the ledger has opened: a page the door has shut never requests it.
  // The page stays on «Сегодня» whatever waits in «Разбор»: that is one of the things «Сегодня» says.
  Cash.load();
@@ -1347,6 +1350,12 @@ function findTwin(r){
 // Sure: the other side carries one of our own names (S.own) or the bank calls it a conversion.
 // Pair: money left one own account and the same amount reached another within four days.
 // A pair nobody has confirmed yet waits in the inbox for one click; after that its kind is remembered (S.ownSeen).
+// All of it - the pairing, the pairs whose kind is known, and the sure rows put into the table - is settle()'s, and
+// settle() runs only on a person's own act: a statement read, «Это перевод», a name added to «Наши названия и
+// счета», the data replaced from a file, the example shown. Never when the page opens (30 October 2026): a save
+// nobody asked for shuts every other open window. Until such an act a sure row waits in «Распознано», where
+// «Принять распознанные» - or «Изменить» and its «Убрать как перевод» - files it exactly as settle() would (toTx),
+// and a pair whose kind is known waits for «Это перевод».
 // A move to (or back from) a founder's Daily or Monthly account from October 2026 (Live.daily) is filed as a transfer
 // between own accounts by «Разбор» itself, and is never paired: its other side is an account whose statements are
 // rarely uploaded, so it would wait for a partner for ever - and, as the sure leg, it would take with it, without a
