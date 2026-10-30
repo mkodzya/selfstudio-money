@@ -6380,8 +6380,12 @@ const Ed=(()=>{
  const lineG=it=>Math.abs(+it.full||0);
  function picks(it){const day=it.date||(it.ym?it.ym+"-15":Live.today()),want=lineG(it),mine=new Set((it.rows||[]).concat(it.done?it.done.rows:[]).map(String));
   const ok=r=>r&&r.o&&isFinite(+r.o.a)&&+r.o.a!==0&&Math.sign(+r.o.a)===it.dir&&/^\d{4}-\d{2}-\d{2}$/.test(r.d||"")&&!ownTr(r)&&r.c!=="skip"&&!FOUNDERS.includes(r.c)&&!(Live.fee(r)&&Live.fee(r).whole);
-  const score=r=>(want>0?Math.min(3,Math.abs(Math.abs(r.a)-want)/want):1)*20+days(r.d,day)/3;
-  const near=S.tx.filter(r=>ok(r)&&!mine.has(String(r.id))&&days(r.d,day)<=45).sort((a,b)=>score(a)-score(b)).slice(0,10);
+  // First the payments of the line's own label and those a founder has already named for another line - one
+  // payment for several invoices is far from each one's sum, and nearest in sum it fell off the list (Mika's
+  // client, 30 October 2026); then the rest, nearest in sum and day.
+  const own=r=>!!it.label&&norm(alias(r.l))===norm(it.label),tied=new Set(M.items.filter(x=>x.done&&x.done.note==="hand").flatMap(x=>x.done.rows.map(String)));
+  const score=r=>(want>0?Math.min(3,Math.abs(Math.abs(r.a)-want)/want):1)*20+days(r.d,day)/3-(own(r)||tied.has(String(r.id))?100:0);
+  const near=S.tx.filter(r=>ok(r)&&!mine.has(String(r.id))&&days(r.d,day)<=45).sort((a,b)=>score(a)-score(b)).slice(0,12);
   return S.tx.concat(S.inbox).filter(r=>mine.has(String(r.id))).concat(near);}
  function pickNote(it,id){
   if(id==null)return "Отметьте платёж. Платёж, который уже закрывает другую строку, можно выбрать и здесь: тогда он закроет обе.";

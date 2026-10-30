@@ -470,7 +470,9 @@ a deploy:
   платёж…», the same day, «да»). The page deals a label's payments to its
   monthly lines by date, whatever the sum, and never a payment of another
   name; on every line but a withdrawal and a computed tax the card now
-  offers the table's payments near its day, of any label and any bank. The
+  offers the table's payments near its day, of any label and any bank -
+  those of the line's own label and those already named for another line
+  first, then the nearest in sum. The
   choice is the hand tie `tx` plus `closed` (`Live.write.pick`), so nothing
   else of the label is dealt on top; «Ни один» clears both and writes the
   rows that closed the line into its `notx` (it is not offered on a line a
