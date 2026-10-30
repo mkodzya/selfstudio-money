@@ -274,7 +274,17 @@ a deploy:
   `409` and stops saving until it is reloaded. So a save that nobody asked
   for — on open, on a timer — shuts the other founders' pages. The page makes
   exactly one: an older plan rewritten as version 3, once. A request on a
-  timer would also keep a session from ever going idle.
+  timer would also keep a session from ever going idle. **«Разбор» files
+  nothing as a page opens** (30 October 2026): `settle()` - the pairing of
+  transfers between own accounts, the pairs whose kind a founder confirmed,
+  the sure rows put into the table - runs only on a person's own act (a
+  statement read, «Это перевод», a name added to «Наши названия и счета», the
+  data replaced, the example shown); until then a sure row waits in
+  «Распознано», and «Принять распознанные» files it as `settle()` would. Until
+  that day a page that opened over such a row saved the table. A new caller of
+  `settle()`, or of anything that saves, is a person's act or is not there.
+  The check `open-pair` holds it with two windows, and against the page as it
+  was.
 - **`/api/me` is short**: `id` (the login), `name`, `firstName`,
   `isFounderTier`, `role`, `canWrite`, `canManage`, `stand`, `version`. Nothing
   else of the platform's is there. The page waits for this answer before it

@@ -7934,16 +7934,14 @@ await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 20
   same([item(Mx, 'tX').state, Mx.month.blocks.team.fact, Mx.month.blocks.fee.fact, spent(Mx), Mx.free.now], [item(Mx0, 'tX').state, 970, 30, spent(Mx0), Mx0.free.now],
     'a line written at the amount that left the bank is closed by its row: COGS 970 and the fee 30 make the 1,000 the page before counted, and «Можно вывести» is what it was');
   // September, the sheet's, is what it was, to the byte - and so is the statement row of 28 Sep whose text says a fee
-  // (both pages hold the same table: it was served before either opened)
-  // (A page that opens over this table files its sure transfers between own accounts from «Разбор» and saves -
-  // settle() - so the page without the fees saves once as it opens. The table is served afresh after that save,
-  // or the second page's own save would find the first one's revision and be refused: a race of the two pages
-  // here, not a fault of either.)
-  await puts('led', 1);
-  serve(L, P);
+  // (both pages hold the same table: it was served before either opened, and neither saves anything as it opens -
+  // not even over this one, whose conversion between own accounts, cv and cvE, stands unpaired. Until 30 October 2026
+  // the first page to open paired it and saved, and the table was served afresh here before the second: the check
+  // `open-pair`.)
   const pg = await open('fees', AT17), sep1 = await pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sep2 = await nf.pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sepO = JSON.parse(sep1);
   same([sep1 === sep2, sepO.cogs, sepO.fixed, sepO.other, sepO.misha, sepO.rev, sepO.fee], [true, 2000, 17, 100.4, 900, 800, 0],
     'September in «Месяцы» is what the page before the fees counted, byte for byte: the sheet\'s rows, and the statement row of 28 Sep at its whole 100.40 - no fee before October');
+  same(await puts('led', 1), 0, '… and neither page saved anything as it opened');
   await nf.pg.context().close();
 
   // ---- on the screen ----
@@ -8342,6 +8340,94 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   S = await holds(pg2, 'a line paid by part of a payment', 'cash');
   same([item(S.M, 'w').done && item(S.M, 'w').done.note, off(S.M).find((r) => r[0] === 'q3')], ['hand', ['q3', 250, { of: 400, took: 150 }]], '… and it does: the line is closed by the payment, and the £250 it did not take stands «вне плана», as a part');
   await pg2.context().close();
+});
+
+// =====================================================================================================================
+// 30 OCTOBER 2026, FOUND WHILE THE CHECK «fees» WAS MENDED: the page saved the table as it opened. settle() files the
+// transfers between own accounts that «Разбор» is sure of - a row it filed so itself, a pair whose kind a founder
+// confirmed once («Это перевод»: S.ownSeen), two of the table's own transfers that make a pair - and it was called as
+// the ledger loaded. Over a table that held such a thing the page saved nobody's act, and every other open window got
+// a 409 and stopped saving until it was reloaded (CLAUDE.md: «a save that nobody asked for - on open, on a timer -
+// shuts the other founders' pages»). Since then settle() runs only on a person's own act, and what it files is what it
+// filed: the same rows, the same pairs, the same figures.
+// =====================================================================================================================
+await run('open-pair', 'a page that opens over «Разбор» holding transfers between own accounts saves nothing - not a sure row, not a pair whose kind is known, not two of the table\'s own transfers that pair; a person\'s own act files them exactly as the page used to when it opened', async () => {
+  // The table: two of its own transfers that make a pair and were never paired (Wise −500 on 2 Oct, Barclays +500 on
+  // 3 Oct). «Разбор»: a row it is sure of (Wise −1,000 on 4 Oct, filed as a transfer between own accounts by itself), and
+  // a pair waiting for «Это перевод» whose kind a founder confirmed before - Wise −2,000 to «Self Example Savings»,
+  // Revolut +2,000, on 3 Oct.
+  const KNOWN = 'Wise|out|self example savings';
+  const leg = (r, t, p) => { r.o.t = t; r.o.p = p; r.pair = 'pB'; r.maybe = true; return r; };
+  const L = ledger([
+    said(filed('tO', '2026-10-02', -500, 'skip', ''), 'Sent money to Self Studio Example Ltd'),
+    said(filed('tI', '2026-10-03', 500, 'skip', '', { b: 'Barclays' }), 'Received from Self Studio Example Ltd'),
+  ], [
+    said(inbox('iA', '2026-10-04', -1000, 'skip', ''), 'To own account: Self Studio Example Ltd'),
+    leg(inbox('iBo', '2026-10-03', -2000, '', '', { auto: false }), 'Sent money to Self Example Savings', 'Self Example Savings'),
+    leg(inbox('iBi', '2026-10-03', 2000, '', '', { b: 'Revolut', auto: false }), 'Received money from Self Example Savings', ''),
+  ]);
+  L.ownSeen = [KNOWN];
+  const P = planW({ banks: [bal('Barclays', 'GBP', 3000, '2026-09-30'), bal('Revolut', 'GBP', 1000, '2026-09-30')] });
+  // What a table files, with a pair named by the rows it joins (a pair made by settle() has a new id each time).
+  const filedOf = (doc) => { const tx = doc.tx || []; return tx.map((r) => { const { pair, ...rest } = r; return [r.id, pair ? tx.filter((q) => q.pair === pair).map((q) => q.id).sort().join('+') : '', canon(rest)]; }).sort(); };
+  const where = () => [(store.led.doc.tx || []).map((r) => r.id + (r.pair ? ' paired' : '')).sort(), (store.led.doc.inbox || []).map((r) => r.id).sort()];
+  const figs = (S) => [S.M.now, S.M.free.now, S.M.accounts.map((a) => [a.key, a.est])];
+
+  // ---- the page as it was until this day: the same file, but for the one call it made as it opened ----
+  const src = fs.readFileSync(PUB + '/money/index.html', 'utf8'), now = ' S.loaded=true;renderAll();';
+  ok(src.split(now).length === 2, 'the page has the one line the old page called settle() in as it opened');
+  serve(L, P);
+  const octx = await browser.newContext(CALM);
+  await octx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await octx.route('**/money/index.html', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: src.replace(now, ' S.loaded=true;settle();renderAll();') }));
+  const opg = await octx.newPage();
+  opg.on('pageerror', (e) => errs.push(`open-pair, the old page: PAGEERROR ${e.message}`));
+  await opg.clock.install({ time: new Date('2026-10-06T12:00:00+01:00') });
+  await opg.goto(BASE + '/money/index.html');
+  await opg.waitForFunction(() => window.__money && window.__cash && window.__cash.state());
+  same([await puts('led', 1), where()], [1, [['iA', 'iBi paired', 'iBo paired', 'tI paired', 'tO paired'], []]],
+    'the old page saved the table as it opened, nobody having pressed anything: the sure row and the confirmed pair went from «Разбор» into the table, and the table\'s two own transfers were paired (the check is not vacuous)');
+  const OLD = filedOf(store.led.doc), oldFigs = figs(await holds(opg, 'the old page, opened'));
+  await octx.close();
+
+  // ---- the page as it is: two founders open it over the same documents, and neither page saves ----
+  serve(L, P);
+  const r0 = store.led.rev;
+  const p1 = await open('open-pair, window 1'), p2 = await open('open-pair, window 2');
+  same([await puts('led', 1), await puts('cash', 1), store.led.rev - r0, where()], [0, 0, 0, [['tI', 'tO'], ['iA', 'iBi', 'iBo']]],
+    'two pages opened over «Разбор» holding a sure transfer, a pair whose kind is known and two of the table\'s own transfers to pair: neither saved anything - the table and «Разбор» are as the stand had them');
+  const S0 = await holds(p2, 'the transfers still waiting');
+  same(figs(S0), oldFigs, '«Денег сейчас», «Можно вывести» and every account are what the old page showed once it had filed them: a transfer between own accounts moves its balances whether it waits in «Разбор» or stands in the table');
+  await p2.click('.nav [data-tab="inbox"]');
+  same([await p2.$$eval('#view-inbox .recog tbody tr', (l) => l.map((tr) => [tr.dataset.id, tr.cells[4].textContent.trim()])), await p2.$$eval('#view-inbox article.op.tr', (l) => l.map((e) => e.dataset.id)), await text(p2, '#inboxBadge')],
+    [[['iA', 'Свой перевод']], ['iBo'], '3'], '«Разбор» shows what waits: the sure row among «Распознано» as «Свой перевод», the pair under «Похоже на перевод между своими», three operations');
+
+  // ---- a person's own act files them, in the second window - which the first one's opening has not shut ----
+  // «Принять распознанные»: the sure row goes into the table, as settle() would have put it there.
+  await p2.click('#view-inbox [data-acceptauto]');
+  for (let i = 0; i < 80 && !where()[0].includes('iA'); i++) await sleep(50);
+  same(where(), [['iA', 'tI', 'tO'], ['iBi', 'iBo']], '«Принять распознанные» files the sure row - that row and nothing else');
+  // «Это перевод»: the pair goes, and settle() - which the press calls - pairs the table's two own transfers.
+  await p2.click('#view-inbox article.op.tr [data-istr]');
+  for (let i = 0; i < 80 && (store.led.doc.inbox || []).length; i++) await sleep(50);
+  await sleep(1200);
+  same([filedOf(store.led.doc), (store.led.doc.inbox || []).length, store.led.rev - r0 === store.led.puts, await text(p2, '#sync')], [OLD, 0, true, 'сохранено'],
+    '«Это перевод» files the pair and pairs the table\'s two own transfers: the table is now, row for row and pair for pair, what the old page wrote as it opened - and every save of the second window was taken, none refused');
+  await p2.click('.nav [data-tab="today"]');
+  same(figs(await holds(p2, 'the transfers filed by hand')), oldFigs, '… and every figure is what it was while they waited');
+  await p1.context().close();
+  await p2.context().close();
+
+  // ---- a statement read files them all at once, as it always did ----
+  serve(L, P);
+  const p3 = await open('open-pair, a statement read');
+  same(await puts('led', 1), 0, 'opened once more over the same documents: nothing is saved');
+  same(await feed(p3, wiseCsv([['CARD-1', '2026-10-05', -12, 'Card transaction of 12.00 GBP issued by Lunch Place', '', '']])), ['Wise', 1], 'a Wise statement with one card payment is read');
+  for (let i = 0; i < 80 && (store.led.doc.inbox || []).length !== 1; i++) await sleep(50);
+  await sleep(300);
+  same([filedOf(store.led.doc), (store.led.doc.inbox || []).map((r) => r.o.t)], [OLD, ['Card transaction of 12.00 GBP issued by Lunch Place']],
+    'the statement read files the sure row and the confirmed pair, and pairs the table\'s own transfers - what the old page wrote as it opened; the card payment waits in «Разбор»');
+  await p3.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
