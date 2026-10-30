@@ -8311,13 +8311,16 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
     filed('q1', '2026-10-02', 900, 'rev', 'Halden', { at: UP }),
     filed('q2', '2026-10-02', 600, 'rev', 'Marlow Retail', { at: UP }),
     filed('q3', '2026-10-03', 400, 'rev', 'Halden', { at: UP }),
+    ...Array.from({ length: 12 }, (_, i) => filed('m' + i, '2026-10-0' + (1 + (i % 5)), 150 + i, 'rev', 'Other Client ' + i, { at: UP })),
   ]), planP({ inflows: [row('x', 'Halden Shop', 500, '2026-10-02'), row('y', 'Halden Extra', 400, '2026-10-02'), every('z', 'Halden Big', 1000, 3, '2026-10'), row('w', 'Halden Tiny', 150, '2026-10-03')] }), { h: 1600 });
   await pg2.click('.nav [data-tab="cash"]');
   n = store.cash.puts;
-  const pick2 = async (id, rowId) => {
+  const pick2 = async (id, rowId, look) => {
     await pg2.click(`#view-cash [data-ed-open="${id}"]`);
     await pg2.click(`#view-cash [data-ed-do="pick"][data-ed-id="${id}"]`);
     const box = '#view-cash [data-ed-askbox="pick"]';
+    // `look`: only whether the payment is offered; the question is left as it was asked, and the card is shut.
+    if (look) { const has = (await pg2.$$eval(`${box} [data-ed-pick]`, (l) => l.map((e) => e.value))).includes(rowId); await pg2.click('#view-cash [data-ed-x]'); return has; }
     await pg2.check(`${box} [data-ed-pick][value="${rowId}"]`);
     const said = await text(pg2, `${box} [data-ed-picknote]`);
     await pg2.click('#view-cash [data-ed-go="pick"]');
@@ -8336,6 +8339,9 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   S = await holds(pg2, 'a payment short of its line', 'cash');
   const z = item(S.M, 'z@2026-10');
   same([z.done && z.done.by, z.done && z.done.rows, off(S.M).find((r) => r[0] === 'q3')], ['closed', ['q2'], ['q3', 400, null]], '… it does, by that payment alone: Halden\'s £400 is not dealt to it on top, and stands «вне плана»');
+  // A month of many payments: twelve of other names, each nearer in sum to «Halden Tiny» £150 than Halden's £400 -
+  // the payments of the line's own label come first all the same, and the one named for another line too.
+  same(await pick2('w', 'q3', true), true, 'the payments of the line\'s own label are offered first');
   same(await pick2('w', 'q3'), 'Этот платёж закроет: Halden Tiny £150 из £400. Остаток £250 встанет «вне плана».', 'that £400 for «Halden Tiny» £150: the question says the line takes its own sum, and the rest will stand «вне плана»');
   S = await holds(pg2, 'a line paid by part of a payment', 'cash');
   same([item(S.M, 'w').done && item(S.M, 'w').done.note, off(S.M).find((r) => r[0] === 'q3')], ['hand', ['q3', 250, { of: 400, took: 150 }]], '… and it does: the line is closed by the payment, and the £250 it did not take stands «вне плана», as a part');
