@@ -464,9 +464,12 @@ a deploy:
   choice is the hand tie `tx` plus `closed` (`Live.write.pick`), so nothing
   else of the label is dealt on top; «Ни один» clears both and writes the
   rows that closed the line into its `notx` (it is not offered on a line a
-  mark holds: «Вернуть в план» takes a mark back). A payment another line
-  holds by itself, picked for a second one, is tied to both, so neither is
-  owed again; one a withdrawal or a computed tax holds is not offered. A
+  mark holds: «Вернуть в план» takes a mark back). A payment the page dealt
+  to another line by itself leaves that line when it is picked for this one
+  - the founder names where it belongs, and the question says that line will
+  wait again; a payment that is that line's too is picked there as well.
+  Lines that hold it by hand keep it, and one payment pays them all. One a
+  withdrawal or a computed tax holds is not offered. A
   payment short of its line closes it at what came, at once, so nothing else
   of the label is dealt to it on top. One payment may close several
   lines, each at its own sum, and what a row tied by hand leaves over

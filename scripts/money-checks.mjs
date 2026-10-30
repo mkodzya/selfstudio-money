@@ -8284,10 +8284,14 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   same([item(S.M, 'porto@2026-10').done && item(S.M, 'porto@2026-10').done.rows], [['p2']], '«Halden Porto store» ← €1,300 of Halden: the line holds the payment named');
   const st = store.cash.doc.inflows.find((r) => r.id === 'porto').rec.x['2026-10'];
   same([st.tx, st.closed], [['p2'], true], '… stored as the founder\'s word: that row (tx), and nothing else of the label on top (closed)');
-  // Halden UK's £2,760 is held by «Halden London maint» by its label already; picked for «Halden CC maint», it
-  // closes both, and the question says so before.
+  // Halden UK's £2,760, which the page dealt to «Halden CC maint» whole, by its label: named for it by hand, the
+  // line takes its own sum, and the rest stands «вне плана» until another line is named for it.
   x = await pick('cc', 'p3');
-  same(x.said, 'Этот платёж закроет: Halden CC maint £1,680 + Halden London maint £1,080 = £2,760 из £2,760. Сходится.', 'the £2,760 payment for «Halden CC maint», which «Halden London maint» holds already: the question counts both lines, and they add up to it');
+  same(x.said, 'Этот платёж закроет: Halden CC maint £1,680 из £2,760. Остаток £1,080 встанет «вне плана».', 'the question says what «Halden CC maint» takes of the £2,760, and that the rest will stand «вне плана»');
+  S = await holds(pg, 'CC maint paid by part of Halden UK', 'cash');
+  same([off(S.M).find((r) => r[0] === 'p3'), (item(S.M, 'ldn@2026-10').rows || []).includes('p3')], [['p3', 1080, { of: 2760, took: 1680 }], false], '… and it does: the £1,080 the line did not take stands «вне плана» as a part, and «Halden London maint» no longer holds it');
+  x = await pick('ldn', 'p3');
+  same(x.said, 'Этот платёж закроет: Halden London maint £1,080 + Halden CC maint £1,680 = £2,760 из £2,760. Сходится.', 'the same payment for «Halden London maint» too: the two lines add up to it');
   S = await holds(pg, 'one payment for two lines', 'cash');
   same(['cc', 'ldn'].map((id) => item(S.M, id + '@2026-10').done && [item(S.M, id + '@2026-10').done.note, item(S.M, id + '@2026-10').done.rows]), [['hand', ['p3']], ['hand', ['p3']]], '… both lines closed by the one payment, by the founder\'s hand');
   same(await texts(pg, '#view-cash [data-cs-id="cc@2026-10"] [data-cs-rm], #view-cash [data-cs-id="ldn@2026-10"] [data-cs-rm]'), ['одним платежом с Halden London maint', 'одним платежом с Halden CC maint'], '… and each says which other line it was paid with');
@@ -8324,9 +8328,12 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   };
   S = await holds(pg2, 'two one-off lines paid in one payment', 'cash');
   same(['x', 'y'].map((id) => item(S.M, id).done && [item(S.M, id).done.note, item(S.M, id).done.rows]), [['sum', ['q1']], ['sum', ['q1']]], 'Halden\'s £900 closes «Halden Shop» and «Halden Extra» by itself, one payment for two invoices');
-  same(await pick2('x', 'q1'), 'Этот платёж закроет: Halden Shop £500 + Halden Extra £400 = £900 из £900. Сходится.', 'picked for «Halden Shop», the question counts the line that holds it too');
+  same(await pick2('x', 'q1'), 'Этот платёж закроет: Halden Shop £500 из £900. Остаток £400 встанет «вне плана». Сейчас он закрывает «Halden Extra»: та строка снова будет ждать платёж. Если он и за неё, выберите его и там.', 'picked for «Halden Shop», the question says the page\'s own deal to «Halden Extra» is undone');
   S = await holds(pg2, 'the payment picked where another line held it', 'cash');
-  same(['x', 'y'].map((id) => item(S.M, id).done && [item(S.M, id).done.note, item(S.M, id).done.rows]), [['hand', ['q1']], ['hand', ['q1']]], '… and both lines stay closed by it: «Halden Extra» keeps it, by hand now, and is not owed again');
+  same([item(S.M, 'x').done && [item(S.M, 'x').done.note, item(S.M, 'x').done.rows], (item(S.M, 'y').done ? item(S.M, 'y').done.rows : []).includes('q1')], [['hand', ['q1']], false], '… «Halden Shop» holds it by hand, and «Halden Extra» no longer');
+  same(await pick2('y', 'q1'), 'Этот платёж закроет: Halden Extra £400 + Halden Shop £500 = £900 из £900. Сходится.', 'chosen for «Halden Extra» too: one payment for the two invoices');
+  S = await holds(pg2, 'one payment for two lines, both by hand', 'cash');
+  same(['x', 'y'].map((id) => item(S.M, id).done && [item(S.M, id).done.note, item(S.M, id).done.rows]), [['hand', ['q1']], ['hand', ['q1']]], '… and both lines are closed by it');
   same(await pick2('z@2026-10', 'q2'), 'Строка закроется на том, что пришло: £600 из £1,000.', 'Marlow Retail\'s £600 for «Halden Big» £1,000: the line will close at what came');
   S = await holds(pg2, 'a payment short of its line', 'cash');
   const z = item(S.M, 'z@2026-10');
