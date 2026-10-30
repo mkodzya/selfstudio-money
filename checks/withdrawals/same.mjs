@@ -10,7 +10,8 @@
 //         before read them.
 //   W     what lib.cjs, `wCheck`, holds of a record and of a rest (W1, W2) - of every model, records or not.
 //   P     a table that holds no fee (lib.cjs, `hasFee`) is read as develop before the fees read it (pre.cjs, 008462e),
-//         byte for byte but for the fields the fees add (`bareFee`) - every model, memory and records or not.
+//         byte for byte but for the fields the fees add, accounts[].stmt and «Своих денег» (`bareFee`) - every model, memory and
+//         records or not.
 //   G     what lib.cjs, `gCheck`, holds of the fees (19 October 2026) - of every model whose table holds one: each fee
 //         once, in its month and bank; every account, and every line other than a withdrawal, as with the fees'
 //         words taken out.

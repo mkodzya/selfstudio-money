@@ -9,7 +9,7 @@
 //   N, D the plan and the table are read as they are with N and D written out (lib.cjs, `named`, `toOwn`), byte for byte
 //   W   what lib.cjs, `wCheck`, holds of every record and every rest (W1, W2)
 //   P   (19 October 2026) a table that holds no fee is read as develop before the fees read it (pre.cjs), byte for
-//       byte but for what the fees add (lib.cjs, `bareFee`)
+//       byte but for what the fees add, accounts[].stmt and «Своих денег» (lib.cjs, `bareFee`)
 //   G   what lib.cjs, `gCheck`, holds of the fees, where the table holds one (each fee once; every account and every line
 //       other than a withdrawal as with the fees' words taken out); D and W count a row without its fee
 // Every other life is given what the owner decided on 17 October 2026, by a stream of its own: a withdrawal or two
