@@ -2543,7 +2543,7 @@ await run('13 on screen', 'a late inflow leaves in two steps, and the card that 
   shows(S, { in: 12000, late: 4000, end: base.fig('end') + 4000 }, 'typed inflow Client E £4,000, 22 Sep — 13 days late: still expected');
   const need = '#view-today .td-need .op[data-td-card="7"] ';
   same([await text(pg, need + '.op-name'), await text(pg, need + '.op-text'), await texts(pg, need + '> .row button'), (await texts(pg, '#view-today .kpi .hint'))[3]],
-    ['Client E · £4,000', 'Ждали 22 сен, в выписках Wise GBP по 5 окт его нет · 13 дн. Из расчёта уберу через 8 дн.', ['Получено', 'Частично…', 'Выбрать платёж…', 'Перенести на…', 'Не придёт'], '1 клиент · дольше всех Client E, 13 дн.'], 'card 7 and the fifth figure say who, how long, and what happens next — with «Частично» as the third answer');
+    ['Client E · £4,000', 'Ждали 22 сен, в выписках Wise GBP по 5 окт его нет · 13 дн. Из расчёта уберу через 8 дн.', ['Получено', 'Частично…', 'Перенести на…', 'Не придёт'], '1 клиент · дольше всех Client E, 13 дн.'], 'card 7 and the fifth figure say who, how long, and what happens next — with «Частично» as the third answer');
   same(await drawn(pg, id), 'td-row | none | Client E | Wise · просрочено 13 дн. | +£4,000 | сегодня, вт 6 окт', '… and the row, under today, says it in plain small words');
   await calm(pg, 'with a card of «Нужно решить»');
   // «Перенести на…» opens the row's card inside the card of «Нужно решить», the cursor on the date.
