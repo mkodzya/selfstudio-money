@@ -6332,8 +6332,10 @@ await run('rule-use', '«Правила разноски» says what each rule h
     out('e1', '2026-10-01', -9, 'other', 'Example misc', 'Card transaction of 9.00 GBP issued by EXAMPLE SHOP'),
     out('s1', '2026-04-06', -150, 'other', 'Spring course', 'Sent money to Spring Course Ltd')];
   // «Разбор»: a card payment to EXAMPLE CLOUD the page has recognised by the first rule, and one to a vendor no rule knows.
-  const i1 = inbox('i1', '2026-10-05', -30, 'fixed', 'Example Cloud');
-  Object.assign(i1.o, { t: 'Card transaction of 30.00 GBP issued by EXAMPLE CLOUD', p: 'EXAMPLE CLOUD' });
+  // £20 is within the usual of its label (twice the median of 12, 12, 12 = £24), so it waits among the recognised rows
+  // with its «Изменить»: at £30 the hold for an unusual payment (big-pay) would keep it among «Проверьте» instead.
+  const i1 = inbox('i1', '2026-10-05', -20, 'fixed', 'Example Cloud');
+  Object.assign(i1.o, { t: 'Card transaction of 20.00 GBP issued by EXAMPLE CLOUD', p: 'EXAMPLE CLOUD' });
   const i2 = inbox('i2', '2026-10-05', -45, '', '', { auto: false });
   Object.assign(i2.o, { t: 'Card transaction of 45.00 GBP issued by NEW VENDOR CO', p: 'NEW VENDOR CO' });
   const pg = await scene('what each rule has filed', { ...ledger(TX, [i1, i2]), rules: RULES }, planX({ banks: [bal('Wise', 'GBP', 5000, '2026-10-01')] }));
@@ -8078,9 +8080,11 @@ await run('rv-oldtable', 'a window whose table is older than the stand\'s does n
 
   // A reader's window sends no save at all, so it names nothing; and the laptop's little server is sent no such member
   // (that page is not on a `finance.` host, and this file has no stand-in for it: the body is read off the page).
+  // Since 30 October 2026 the body sent as the tab closes is made by `light`, which starts from docOf() and keeps only
+  // as many of the journal's newest entries as fit the browser's 64 KiB: still the document with `base` in it.
   const src = fs.readFileSync(PUB + '/money/index.html', 'utf8');
-  const disk = /fetch\("\/api\/cash",\{method:"PUT"[^\n]*?body:JSON\.stringify\(Object\.assign\(docOf\(\),\{base:rev\}\)\)\}\)/.test(src), beacon = /sendBeacon\("\/api\/cash",new Blob\(\[JSON\.stringify\(Object\.assign\(docOf\(\),\{base:rev\}\)\)\]/.test(src);
-  same([disk, beacon, (src.match(/ledger:S\.rev/g) || []).length], [true, true, 1], 'the plan as the laptop tool is sent it - the document with `base` in it, and nothing else - is what it was: the table\'s revision is named in one place, the body for the stand');
+  const disk = /fetch\("\/api\/cash",\{method:"PUT"[^\n]*?body:JSON\.stringify\(Object\.assign\(docOf\(\),\{base:rev\}\)\)\}\)/.test(src), beacon = /sendBeacon\("\/api\/cash",new Blob\(\[light\(d=>JSON\.stringify\(Object\.assign\(d,\{base:rev\}\)\)\)\]/.test(src), lit = /function light\(make\)\{\s*const d=docOf\(\);/.test(src);
+  same([disk, beacon, lit, (src.match(/ledger:S\.rev/g) || []).length], [true, true, true, 1], 'the plan as the laptop tool is sent it - the document with `base` in it, and nothing else - is what it was (as the tab closes, through `light`, from docOf()): the table\'s revision is named in one place, the body for the stand');
 });
 
 // The rule of 13 October 2026 for the takings of a balance's own day. A statement row dated on the very day a
