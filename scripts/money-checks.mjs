@@ -6069,6 +6069,48 @@ await run('rv-stmt-bal', 'an account stands on the balance its statement prints 
   await pg.context().close();
 });
 
+await run('revolut-cols', 'a Revolut export is Revolut\'s by its columns, whatever its file is called - and read again it brings in nothing the page filed under Wise before', async () => {
+  // Prod, 30 October 2026: a Revolut statement whose file name did not say «revolut» was read as Wise's - the page
+  // knew Revolut by the name alone, and a file nothing names falls to Wise - and three of its rows went into the table
+  // as Wise GBP. One was moved to Revolut by hand in «Таблица»; two still stand under Wise. Their keys begin «Wise|»,
+  // and a row is known by its key: read as Revolut's, the same file would have brought all three in a second time.
+  // (A made-up statement of the same shape: the business account's columns, the newest row first.)
+  const HEAD = 'Date started (UTC),Date completed (UTC),ID,Type,State,Description,Reference,Payer,Card number,Card label,Card state,Orig currency,Orig amount,Payment currency,Amount,Total amount,Exchange rate,Fee,Fee currency,Balance,Account,Beneficiary account number,Beneficiary sort code or routing number,Beneficiary IBAN,Beneficiary BIC,MCC,Related transaction id,Spend program';
+  const line = ([d, id, type, text, amt, bal]) => [d, d, id, type, 'COMPLETED', text, '', '', '', '', '', 'GBP', amt.toFixed(2), 'GBP', amt.toFixed(2), amt.toFixed(2), '', '0.00', 'GBP', bal.toFixed(2), 'Main', '', '', '', '', '', '', ''].join(',');
+  const ROWS = [['2026-10-02', 'ex-0004', 'CARD_PAYMENT', 'To Example Tool', -12, 363], ['2026-10-02', 'ex-0003', 'TRANSFER', 'To Example Supplier Ltd', -100, 375],
+    ['2026-10-01', 'ex-0002', 'FEE', 'Revolut Business Fee', -25, 475], ['2026-10-01', 'ex-0001', 'TOPUP', 'Money added from Example Savings', 500, 500]];
+  const CSV = [HEAD, ...ROWS.map(line)].join('\n');
+  const PERSONAL = 'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\nTRANSFER,Current,2026-10-02 10:00:00,2026-10-02 10:00:05,To Example Tool,-12.00,0.00,GBP,COMPLETED,363.00';
+  // The three rows as the page filed them then: under Wise, each with the key it was given.
+  const then = (id, [d, tid, , text, amt], c, b) => ({ ...filed(id, d, amt, c, text, { b }), key: `Wise|${d}|${amt}|GBP|${tid}` });
+  const TX = [then('w1', ROWS[3], 'skip', 'Wise'), then('w2', ROWS[2], 'fixed', 'Wise'), then('w3', ROWS[1], 'fixed', 'Revolut')];
+  const pg = await scene('a Revolut statement named otherwise', ledger(TX), planX({ banks: [] }));
+  const read = (text, name) => pg.evaluate(([text, name]) => { const p = window.__tx.parseGrid(window.__tx.parseCSV(text), name); return [p.bank, p.defCur, p.was || '', p.rows.filter((r) => r.eb != null).map((r) => [r.d, r.a, r.eb])]; }, [text, name]);
+  same([await read(CSV, 'statement.csv'), await read(PERSONAL, 'account-statement_2026-10.csv')],
+    [['Revolut', 'GBP', 'Wise', [['2026-10-02', -12, 363]]], ['Revolut', 'GBP', 'Wise', []]],
+    'a file of Revolut\'s columns is Revolut\'s, in pounds, whatever its name - the business account\'s and the personal one\'s; the page is sure of it, so the balance after the newest row is what the account holds; and it says which bank it was read as before');
+  same([await read(CSV, 'revolut-oct.csv'), (await read(wiseCsv([['TRANSFER-1', '2026-10-02', -12, 'Sent money to Example Tool']]), 'statement.csv')).slice(0, 3)],
+    [['Revolut', 'GBP', '', [['2026-10-02', -12, 363]]], ['Wise', 'GBP', '']],
+    'a file whose name says Revolut was Revolut\'s before as well, and Wise\'s own columns are still Wise\'s');
+  // The file, dropped into «Загрузка».
+  const drop = () => pg.setInputFiles('#fileIn', { name: 'statement.csv', mimeType: 'text/csv', buffer: Buffer.from(CSV) });
+  const tx = () => (store.led.doc.tx || []).map((r) => [r.id, r.b, r.key]);
+  await drop();
+  await puts('led', 1);
+  same([(store.led.doc.inbox || []).map((r) => [r.b, r.key, r.o.t, r.o.bal]), tx(), await toastText(pg)],
+    [[['Revolut', 'Revolut|2026-10-02|-12|GBP|ex-0004', 'To Example Tool', 363]], TX.map((r) => [r.id, r.b, r.key]), 'Новых операций: 1'],
+    'only the row the table lacks comes in, under Revolut, with the balance after it; the three filed under Wise before are known by the keys they carry, and stay where they stand - two under Wise, one under Revolut - with nothing of theirs rewritten');
+  await pg.click('.nav [data-tab="settings"]');
+  await pg.click('#view-settings .set-nav [data-tabgo="upload"]');
+  same([await pg.$eval('#view-upload .file select[data-fbank]', (e) => e.value), await pg.$$eval('#view-upload .file .pill', (l) => l.map((e) => e.textContent))], ['Revolut', ['новых 1', 'уже были 3']], '«Загрузка» says the file is Revolut\'s, one row new and three there already');
+  // … and read once more, it brings nothing.
+  const rows = () => [tx(), (store.led.doc.inbox || []).map((r) => [r.id, r.b, r.key])], rows0 = JSON.stringify(rows());
+  await drop();
+  await sleep(1200);
+  same([await toastText(pg), JSON.stringify(rows()) === rows0], ['Новых операций нет: всё из этих файлов уже загружено', true], 'the same file read again brings nothing in: every row stands where it stood, under the key it had');
+  await pg.context().close();
+});
+
 // =====================================================================================================================
 // «ЧТО ЕСЛИ» (the owner's decision of 11 October 2026: «давай делать Что если», and of the two places to ask it -
 // «оба, делай»). A trial on a copy of the plan: the same engine, nothing saved, nothing else on the page moved.

@@ -1117,12 +1117,17 @@ function mapCols(hdr){
   if(i>=0)m[k]=i;}
  return m;
 }
+// Revolut's own export, known by its columns (30 October 2026): a statement whose file was named otherwise was read as
+// Wise's, and its rows were filed under Wise. Each set is a set of column names that, all together, only Revolut writes.
+const REV_COLS=[["date started (utc)","date completed (utc)"],["started date","completed date","product"]];
+const revolutCols=hdr=>{const h=hdr.map(x=>String(x||"").trim().toLowerCase());return REV_COLS.some(s=>s.every(c=>h.includes(c)));};
 function guessBank(name,hdr){
  const n=name.toLowerCase(),h=hdr.join("|").toLowerCase();
  if(/wise|transferwise/.test(n)||h.includes("transferwise id"))return "Wise";
  if(/barclays/.test(n)||(h.includes("subcategory")&&h.includes("memo")))return "Barclays";
  if(/tochka|точка/.test(n)||/[а-я]/.test(h))return "Tochka";
  if(/mosta/.test(n))return "Mosta";if(/nebeus/.test(n))return "Nebeus";if(/revolut/.test(n))return "Revolut";
+ if(revolutCols(hdr))return "Revolut";
  return "";
 }
 // A wallet's export of its orders (Mosta's «wallet-orders»): a row is an order, not a line of a statement, and no sum
@@ -1165,7 +1170,11 @@ function parseGrid(grid,name){
  // (`sure`: the file's name or its own columns say whose statement this is. A bank guessed from less - Cyrillic
  // headers are taken for Tochka's - is good enough to file rows under until somebody corrects it, and not good enough
  // to say what an account holds.)
- const hdr=grid[hi].map(x=>String(x||"")),known=guessBank(name,hdr),hl=hdr.join("|").toLowerCase(),sure=/wise|barclays|tochka|точка|mosta|nebeus|revolut/i.test(name)||hl.includes("transferwise id")||(hl.includes("subcategory")&&hl.includes("memo"))||hl.includes("инн плательщика"),bank=known||"Wise",defCur=bank==="Tochka"?"RUB":"GBP",rows=[],accs={};let odd=false;
+ // (`was`: the bank the page filed such a file under before it knew Revolut by its columns - Wise, the bank a file
+ // nothing names falls to. Its rows already in the table carry keys that begin «Wise|», and ingest finds them by
+ // those too: read again, the file brings none of them in a second time, and nothing stored is rewritten.)
+ const hdr=grid[hi].map(x=>String(x||"")),known=guessBank(name,hdr),hl=hdr.join("|").toLowerCase(),sure=/wise|barclays|tochka|точка|mosta|nebeus|revolut/i.test(name)||hl.includes("transferwise id")||(hl.includes("subcategory")&&hl.includes("memo"))||hl.includes("инн плательщика")||revolutCols(hdr),bank=known||"Wise",defCur=bank==="Tochka"?"RUB":"GBP",rows=[],accs={};let odd=false;
+ const was=bank==="Revolut"&&!/revolut/i.test(name)?"Wise":"";
  for(let i=hi+1;i<grid.length;i++){const r=grid[i];if(!r||!r.length)continue;
   const d=parseDate(r[map.date]);
   let a=map.amount!=null?parseNum(r[map.amount]):NaN;
@@ -1194,7 +1203,7 @@ function parseGrid(grid,name){
  // (A fee is folded into its payment, and the balance after it goes with the payment - unless that takes it back to an
  // earlier day than another row's: then the file's last day is not the day the balance is of.)
  const out=foldFees(rows,defCur);out.forEach(r=>{if(r.eb!=null&&out.some(q=>q.cur===r.cur&&q.d>r.d))delete r.eb;});
- return{bank,defCur,rows:out,cols:Object.keys(map).length,acn:Object.keys(accs).sort((x,y)=>accs[y]-accs[x])[0]||""};
+ return Object.assign({bank,defCur,rows:out,cols:Object.keys(map).length,acn:Object.keys(accs).sort((x,y)=>accs[y]-accs[x])[0]||""},was?{was}:{});
 }
 // The statement's own balance (the owner's decision of 9 October 2026: «бери остатки из выписок»). A statement that
 // prints what the account stood at after every row says, by its last row, what the account holds - nobody has to
@@ -1397,7 +1406,11 @@ function unpair(r){if(!r.pair)return;const m=S.inbox.find(q=>q.pair===r.pair&&q!
 // only if the row came after the line was typed: a payment that was already on the page is not the one still awaited.
 function ingest(parsed,file,src){
  const keys=new Map(S.tx.concat(S.inbox).map(r=>[r.key,r])),at=Date.now(),ends=[],months=new Set();let added=0,dup=0,late=false;
- const keyOf=p=>[file.bank+(file.acc?"·"+file.acc:""),p.d,p.a,p.cur||file.cur,p.tid||norm(p.t+" "+p.p).slice(0,60)].join("|"),mine=new Set(parsed.rows.map(keyOf));
+ // (A row is known by its key - and, for a file the page once read as another bank's (`was`, parseGrid), by the key
+ // it was filed under then as well: the same row, already in the table, keeps the key it has.)
+ const was=parsed.was&&parsed.was!==file.bank?parsed.was:"";
+ const keyOf=(p,b)=>[(b||file.bank)+(file.acc?"·"+file.acc:""),p.d,p.a,p.cur||file.cur,p.tid||norm(p.t+" "+p.p).slice(0,60)].join("|"),keysOf=p=>was?[keyOf(p),keyOf(p,was)]:[keyOf(p)];
+ const mine=new Set([].concat(...parsed.rows.map(keysOf)));
  // What the statement says the account stood at after the row it ends at goes onto that row:
  //   o.bal    the balance;
  //   o.balAt  when the statement was made - the file's own time, never later than now. That, and not the moment the
@@ -1415,8 +1428,8 @@ function ingest(parsed,file,src){
  const mark=(r,p)=>{if(p.eb==null||!r.o||r.d!==p.d||r.b!==file.bank)return;if(behind(r)){late=true;return;}
   ends.push({cur:r.o.cur,d:r.d,v:p.eb});r.o.balAt=r.o.bal===p.eb?Math.max(+r.o.balAt||0,made):made;r.o.bal=p.eb;r.o.balIn=at;if(S.tx.includes(r))months.add(r.d.slice(0,7));};
  parsed.rows.forEach(p=>{
-  const cur=p.cur||file.cur,key=keyOf(p);
-  if(keys.has(key)){dup++;mark(keys.get(key),p);return;}
+  const cur=p.cur||file.cur,key=keyOf(p),hit=keysOf(p).find(k=>keys.has(k));
+  if(hit){dup++;mark(keys.get(hit),p);return;}
   const r={id:uid(),f:file.id,d:p.d,b:file.bank,ac:file.acc||file.acn||"",dir:p.a>0?1:-1,a:0,o:Object.assign({a:p.a,cur,t:p.t,p:p.p,h:p.h,fix:p.hasCur},p.own?{own:true}:{}),key,s:src,at};
   keys.set(key,r);mark(r,p);
   reprice(r);classify(r);r.twin=findTwin(r);S.inbox.push(r);added++;});
@@ -1848,7 +1861,7 @@ function renderUpload(){
  $("#view-upload").innerHTML=`${setNav("upload")}
  <div class="page-head"><div><h1>Загрузка <em>выписок</em></h1><div class="page-sub">раз в неделю · все банки сразу</div></div>
   <div class="row"><button data-demo class="ghost">Показать на примере</button></div></div>
- <label class="drop" id="drop"><input type="file" id="fileIn" multiple accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" aria-label="Выбрать файлы выписок"><b>Перетащите выписки сюда</b><span class="note">или нажмите, чтобы выбрать файлы. Перетащить можно на любую страницу.<br>Wise, Barclays, Tochka, Mosta, Nebeus · CSV, Excel и PDF</span></label>
+ <label class="drop" id="drop"><input type="file" id="fileIn" multiple accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" aria-label="Выбрать файлы выписок"><b>Перетащите выписки сюда</b><span class="note">или нажмите, чтобы выбрать файлы. Перетащить можно на любую страницу.<br>Wise, Barclays, Tochka, Mosta, Nebeus, Revolut · CSV, Excel и PDF</span></label>
  ${S.files.length?`<section class="card"><h2>Загружено в этот раз${ui.lastTr?`<span class="note">переводов между своими убрано без вашего участия: ${ui.lastTr}</span>`:""}</h2><div class="files">${S.files.map(f=>f.error?
    `<div class="file err"><div class="fn">${esc(f.name)}</div><div>${esc(f.error)}</div></div>`:
    `<div class="file"><div class="fn" title="${esc(f.name)}">${esc(f.name)}${f.demo?' <span class="pill info">пример</span>':""}</div>
