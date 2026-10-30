@@ -7935,6 +7935,12 @@ await run('fees', 'a bank\'s fee is a line of its own, per bank, from October 20
     'a line written at the amount that left the bank is closed by its row: COGS 970 and the fee 30 make the 1,000 the page before counted, and «Можно вывести» is what it was');
   // September, the sheet's, is what it was, to the byte - and so is the statement row of 28 Sep whose text says a fee
   // (both pages hold the same table: it was served before either opened)
+  // (A page that opens over this table files its sure transfers between own accounts from «Разбор» and saves -
+  // settle() - so the page without the fees saves once as it opens. The table is served afresh after that save,
+  // or the second page's own save would find the first one's revision and be refused: a race of the two pages
+  // here, not a fault of either.)
+  await puts('led', 1);
+  serve(L, P);
   const pg = await open('fees', AT17), sep1 = await pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sep2 = await nf.pg.evaluate(() => JSON.stringify(window.__tx.agg('2026-09'))), sepO = JSON.parse(sep1);
   same([sep1 === sep2, sepO.cogs, sepO.fixed, sepO.other, sepO.misha, sepO.rev, sepO.fee], [true, 2000, 17, 100.4, 900, 800, 0],
     'September in «Месяцы» is what the page before the fees counted, byte for byte: the sheet\'s rows, and the statement row of 28 Sep at its whole 100.40 - no fee before October');
@@ -8217,6 +8223,27 @@ await run('tax-split', '«Разделить…»: one HMRC payment is Mika\'s a
   await months(pg);
   same((await kpi(pg, 'mika'))['Личные налоги'], '£0', '… and the payment is the studio\'s tax again');
   await pg.context().close();
+  // A payment filed as one founder's («HMRC Mika») keeps its label when it is split: «Касса» reads it by the label,
+  // and so as it did (the review of 30 October 2026: the split used to rename it «HMRC», which moved it to the
+  // studio's taxes in the plan).
+  const mine = () => { const r = hm(); r.l = 'HMRC Mika'; return r; };
+  pg = await scene('tax whole mika', ledger([], [mine()]), P());
+  await pg.click('.nav [data-tab="inbox"]');
+  await pg.click('#view-inbox .op[data-id="h1"] [data-accept]');
+  await puts('led', 1);
+  const wholeMika = plan((await holds(pg, 'Mika\'s payment taken whole', 'cash')).M);
+  await pg.context().close();
+  pg = await scene('tax split mika', ledger([], [mine()]), P());
+  await pg.click('.nav [data-tab="inbox"]');
+  await pg.click('#view-inbox .op[data-id="h1"] [data-taxsplit]');
+  await pg.fill('#view-inbox .op[data-id="h1"] [data-spf="mika"]', '1200');
+  await pg.click('#view-inbox .op[data-id="h1"] [data-sprest="vanya"]');
+  await pg.click('#view-inbox .op[data-id="h1"] [data-spok]');
+  await pg.click('#view-inbox .op[data-id="h1"] [data-accept]');
+  await puts('led', 1);
+  same(store.led.doc.tx.find((x) => x.id === 'h1').l, 'HMRC Mika', 'a payment filed as Mika\'s keeps its label when it is split');
+  same(plan((await holds(pg, 'Mika\'s payment split', 'cash')).M), wholeMika, '… and «Касса» reads it exactly as the whole one');
+  await pg.context().close();
 });
 
 // «Выбрать платёж…» (the owner's decision of 30 October 2026, «да»): the page deals the payments of one label to
@@ -8252,17 +8279,15 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   const off = (M) => M.months.by['2026-10'].off.by.inflows.rows.map((r) => [r.id, r.amt, r.part || null]);
   let S, x;
   x = await pick('porto', 'p2');
-  same(x.offered.slice().sort(), ['', 'p1', 'p2', 'p3'], 'the question offers the month\'s three payments of any name, and «Ни один»');
+  same(x.offered.slice().sort(), ['p1', 'p2', 'p3'], 'the question offers the month\'s three payments of any name (and no «Ни один» on a line that holds none)');
   S = await holds(pg, 'Porto store paid by Halden Italia', 'cash');
   same([item(S.M, 'porto@2026-10').done && item(S.M, 'porto@2026-10').done.rows], [['p2']], '«Halden Porto store» ← €1,300 of Halden: the line holds the payment named');
   const st = store.cash.doc.inflows.find((r) => r.id === 'porto').rec.x['2026-10'];
   same([st.tx, st.closed], [['p2'], true], '… stored as the founder\'s word: that row (tx), and nothing else of the label on top (closed)');
+  // Halden UK's £2,760 is held by «Halden London maint» by its label already; picked for «Halden CC maint», it
+  // closes both, and the question says so before.
   x = await pick('cc', 'p3');
-  same(x.said, 'Этот платёж закроет: Halden CC maint £1,680 из £2,760. Остаток £1,080 встанет «вне плана».', 'the question says what one line takes of the £2,760 payment, and that the rest will stand «вне плана»');
-  S = await holds(pg, 'CC maint paid by part of Halden UK', 'cash');
-  same(off(S.M).find((r) => r[0] === 'p3'), ['p3', 1080, { of: 2760, took: 1680 }], '… and it does: the £1,080 the line did not take, as a part of the payment');
-  x = await pick('ldn', 'p3');
-  same(x.said, 'Этот платёж закроет: Halden London maint £1,080 + Halden CC maint £1,680 = £2,760 из £2,760. Сходится.', 'the same payment for a second line: the two lines add up to it');
+  same(x.said, 'Этот платёж закроет: Halden CC maint £1,680 + Halden London maint £1,080 = £2,760 из £2,760. Сходится.', 'the £2,760 payment for «Halden CC maint», which «Halden London maint» holds already: the question counts both lines, and they add up to it');
   S = await holds(pg, 'one payment for two lines', 'cash');
   same(['cc', 'ldn'].map((id) => item(S.M, id + '@2026-10').done && [item(S.M, id + '@2026-10').done.note, item(S.M, id + '@2026-10').done.rows]), [['hand', ['p3']], ['hand', ['p3']]], '… both lines closed by the one payment, by the founder\'s hand');
   same(await texts(pg, '#view-cash [data-cs-id="cc@2026-10"] [data-cs-rm], #view-cash [data-cs-id="ldn@2026-10"] [data-cs-rm]'), ['одним платежом с Halden London maint', 'одним платежом с Halden CC maint'], '… and each says which other line it was paid with');
@@ -8277,6 +8302,39 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   const st2 = store.cash.doc.inflows.find((r) => r.id === 'porto').rec.x['2026-10'];
   same([st2.tx, st2.closed, st2.notx], [undefined, undefined, ['p2']], '… stored: no payment by hand, and that one is not this line\'s');
   await pg.context().close();
+  // (The review of 30 October 2026.) A payment another line holds by itself, picked for a second line, closes both -
+  // the first keeps it, by hand now; and a payment short of its line closes it at what came, with nothing else of
+  // the label dealt to it on top.
+  const pg2 = await scene('pick pay 2', ledger([
+    filed('q1', '2026-10-02', 900, 'rev', 'Halden', { at: UP }),
+    filed('q2', '2026-10-02', 600, 'rev', 'Marlow Retail', { at: UP }),
+    filed('q3', '2026-10-03', 400, 'rev', 'Halden', { at: UP }),
+  ]), planP({ inflows: [row('x', 'Halden Shop', 500, '2026-10-02'), row('y', 'Halden Extra', 400, '2026-10-02'), every('z', 'Halden Big', 1000, 3, '2026-10'), row('w', 'Halden Tiny', 150, '2026-10-03')] }), { h: 1600 });
+  await pg2.click('.nav [data-tab="cash"]');
+  n = store.cash.puts;
+  const pick2 = async (id, rowId) => {
+    await pg2.click(`#view-cash [data-ed-open="${id}"]`);
+    await pg2.click(`#view-cash [data-ed-do="pick"][data-ed-id="${id}"]`);
+    const box = '#view-cash [data-ed-askbox="pick"]';
+    await pg2.check(`${box} [data-ed-pick][value="${rowId}"]`);
+    const said = await text(pg2, `${box} [data-ed-picknote]`);
+    await pg2.click('#view-cash [data-ed-go="pick"]');
+    await puts('cash', ++n);
+    return said;
+  };
+  S = await holds(pg2, 'two one-off lines paid in one payment', 'cash');
+  same(['x', 'y'].map((id) => item(S.M, id).done && [item(S.M, id).done.note, item(S.M, id).done.rows]), [['sum', ['q1']], ['sum', ['q1']]], 'Halden\'s £900 closes «Halden Shop» and «Halden Extra» by itself, one payment for two invoices');
+  same(await pick2('x', 'q1'), 'Этот платёж закроет: Halden Shop £500 + Halden Extra £400 = £900 из £900. Сходится.', 'picked for «Halden Shop», the question counts the line that holds it too');
+  S = await holds(pg2, 'the payment picked where another line held it', 'cash');
+  same(['x', 'y'].map((id) => item(S.M, id).done && [item(S.M, id).done.note, item(S.M, id).done.rows]), [['hand', ['q1']], ['hand', ['q1']]], '… and both lines stay closed by it: «Halden Extra» keeps it, by hand now, and is not owed again');
+  same(await pick2('z@2026-10', 'q2'), 'Строка закроется на том, что пришло: £600 из £1,000.', 'Marlow Retail\'s £600 for «Halden Big» £1,000: the line will close at what came');
+  S = await holds(pg2, 'a payment short of its line', 'cash');
+  const z = item(S.M, 'z@2026-10');
+  same([z.done && z.done.by, z.done && z.done.rows, off(S.M).find((r) => r[0] === 'q3')], ['closed', ['q2'], ['q3', 400, null]], '… it does, by that payment alone: Halden\'s £400 is not dealt to it on top, and stands «вне плана»');
+  same(await pick2('w', 'q3'), 'Этот платёж закроет: Halden Tiny £150 из £400. Остаток £250 встанет «вне плана».', 'that £400 for «Halden Tiny» £150: the question says the line takes its own sum, and the rest will stand «вне плана»');
+  S = await holds(pg2, 'a line paid by part of a payment', 'cash');
+  same([item(S.M, 'w').done && item(S.M, 'w').done.note, off(S.M).find((r) => r[0] === 'q3')], ['hand', ['q3', 250, { of: 400, took: 150 }]], '… and it does: the line is closed by the payment, and the £250 it did not take stands «вне плана», as a part');
+  await pg2.context().close();
 });
 
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
