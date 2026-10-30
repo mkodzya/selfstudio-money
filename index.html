@@ -698,6 +698,12 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .ed-ask .fld{max-width:220px}
 .ed-ask .fld input{width:100%;font-family:var(--mono);font-size:12px}
 .ed-pay{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)}
+/* «Выбрать платёж…»: the payments that could be this line's, one quiet line each, chosen with a radio. */
+.ed-pks{display:flex;flex-direction:column}
+.ed-pk{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
+.ed-pk input{margin:0;flex:0 0 auto;accent-color:var(--accent)}
+.ed-pk .note{font-size:12px}
+.ed-pk .ed-pk-a{margin-left:auto}
 /* «Настройки»: the tax rules, each a card of its own; the clients, each a line with a two-way switch. */
 .ed-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:14px}
 .ed-rule{border:1px solid var(--border-strong);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -1360,7 +1366,7 @@ const alias=l=>{const k=String(l||"").trim(),a=S.aliases,v=a&&Object.prototype.h
 // text with two «(fee: …)» apart had one of them written twice, and Live.fee counted it twice: the review of
 // 19 October 2026. A text with one or none is cut exactly as before.)
 const text120=s=>{s=String(s||"");if(s.length<=120)return s;const re=/\(fee:[^)]*\)/gi,fz=s.match(re)||[],h=s.slice(0,120);if((h.match(re)||[]).length===fz.length)return h;const f=fz.join(" ");return s.replace(re,"").slice(0,Math.max(0,119-f.length))+" "+f;};
-const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:text120(r.o.t||r.o.p)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;t.o.balIn=+r.o.balIn||+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;return t;};
+const toTx=r=>{const t={id:r.id,d:r.d,a:round2(r.a*sgn(r)),c:r.c,b:r.b,l:r.c==="cogs"?alias(r.l):(r.l||""),v:r.c==="rev"?(+r.v||0):0,s:r.s,o:{a:r.o.a,cur:r.o.cur,t:text120(r.o.t||r.o.p)},key:r.key};if(r.o.r>0){t.o.r=r.o.r;if(r.o.rd)t.o.rd=r.o.rd;}if(isFinite(r.o.bal)&&r.o.balAt>0){t.o.bal=+r.o.bal;t.o.balAt=+r.o.balAt;t.o.balIn=+r.o.balIn||+r.o.balAt;}if(r.c==="skip"&&r.pair)t.pair=r.pair;if(r.ac)t.ac=r.ac;if(r.at)t.at=r.at;if(r.c==="tax"&&Array.isArray(r.split))t.split=r.split.map(p=>({f:p.f,n:+p.n}));return t;};
 function settle(){
  const known=q=>{const k=seenKey(q);return k&&S.ownSeen.includes(k);};
  S.inbox.filter(r=>r.maybe).forEach(r=>{const legs=[r,S.inbox.find(q=>q.pair===r.pair&&q!==r)].filter(Boolean);if(legs.some(known))legs.forEach(q=>{q.c="skip";q.l="";q.v=0;q.auto=true;q.maybe=false;});});
@@ -1479,6 +1485,8 @@ function undo(){
  saveMonths([...ms]);saveRules();saveSettings();saveInbox();renderAll();toast("Отменено");
 }
 function accept(ids){
+ // A row whose «Разделить…» stands open waits: what was typed there is not confirmed, and would be lost.
+ if(ui.split&&ids.includes(ui.split.id)){ids=ids.filter(id=>id!==ui.split.id);if(!ids.length){toast("Сначала «Готово» или «Отмена» в «Разделить…»");return 0;}}
  snap();const yms=[];let learned=0,n=0;
  let need=null;
  ids.forEach(id=>{const r=S.inbox.find(x=>x.id===id);if(!r||!r.c)return;
@@ -1499,7 +1507,7 @@ function months(){const s=new Set(Object.keys(S.history));S.tx.forEach(r=>{if(!o
 // A founder's personal tax (HMRC Mika, HMRC Vanya) sits in the TAXES block on the sheet, and stays there in the
 // ledger. But it is that founder's money leaving the studio, so every total counts it as their withdrawal and
 // keeps a note of how much of the withdrawal was tax. "Taxes" in the totals is then the studio's own.
-const owner=r=>{if(r.c!=="tax")return "";const l=(r.l||"").toLowerCase();return /\bmika?\b/.test(l)?"mika":/\bvanya\b/.test(l)?"vanya":/\bmisha\b/.test(l)?"misha":"";};
+const owner=r=>{if(r.c!=="tax")return "";if(typeof r.pw==="string")return r.pw;const l=(r.l||"").toLowerCase();return /\bmika?\b/.test(l)?"mika":/\bvanya\b/.test(l)?"vanya":/\bmisha\b/.test(l)?"misha":"";};
 const cat=r=>owner(r)||r.c;
 // A transfer between own accounts: filed so, or - from October 2026 - a move to (or back from) a founder's Daily or Monthly account
 // (the owner's decision of 17 October 2026, Live.daily). Neither is in a block, a total, «Месяцы» or «Отчёты»; both
@@ -1537,7 +1545,22 @@ const fGroup=r=>{if(r.c==="tax")return FG.tax;const l=(r.l||"").trim().toLowerCa
 // nothing stored is touched. A table with no fee in it is counted exactly as before.
 const FEECAT={k:"fee",name:"BANK FEES",ru:"Банковские комиссии",lab:"Bank"};CAT.fee=FEECAT;
 const netOf=(r,f)=>f&&!f.whole?round2(r.a-Math.sign(r.a)*f.g):r.a;
-function counted(list){const out=[];list.forEach(r=>{const f=Live.fee(r);
+// A personal tax paid in one payment for more than one founder (the owner's decision of 30 October 2026: «мне нужно
+// разделить этот платеж в отчете … в налоговую я отправляю 1 платеж а не 2 отдельных», and «А»). The row stays the
+// bank's one payment - its key, amount, label and block as they were - and holds beside them whose parts it is:
+// `split:[{f,n}]`, f a founder or "" the studio, n in the statement's own currency, the parts adding up to the
+// payment. «Месяцы» and «Отчёты» count each part as that one's tax (counted: a copy per part, `pw` its founder,
+// which owner reads first). The plan reads the row as before, by its label: in «Касса» and «Сегодня» it stays one
+// payment and closes the line it always closed («А»). A split that does not add up - a payment with a bank's fee
+// inside, a part of nobody, a block other than «Налоги» - is none: the row is counted whole, as without one.
+const SPLITF=["","mika","misha","vanya"];
+function splitOf(r){if(!r||r.c!=="tax"||!Array.isArray(r.split)||!r.o||!(Math.abs(+r.o.a)>0)||Live.fee(r))return null;
+ const p=r.split,seen=new Set();if(p.length<2||p.length>SPLITF.length)return null;
+ for(const x of p){if(!x||!SPLITF.includes(x.f)||seen.has(x.f)||!(+x.n>0))return null;seen.add(x.f);}
+ const s=p.reduce((a,x)=>a+(+x.n),0);if(Math.abs(s-Math.abs(+r.o.a))>0.011)return null;
+ let left=round2(r.a);return p.map((x,i)=>{const g=i===p.length-1?left:round2(r.a*(+x.n)/s);left=round2(left-g);return{f:x.f,n:+x.n,g};});}
+const splitWords=(sp,cur)=>sp.map(x=>`${x.f?FN[x.f]:"студии"} ${fmt(x.n,x.n%1?2:0,SYM[cur]||"")}`).join(" · ");
+function counted(list){const out=[];list.forEach(r=>{const sp=splitOf(r);if(sp){sp.forEach((x,i)=>out.push(Object.assign({},r,{a:x.g,pw:x.f,pn:i})));return;}const f=Live.fee(r);
   if(!ownTr(r)&&!(f&&f.whole))out.push(f?Object.assign({},r,{a:netOf(r,f),feeIn:f.g}):r);
   if(f)out.push({id:r.id,d:r.d,b:r.b,c:"fee",l:f.bank,a:f.g,v:0,s:r.s,o:r.o,isFee:true,whole:f.whole,cur:f.cur,n:f.n});});return out;}
 // What a list of fees comes to, bank by bank, in the bank's own currency and in pounds - «Wise £3.20 · Tochka
@@ -1917,6 +1940,25 @@ function rowState(r){return r.maybe?"tr":r.twin?"dup":!r.c?"ask":r.auto?"ok":"ne
 const CHIPS=CATS.map(c=>[c.k,c.ru]).concat([["skip","Свой перевод"]]);
 const acTag=r=>esc(r.b)+(r.ac?" ·"+esc(r.ac.slice(-4)):"");
 const origAmt=r=>(r.dir>0?"+":"−")+fmt(Math.abs(r.o.a),2,SYM[r.o.cur]||"");
+// «Разделить…»: whose parts a tax payment holds, typed in the statement's currency; what is left over is one
+// person's - the studio's unless another is pressed - so one founder's part and «Остаток — Vanya» are one figure and a press.
+// The form stands where the «Чей налог» chips stood, in «Разбор» and in the card of «Таблица».
+const spRow=id=>S.inbox.find(q=>q.id===id)||S.tx.find(q=>q.id===id);
+function splitDraft(r){const st=ui.split,tot=Math.abs(+r.o.a),by={};let s=0;FOUNDERS.forEach(k=>{const n=round2(+st.v[k]||0);if(n>0){by[k]=n;s=round2(s+n);}});
+ const left=round2(tot-s);if(left>0.005)by[st.rest]=round2((by[st.rest]||0)+left);
+ return{left,parts:SPLITF.filter(k=>by[k]>0).map(k=>({f:k,n:by[k]}))};}
+function splitNote(r){const{left,parts}=splitDraft(r),cur=r.o.cur||"GBP";
+ if(left<-0.005)return `Части больше платежа на ${fmt(-left,2,SYM[cur]||"")}: уменьшите одну из них.`;
+ if(!FOUNDERS.some(k=>+ui.split.v[k]>0))return "Впишите хотя бы одну часть: остаток страница посчитает сама.";
+ return `Получится: ${splitWords(parts,cur)}.${parts.length<2?" Это весь платёж одного — как кнопка с его именем.":""}`;}
+function splitForm(r){const st=ui.split,cur=r.o.cur||"GBP",sym=(SYM[cur]||cur).trim(),tot=Math.abs(+r.o.a);
+ const chip=(k,nm)=>`<button class="chip${st.rest===k?" active":""}" data-sprest="${k}" aria-pressed="${st.rest===k}">${nm}</button>`;
+ return `<div class="ed-ask sp-ask" data-sp-row="${esc(r.id)}"><b>Как разделить ${fmt(tot,tot%1?2:0,SYM[cur]||"")}</b>
+  <div class="ed-grid sp-grid">${FOUNDERS.map(k=>`<label class="fld" for="sp-${k}-${esc(r.id)}"><span>${FN[k]}, ${esc(sym)}</span><input id="sp-${k}-${esc(r.id)}" data-spf="${k}" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(st.v[k]||"")}" placeholder="0"></label>`).join("")}</div>
+  <div class="op-chips" role="group" aria-label="Чей остаток"><span class="lbl" style="align-self:center">Остаток</span>${chip("","Студии")}${FOUNDERS.map(k=>chip(k,FN[k])).join("")}</div>
+  <span class="note" data-spnote>${esc(splitNote(r))}</span>
+  <div class="row"><button class="sm primary" data-spok>Готово</button><button class="sm ghost" data-spx>Отмена</button></div></div>`;}
+const splitSaid=r=>`<div class="op-chips sp-said" role="group" aria-label="Чей налог"><span class="lbl" style="align-self:center">Чей налог</span><span>Разделён: ${esc(splitWords(splitOf(r),r.o.cur||"GBP"))}</span><button class="sm ghost" data-spedit="${esc(r.id)}">Изменить</button><button class="sm ghost" data-spnone="${esc(r.id)}">Не делить</button></div>`;
 function opCard(r,st){
  const twin=r.twin&&S.tx.find(x=>x.id===r.twin),lab=r.c&&CAT[r.c]?(CAT[r.c].lab==="Project"?"Проект":CAT[r.c].lab==="Person"?"Кому":"Подпись"):"";
  return `<article class="op ${st}" data-id="${r.id}">
@@ -1925,7 +1967,7 @@ function opCard(r,st){
   <div><div class="op-name">${esc(r.o.p||r.o.t||"—")}</div>${r.o.p&&r.o.t?`<div class="op-text">${esc(r.o.t)}</div>`:""}</div>
   ${twin?`<div class="op-warn"><span>Похожая строка уже есть в таблице: ${dShort(twin.d)} · ${esc(twin.l||CAT[twin.c].ru)} · ${fmt(twin.a,2)}</span><button class="sm" data-drop>Это повтор, убрать</button><button class="sm" data-nottwin>Нет, это новая</button></div>`:""}
   <div class="op-chips" role="group" aria-label="Блок">${CHIPS.map(([k,n])=>`<button class="chip${r.c===k?" active":""}" data-setc="${k}" aria-pressed="${r.c===k}">${n}</button>`).join("")}</div>
-  ${r.c==="tax"?`<div class="op-chips" role="group" aria-label="Чей налог"><span class="lbl" style="align-self:center">Чей налог</span>${[["","Студии"],["mika","Mika"],["misha","Misha"],["vanya","Vanya"]].map(([k,nm])=>`<button class="chip${owner(r)===k?" active":""}" data-taxowner="${k}" aria-pressed="${owner(r)===k}">${nm}</button>`).join("")}</div>`:""}
+  ${r.c==="tax"?(ui.split&&ui.split.id===r.id?splitForm(r):splitOf(r)?splitSaid(r):`<div class="op-chips" role="group" aria-label="Чей налог"><span class="lbl" style="align-self:center">Чей налог</span>${[["","Студии"],["mika","Mika"],["misha","Misha"],["vanya","Vanya"]].map(([k,nm])=>`<button class="chip${owner(r)===k?" active":""}" data-taxowner="${k}" aria-pressed="${owner(r)===k}">${nm}</button>`).join("")}${Live.fee(r)?"":`<button class="chip" data-taxsplit="${esc(r.id)}" aria-pressed="false">Разделить…</button>`}</div>`):""}
   <div class="op-foot">
    ${lab?`<label class="fld" for="l-${r.id}"><span>${lab}</span><input class="lab" id="l-${r.id}" data-f="l" list="labs-${r.c}" value="${esc(r.l||"")}" placeholder="${r.c==="rev"||r.c==="cogs"?"новое название или из списка":"можно оставить пустым"}" autocomplete="off"></label>`:""}
    ${r.c==="rev"&&(r.o.cur==="GBP"||+r.v>0)?`<label class="fld vat" for="v-${r.id}"><span>VAT, £</span><input class="vat" id="v-${r.id}" data-f="v" type="number" step="any" value="${r.v||""}" placeholder="0"></label>`:""}
@@ -1987,12 +2029,13 @@ function renderLedger(){
    <label for="e-c">Блок<select id="e-c">${catOpts(e.c)}</select></label><label for="e-l">Подпись<input id="e-l" value="${esc(e.l||"")}"></label>
    <label for="e-b">Банк<select id="e-b">${opt(BANKS.map(b=>[b,b]),e.b)}</select></label><label for="e-v">VAT<input id="e-v" type="number" step="any" value="${e.v||""}" style="width:90px"></label>
    <button class="primary" data-esave>Сохранить</button><button data-edel>Удалить</button><button data-eclose>Закрыть</button></div>
-   ${e.o?`<div class="note" style="margin-top:8px">В выписке: ${esc(e.o.t||"")} · ${fmt(Math.abs(e.o.a),2,SYM[e.o.cur]||"")}${(f=>f?f.whole?" · вся строка — комиссия банка, в блок не входит":` · в т.ч. комиссия банка ${fmt(f.n,2,SYM[f.cur]||"")}: в блоке строка без неё`:"")(Live.fee(e))}</div>`:""}</section>`:""}
+   ${e.o?`<div class="note" style="margin-top:8px">В выписке: ${esc(e.o.t||"")} · ${fmt(Math.abs(e.o.a),2,SYM[e.o.cur]||"")}${(f=>f?f.whole?" · вся строка — комиссия банка, в блок не входит":` · в т.ч. комиссия банка ${fmt(f.n,2,SYM[f.cur]||"")}: в блоке строка без неё`:"")(Live.fee(e))}</div>`:""}
+   ${e.c==="tax"&&e.o&&!Live.fee(e)?(ui.split&&ui.split.id===e.id?splitForm(e):splitOf(e)?splitSaid(e):`<div class="row" style="margin-top:8px"><span class="note">Один платёж в налоговую за нескольких?</span><button class="sm" data-taxsplit="${esc(e.id)}">Разделить…</button></div>`):""}</section>`:""}
  <div class="blocks">${CATS.map(c=>{const br=rows.filter(r=>r.c===c.k&&!ownTr(r)&&!fwhole(r)),sum=br.reduce((a,r)=>a+netOf(r,fz.get(r)),0);
   return `<section class="blk ${c.k}"><h3>${c.name}<span class="note">${br.length}</span></h3>
    <div class="bt"><span class="sum">${fmt(sum,2)}</span></div>
    <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Amount</th>${c.k==="rev"?'<th class="r">Vat</th><th>Project</th><th>Bank</th>':`<th>Bank</th><th>${c.lab}</th>`}</tr></thead><tbody>
-   ${br.map(r=>`<tr class="rowbtn${ui.edit===r.id?" sel":""}" data-row="${r.id}" tabindex="0"><td class="m">${dShort(r.d)}</td><td class="m r">${fmt(netOf(r,fz.get(r)),2)}${fz.get(r)?` <div class="note">в т.ч. комиссия банка ${fmt(fz.get(r).g,2)}</div>`:""}</td>${c.k==="rev"?`<td class="m r">${r.v?fmt(r.v,2):""}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td><td>${esc(r.b)}</td>`:`<td>${esc(r.b)}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td>`}</tr>`).join("")||`<tr><td colspan="5" class="note" style="padding:10px">пусто</td></tr>`}
+   ${br.map(r=>`<tr class="rowbtn${ui.edit===r.id?" sel":""}" data-row="${r.id}" tabindex="0"><td class="m">${dShort(r.d)}</td><td class="m r">${fmt(netOf(r,fz.get(r)),2)}${fz.get(r)?` <div class="note">в т.ч. комиссия банка ${fmt(fz.get(r).g,2)}</div>`:""}</td>${c.k==="rev"?`<td class="m r">${r.v?fmt(r.v,2):""}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}</td><td>${esc(r.b)}</td>`:`<td>${esc(r.b)}</td><td class="lb" title="${esc(r.l)}">${esc(r.l)}${r.s==="demo"?" ·пример":""}${(sp=>sp?`<div class="note">${esc(splitWords(sp,r.o.cur||"GBP"))}</div>`:"")(splitOf(r))}</td>`}</tr>`).join("")||`<tr><td colspan="5" class="note" style="padding:10px">пусто</td></tr>`}
    </tbody></table></div></section>`;}).join("")}${fz.size?(()=>{const fl=[...fz].sort((a,b)=>a[0].d<b[0].d?-1:a[0].d>b[0].d?1:0),tot=fl.reduce((a,[,f])=>a+f.g,0);
   return `<section class="blk fee" id="led-fees"><h3>${FEECAT.name}<span class="note">${fl.length}</span></h3>
    <div class="bt"><span class="sum">${fmt(tot,2)}</span><span class="note">${esc(feeSplit(fl.map(([,f])=>({l:f.bank,a:f.g,cur:f.cur,n:f.n}))))}</span></div>
@@ -3172,6 +3215,7 @@ const Cash=(()=>{
 //                                  (null if nothing is left)
 //  off(P, it) / on(P, it)          the tick: row.on=false · x[ym].off for one month · per.none («не платим») for a tax
 //  tx(P, it, id) / notx / closed   «Это оно» / «Нет, другой» / «Это всё» — on the row or x[ym]
+//  pick(P, it, id, drop)           «Выбрать платёж…»: tx = [id] and closed; id "" — no tx, no closed, drop → notx
 //  link(P, it, sk)                 «{label} в таблице — это «{name}»? Да»: the row's link, by hand
 //  set(P, it, v, now, by)          a change to one line; v holds only what changed. A row: its fields (an emptied
 //                                  date keeps the row in v.mon; a row of `taxes` renamed after a founder moves to
@@ -4312,6 +4356,10 @@ const Live=(()=>{
    let s=0,last="";rs.forEach(f=>{s+=paidIn(f,it);used.add(String(f.id));if(f.d>last)last=f.d;});
    const t=it.rem*it.vk,lo=tol(t,it.dir)[0];it.match=rs.map(f=>String(f.id));
    if(s>=t-lo||rs.some(f=>shared[String(f.id)]>1))it.done={by:"row",on:last,rows:it.match.slice(),note:"hand"};
+   // A line whose payment a founder named and closed («Выбрать платёж…», «Это всё») is closed here, at what that
+   // payment brought - not after the rows are dealt, when another row of its label could be given to it on top and
+   // the line that row was for would be owed it again (the review of 30 October 2026).
+   else if(it.closed&&!it.wd){it.got+=s;it.gotG=gbpOn(it.got,it.cur,last);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;it.done={by:"closed",on:last,rows:it.match.slice(),note:"",got:r2(it.got)};}
    else{it.got+=s;it.gotG=gbpOn(it.got,it.cur,last);it.rem=Math.max(0,(t-s)/it.vk);it.last=last;}
   });
   const word=it=>!!it.paid&&(!!it.paid.ok||!!it.paid.legacy||!isD(it.paid.on));
@@ -5103,9 +5151,16 @@ const Live=(()=>{
    Object.keys(months).forEach(m=>{if(m<began||m>ymT)return;const o=months[m];o.off={in:0,out:0,nIn:0,nOut:0,by:{}};SECS.forEach(k=>{o.off.by[k]={rows:[],gbp:0};});
     const w=inb.filter(r=>r.d.slice(0,7)===m&&!isProv(r)&&!own(r)&&!r.maybe&&!r.twin&&!r.rep);o.wait={n:w.length,gbp:r2(sum(w,r=>Math.abs(+r.a||0)))};});
    const tookOf=new Map();wds.forEach(it=>it.took.forEach((v,id)=>{tookOf.set(id,(tookOf.get(id)||0)+v);}));
+   // A row a founder tied by hand to lines that are no withdrawals («Выбрать платёж…», «Это оно») pays each of them
+   // its own sum; what is left of it (30 October 2026) stands here as the rest of a row withdrawals took in part
+   // does - a payment for two invoices that brought a third one's money too is not lost from sight.
+   const handOf=new Map();items.forEach(it=>{const d=it.done;if(it.wd||!d||d.note!=="hand")return;d.rows.forEach(id=>{handOf.set(String(id),(handOf.get(String(id))||0)+doneG(it));});});
    pool.forEach(r=>{const o=months[r.d.slice(0,7)];if(!o||!o.off||!KEYS.includes(r.c)||r.fw)return;let a=r.a,amt=r2(Math.abs(r.o?r.o.a:r.a)),part=null;
-    if(used.has(r.id)){const t=tookOf.get(r.id)||0,full=Math.abs(r.a);if(!(t>0)||r.ret||!FOUNDERS.includes(r.c))return;const rest=r2(full-t);if(!(rest>=0.005))return;
-     const of=amt,n=r2(of*rest/full);a=rest;amt=n;part={of,took:r2(of-n)};}
+    if(used.has(r.id)){const t=tookOf.get(r.id)||0,h=handOf.get(String(r.id))||0,full=Math.abs(r.a);
+     if(t>0&&!r.ret&&FOUNDERS.includes(r.c)){const rest=r2(full-t);if(!(rest>=0.005))return;
+      const of=amt,n=r2(of*rest/full);a=rest;amt=n;part={of,took:r2(of-n)};}
+     else if(h>0&&!FOUNDERS.includes(r.c)&&full-h>Math.max(2,0.02*full)){const rest=r2(full-h),of=amt,n=r2(of*rest/full);a=Math.sign(r.a)*rest;amt=n;part={of,took:r2(of-n)};}
+     else return;}
     const k=secOfRow(r),z=o.off.by[k];
     z.rows.push(Object.assign({id:r.id,d:r.d,name:nameOfRow(r),amt,cur:r.o?r.o.cur:"GBP",gbp:r2(a),bank:r.b,prov:r.prov,back:r.ret},part?{part}:{}));z.gbp=r2(z.gbp+a);
     if(k==="inflows"){o.off.in=r2(o.off.in+a);o.off.nIn++;}else{o.off.out=r2(o.off.out+a);o.off.nOut++;}});}
@@ -5396,6 +5451,14 @@ const Live=(()=>{
   tx(P,it,id){const s=slot(P,it,true);if(s)push(s,"tx",id);},
   notx(P,it,id){const s=slot(P,it,true);if(s)push(s,"notx",id);},
   closed(P,it){const s=slot(P,it,true);if(s)s.closed=true;},
+  // «Выбрать платёж…» (the owner's decision of 30 October 2026: «А и да, делай»): the payment that paid this line is
+  // the one a founder names, whatever its label - a client may pay a project under another name, and one payment
+  // may pay several lines. The line holds that row and nothing else (tx), and is closed at what the row brings when
+  // that is short of it (closed), so no other row of the label is dealt to it on top. `id` "" - «Ни один: ещё не
+  // пришло»: the line holds nothing by hand, and the rows that closed it (`drop`) are not this line's (notx).
+  pick(P,it,id,drop){const s=slot(P,it,true);if(!s)return;
+   if(id){s.tx=[String(id)];s.closed=true;if(Array.isArray(s.notx)){s.notx=s.notx.filter(x=>x!==String(id));if(!s.notx.length)delete s.notx;}return;}
+   delete s.tx;delete s.closed;arr(drop).forEach(x=>push(s,"notx",x));tidy(P,it);},
   // «Частично»: so much has been paid (`got`, in the line's currency, the tax on top included) and the rest is
   // still owed. The line is closed for its month at what was paid, and the rest becomes a row of its own on the day
   // the founder names (`date`) — a one-off row even when it came from a month of a «каждый месяц» row, named after
@@ -6049,11 +6112,13 @@ const Ed=(()=>{
  const vatWords=it=>it&&it.dir>0&&it.vat&&it.factor>1&&it.amt>0?`в т.ч. VAT ${nat0(it.amt*(it.factor-1),it.cur)}`:"";
  // The one thing a row may say beyond its name, in plain words. Most rows say nothing: a line through a row is a
  // row that is paid, muted ink is a tax worked out by a rule.
+ // A payment a founder tied to several lines: each says which others it paid with it.
+ const handWith=it=>{const ids=new Set(it.done.rows.map(String)),o=M.items.filter(x=>x.id!==it.id&&x.done&&x.done.note==="hand"&&x.done.rows.some(id=>ids.has(String(id))));return o.length?`одним платежом с ${o.slice(0,2).map(x=>x.name).join(", ")}${o.length>2?" и ещё "+(o.length-2):""}`:"";};
  function remark(it){const d=it.done,inn=it.dir>0,nat=nat0,plan=()=>nat(it.amt*(it.factor||1),it.cur);
   if(d)return d.note==="partial"?`${inn?"получено":"оплачено"} ${nat(d.got,it.cur)} из ${plan()}`
    :d.by==="mark"?"отмечено · ждёт выписку":d.by==="ok"?(it.src==="tax"?"оплачено по вашему слову":"отмечено вручную"):d.by==="legacy"?"отмечено в старой Кассе":d.by==="closed"?"закрыто частью"
    :it.wd&&d.note==="taken"?`взято ${nat(d.got,it.cur)} из ${plan()}`:d.note==="other"||d.note==="part"?`${inn?"пришло":"заплатили"} ${nat(d.got,it.cur)}, в плане ${plan()}`
-   :d.note==="amount"&&d.label?`закрыто по сумме: ${d.label}`:d.note==="vat"?"пришло с VAT":d.note==="novat"?"пришло без VAT":d.note==="over"?`пришло больше на ${fmt(Math.round(d.over))}`:d.note==="sum"?"одним платежом с другими":d.note==="period"?"закрыто вместе с периодом":"";
+   :d.note==="amount"&&d.label?`закрыто по сумме: ${d.label}`:d.note==="vat"?"пришло с VAT":d.note==="novat"?"пришло без VAT":d.note==="over"?`пришло больше на ${fmt(Math.round(d.over))}`:d.note==="sum"?"одним платежом с другими":d.note==="period"?"закрыто вместе с периодом":d.note==="hand"?handWith(it):"";
   if(it.state==="missed")return it.hint?"возможно, уже оплачено":"платежа не было";
   if(it.state==="doubt")return "пока не считаю";
   // A debt carried over from a month paid in part without a date, as a plan from before holds it: what the studio
@@ -6161,7 +6226,7 @@ const Ed=(()=>{
  // knows which it is, so the press asks. The account whose balance it is, or null when there is nothing to ask.
  const inBal=it=>{if(!M||it.src==="tax"||!it.date)return null;const a=M.accounts.find(a=>a.key===it.acct);return a&&a.anchor&&it.date<a.anchor.asOf?a:null;};
  // A press that has two answers opens the row's card on the question instead of doing one of them.
- const asks=(verb,it)=>verb==="part"?"part":(verb==="skip"||verb==="del")&&it.src==="occ"&&!(verb==="del"&&it.occ.last)?verb:verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
+ const asks=(verb,it)=>verb==="part"?"part":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"&&!(verb==="del"&&it.occ.last)?verb:verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
  function act(verb,x,direct){
   if(Plan.lost())return;
   const it=item(x.dataset.edId),V=VERBS[verb];if(!it)return;
@@ -6189,6 +6254,12 @@ const Ed=(()=>{
    // year typed with a slip read «на пт 12 ноя» like this year's — of a row that is then nowhere in sight.
    const when=dRuW(d)+(d.slice(0,4)===T.slice(0,4)?"":" "+d.slice(0,4));
    return done(`${it.name}: ${inn?"получено":"оплачено"} ${nat(v,it.cur)} из ${nat(full,it.cur)}, остаток — на ${when}`,(P,now,by)=>{W.partial(P,it,v,uid(),now,by,T,d);});}
+  if(what==="pick"&&pickable(it)){const x=q(card,"[data-ed-pick]:checked");if(!x)return toast("Отметьте платёж");
+   const id=x.value,r=id?S.tx.concat(S.inbox).find(z=>String(z.id)===id):null;if(id&&!r)return toast("Этого платежа в таблице уже нет");
+   if(!id&&it.mark)return toast("Строка отмечена вручную — снимите отметку кнопкой «Вернуть в план»");
+   if(id&&locked(it,id).length)return toast("Этот платёж закрывает вывод или налог — здесь его не выбрать");
+   const drop=id?[]:(it.rows||[]).concat(it.done?it.done.rows:[]).map(String),keep=id?keepers(it,id):[];
+   return done(id?`${it.name}: ${it.dir>0?"оплачено":"закрыто"} платежом ${alias(r.l)||"без подписи"}, ${dRu(r.d)}`:`${it.name}: жду платёж`,P=>{W.pick(P,it,id,drop);keep.forEach(h=>W.tx(P,h,id));});}
   if(what==="pay-none")return done(`Оплачено: ${it.name}`,(P,now,by)=>{W.mark(P,it,Live.today(),now,by);});
   // «уже в остатке»: the line was paid on its own day, before the balance — the mark says that day, and a mark of a
   // day before the balance adds nothing to it. «… позже»: paid today, as a mark always said.
@@ -6220,7 +6291,7 @@ const Ed=(()=>{
   if(it.kind==="tax"){const p=M.taxes.periods.find(x=>x.key===it.tax.key),r=M.taxes.rules.find(x=>x.id===it.tax.rule);
    out.push(p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.");}
   else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?(FN[it.whose]?`вывод ${FN[it.whose]}: закроется тем, что возьмёт ${FN[it.whose]}`:"вывод: закроется тем, что возьмут фаундеры"):it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
-  if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
+  if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":d.note==="hand"?"Закрыто платежом, который выбрали вы":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
   // What has happened is counted at the rate of its own day, and the card says which.
   if(d&&d.fx>0)out.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
   if(d){}
@@ -6242,13 +6313,14 @@ const Ed=(()=>{
  // By what the row is and where it stands. «Получено» / «Оплачено» comes first on every open row, and «Частично»
  // beside it: paid means paid, and a debt remains only where a founder says so — and stands on the day he names.
  function actions(it){
-  const inn=it.dir>0,late=it.state==="late",d=it.done,tax=it.src==="tax",b=(v,l,c)=>btn(v,l,it,c),pay=b("paid",inn?"Получено":"Оплачено"),part=tax?"":b("part","Частично…");
+  const inn=it.dir>0,late=it.state==="late",d=it.done,tax=it.src==="tax",b=(v,l,c)=>btn(v,l,it,c),pay=b("paid",inn?"Получено":"Оплачено"),pk=pickable(it)?b("pick","Выбрать платёж…"):"",part=(tax?"":b("part","Частично…"))+pk;
   // A row that is paid can still be made to repeat: a first invoice marked received is often the first of many.
-  if(d)return (d.by==="mark"||d.by==="ok"||d.by==="legacy"||d.note==="partial"?b("unpaid","Вернуть в план"):"")+(it.occ&&d.by==="row"&&d.note==="other"?b("same","И дальше так же")+part:"")+(it.src==="row"&&it.date&&!it.carry?b("tick","Повторять каждый месяц"):"");
+  // And the payment that closed it can be named again: the page deals a label's payments by date, not by sum.
+  if(d)return (d.by==="mark"||d.by==="ok"||d.by==="legacy"||d.note==="partial"?b("unpaid","Вернуть в план"):"")+(it.occ&&d.by==="row"&&d.note==="other"?b("same","И дальше так же")+part:pk)+(it.src==="row"&&it.date&&!it.carry?b("tick","Повторять каждый месяц"):"");
   // (A row of its own switched off had only its tick in the month's table to bring it back, and the table has none now.)
   if(it.state==="off")return b("on","Вернуть в план")+(it.src==="row"?b("del","Удалить","ghost"):"");
   if(it.state==="missed")return pay+part;
-  if(it.state==="empty"||it.state==="doubt")return it.src==="row"?b("del","Удалить","ghost"):"";
+  if(it.state==="empty"||it.state==="doubt")return (it.state==="doubt"?pk:"")+(it.src==="row"?b("del","Удалить","ghost"):"");
   // (A row without a date had «частично» in its row of the month, and nowhere else; the month's row has no buttons now.)
   if(it.state==="undated"||it.state==="carry")return pay+part+b("del","Удалить","ghost");
   if(it.src!=="row")return pay+part+b("move","Перенести на…")+b("skip",tax?"Не платим":inn?"Не придёт":"Не платим")+(it.src==="occ"?b("del","Убрать","ghost"):"");
@@ -6271,12 +6343,50 @@ const Ed=(()=>{
    return `<div class="ed-ask" data-ed-askbox="${a}"><span>${a==="del"?"Убрать":inn?"Не придёт":"Не платим"}:</span><div class="row"><button class="sm primary" data-ed-go="${a}-only">только ${mon(ym)}</button><button class="sm" data-ed-go="${a}-onward">${mon(ym)} и дальше</button>${x}</div></div>`;}
   if(a==="paid"){const A=inBal(it);
    if(A)return `<div class="ed-ask" data-ed-askbox="paid"><span>Остаток ${esc(acName(A))} ${A.anchor.file?"— по выписке на":"вписан на"} ${dRu(A.anchor.asOf)}, а строка — от ${dRu(it.date)}. Эти деньги:</span><div class="row"><button class="sm primary" data-ed-go="paid-in">уже в остатке</button><button class="sm" data-ed-go="paid-after">${inn?"пришли":"ушли"} позже</button>${x}</div></div>`;}
+  if(a==="pick"&&pickable(it))return pickBox(it,x);
   // «Оплачено» on a tax first shows the payments to the tax authority that nothing has claimed: one of them may be it.
   if(a==="pay"&&it.src==="tax")return `<div class="ed-ask" data-ed-askbox="pay"><span>Какой из платежей — этот налог?</span>
    ${(it.pays||[]).map(p=>`<div class="ed-pay"><span>${esc(p.label||"Платёж")} · ${fmt(p.gbp,p.gbp%1?2:0)} · ${dRu(p.d)}</span><span class="row"><button class="sm" data-ed-payrow="${esc(p.id)}" data-ed-whole="1">Это он — весь</button><button class="sm" data-ed-payrow="${esc(p.id)}">Это часть</button></span></div>`).join("")}
    <div class="row"><button class="sm" data-ed-go="pay-none">В выписках нет — оплачено сегодня</button>${x}</div></div>`;
   return "";
  }
+ // «Выбрать платёж…» (the owner's decision of 30 October 2026). The page deals a label's payments to its lines by
+ // date and by the rules of an invoice - not to the line whose sum they fit, and never a payment of another name:
+ // a client who pays a project under another name, or several invoices in one payment, is the founder's to say.
+ // Offered on every line but a withdrawal (its takings are the founders' blocks, dealt by their own rules) and a
+ // computed tax (its payments are asked for on «Оплачено»). The question lists the table's payments that could be
+ // this line's - the same way, near its day, of any label and any bank; the founders' blocks, own transfers and
+ // fee rows are none - those nearest in sum first, and always the ones that hold it now.
+ const pickable=it=>!it.wd&&it.src!=="tax"&&it.on!==false&&it.amt>0&&it.state!=="off"&&it.state!=="empty";
+ const days=(a,b)=>Math.abs(Date.parse(a)-Date.parse(b))/864e5;
+ const holders=id=>M.items.filter(x=>(x.rows||[]).map(String).includes(String(id))||(x.done&&x.done.rows.map(String).includes(String(id))));
+ // A payment a withdrawal or a computed tax holds is theirs by their own rules, and is not given away here.
+ const locked=(it,id)=>holders(id).filter(h=>h.id!==it.id&&(h.wd||h.src==="tax"));
+ // The other lines that hold it, which keep it: «тогда он закроет обе».
+ const keepers=(it,id)=>holders(id).filter(h=>h.id!==it.id&&!h.wd&&h.src!=="tax");
+ const lineG=it=>Math.abs(+it.full||0);
+ function picks(it){const day=it.date||(it.ym?it.ym+"-15":Live.today()),want=lineG(it),mine=new Set((it.rows||[]).concat(it.done?it.done.rows:[]).map(String));
+  const ok=r=>r&&r.o&&isFinite(+r.o.a)&&+r.o.a!==0&&Math.sign(+r.o.a)===it.dir&&/^\d{4}-\d{2}-\d{2}$/.test(r.d||"")&&!ownTr(r)&&r.c!=="skip"&&!FOUNDERS.includes(r.c)&&!(Live.fee(r)&&Live.fee(r).whole);
+  const score=r=>(want>0?Math.min(3,Math.abs(Math.abs(r.a)-want)/want):1)*20+days(r.d,day)/3;
+  const near=S.tx.filter(r=>ok(r)&&!mine.has(String(r.id))&&days(r.d,day)<=45).sort((a,b)=>score(a)-score(b)).slice(0,10);
+  return S.tx.concat(S.inbox).filter(r=>mine.has(String(r.id))).concat(near);}
+ function pickNote(it,id){
+  if(id==null)return "Отметьте платёж. Платёж, который уже закрывает другую строку, можно выбрать и здесь: тогда он закроет обе.";
+  if(id==="")return (it.rows||[]).length?"Строка снова будет ждать платёж, и тот, что её закрыл, ей больше не отдаётся.":"Строка будет ждать платёж.";
+  const r=S.tx.find(x=>String(x.id)===String(id));if(!r)return "";
+  const with_=keepers(it,id),ls=[it].concat(with_),sum=round2(ls.reduce((a,x)=>a+lineG(x),0)),got=Math.abs(r.a),z=Math.max(2,0.02*got);
+  const list=ls.map(x=>`${x.name} ${fmt(lineG(x))}`).join(" + ");
+  if(ls.length===1&&sum-got>z)return `Строка закроется на том, что пришло: ${fmt(got)} из ${fmt(sum)}.`;
+  const head=`Этот платёж закроет: ${list}${ls.length>1?` = ${fmt(sum)}`:""} из ${fmt(got)}.`;
+  return Math.abs(got-sum)<=z?`${head} Сходится.`:got>sum?`${head} Остаток ${fmt(round2(got-sum))} встанет «вне плана».`:`${head} Платежа не хватает на ${fmt(round2(sum-got))}: строки закроются по своим суммам, проверьте, тот ли это платёж.`;}
+ function pickBox(it,x){const inn=it.dir>0,mine=new Set((it.rows||[]).concat(it.done?it.done.rows:[]).map(String)),list=picks(it);
+  const opt=r=>{const id=String(r.id),o=r.o,others=holders(id).filter(h=>h.id!==it.id),lock=locked(it,id).length>0,st=mine.has(id)?"сейчас здесь":others.length?`сейчас закрывает ${others.slice(0,2).map(h=>h.name).join(", ")}${others.length>2?" и ещё "+(others.length-2):""}${lock?" — здесь его не выбрать":""}`:"вне плана";
+   return `<label class="ed-pk"><input type="radio" name="ed-pick" data-ed-pick value="${esc(id)}"${mine.has(id)&&mine.size===1?" checked":""}${lock?" disabled":""}><span>${dRu(r.d)} · ${esc(alias(r.l)||"без подписи")} · ${esc(r.b)}</span><span class="note">${st}</span><span class="ed-pk-a mono">${fmt(Math.abs(+o.a),Math.abs(+o.a)%1?2:0,SYM[o.cur||"GBP"]||"")}${SYM[o.cur||"GBP"]?"":" "+esc(o.cur)}${(o.cur||"GBP")!=="GBP"?" · "+fmt(Math.abs(r.a),2):""}</span></label>`;};
+  const sel=mine.size===1?[...mine][0]:null;
+  return `<div class="ed-ask" data-ed-askbox="pick"><span>Какой платёж ${inn?"оплатил":"закрыл"} «${esc(it.name)}» (${nat0(it.amt*(it.factor||1),it.cur)}${it.cur!=="GBP"?" · "+fmt(lineG(it)):""})?</span>
+   <div class="ed-pks">${list.length?list.map(opt).join(""):`<span class="note">В таблице нет ${inn?"поступлений":"платежей"} рядом с этой датой.</span>`}${mine.size&&!it.mark?`<label class="ed-pk"><input type="radio" name="ed-pick" data-ed-pick value=""><span>Ни один: ${inn?"ещё не пришло":"ещё не оплачено"}</span></label>`:""}</div>
+   <span class="note" data-ed-picknote>${esc(pickNote(it,sel))}</span>
+   <div class="row"><button class="sm primary" data-ed-go="pick">Готово</button>${x}</div></div>`;}
  const partNote=(it,got)=>{const full=round2(it.amt*(it.factor||1)),v=got===""?NaN:+got;return v>=0&&v<full?`остаток ${nat(round2(full-v),it.cur)}`:`из ${nat(full,it.cur)}`;};
  // «+ VAT»: what will come with the tax on top, said under the tick while it is on.
  const vatNote=(amt,cur,on)=>{const r=M?M.taxes.rate:20,a=+amt||0;return !on?"":!r?"ставка VAT — 0%: к счёту ничего не добавляется":a>0?`придёт ${nat(round2(a*(1+r/100)),cur)}, из них VAT ${nat(round2(a*r/100),cur)}`:"";};
@@ -6736,6 +6846,7 @@ const Ed=(()=>{
   const t=ev.target,card=t.closest&&t.closest("[data-ed-card]");if(!card||!cur)return;
   const note=(k,s)=>{const e=q(card,`[data-ed-n="${k}"]`);if(e)e.textContent=s;};
   if(t.matches("[data-ed-part]")){const it=item(card.dataset.edId),e=q(card,"[data-ed-partnote]");if(it&&e)e.textContent=partNote(it,t.value);return;}
+  if(t.matches("[data-ed-pick]")){const it=item(card.dataset.edId),e=q(card,"[data-ed-picknote]");if(it&&e)e.textContent=pickNote(it,t.value);return;}
   if(card.dataset.edCard==="add"&&t.dataset.edF){const k=t.dataset.edF,d=cur.draft;
    if(k==="of"){cur.of=t.value;cur.ofSet=true;return;}
    d[k]=t.type==="checkbox"?t.checked:t.value;
@@ -7248,9 +7359,9 @@ Plan.watch(()=>Ed.settingsDraw());
 // that the page sends no save (put, push, write, Plan.lost) and that the server takes none from a reader.
 // KEEP are the buttons that also say something - which block a row is in, whether a client pays VAT: they stay.
 // «Что если» (data-wi-*) is in neither list on purpose: a trial changes no document, and a reader may ask too.
-const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]",'button[data-ed-at="need"]',
+const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]","[data-ed-pick]",'button[data-ed-at="need"]',
  "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
- "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","input.lab","input.vat","[data-accept]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
+ "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","[data-taxsplit]","[data-spf]","[data-sprest]","[data-spok]","[data-spx]","[data-spedit]","[data-spnone]","input.lab","input.vat","[data-accept]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
  "[data-fx]","[data-fxo]","[data-fxdo]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
  "[data-demo]","#toastUndo","[data-td-fill]","[data-td-helper]",'[data-tabgo="upload"]'].join(",");
 const KEEP="[data-ed-cl],[data-setc],[data-cs-fix],[data-taxowner]";
@@ -7427,11 +7538,24 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-scope]"))){ui.scope=x.dataset.scope;ui.period=null;return renderDash();}
  if((x=c("[data-focus]"))){ui.focus=x.dataset.focus;renderDash();return window.scrollTo(0,0);}
  if((x=c("[data-q]"))){ui.quarter=x.dataset.q;ui.edit=null;return renderLedger();}
- if((x=c("[data-taxowner]"))){r=inboxRow(t);if(!r)return;r.l="HMRC"+(x.dataset.taxowner?" "+FN[x.dataset.taxowner]:"");r.auto=false;r.touched=true;saveInbox();return renderInbox();}
+ if((x=c("[data-taxowner]"))){r=inboxRow(t);if(!r)return;r.l="HMRC"+(x.dataset.taxowner?" "+FN[x.dataset.taxowner]:"");delete r.split;r.auto=false;r.touched=true;saveInbox();return renderInbox();}
+ // «Разделить…» (30 October 2026), on a row of «Разбор» or of «Таблица» - whichever the press came from. A row of
+ // «Разбор» is saved with «Разбор»; a row of the table, as «Сохранить» saves it.
+ if((x=c("[data-taxsplit],[data-spedit]"))){r=spRow(x.dataset.taxsplit||x.dataset.spedit);if(!r||r.c!=="tax"||!r.o||Live.fee(r))return;const v={};(splitOf(r)||[]).forEach(p=>{if(p.f)v[p.f]=p.n;});
+  ui.split={id:r.id,v,rest:""};return S.inbox.includes(r)?renderInbox():renderLedger();}
+ if((x=c("[data-sprest]"))){if(!ui.split)return;ui.split.rest=x.dataset.sprest;r=spRow(ui.split.id);return r&&S.inbox.includes(r)?renderInbox():renderLedger();}
+ if(c("[data-spx]")){r=ui.split&&spRow(ui.split.id);ui.split=null;return r&&S.inbox.includes(r)?renderInbox():renderLedger();}
+ if(c("[data-spok]")||(x=c("[data-spnone]"))){const none=!!x&&x.matches("[data-spnone]");r=none?spRow(x.dataset.spnone):ui.split&&spRow(ui.split.id);if(!r){ui.split=null;return;}let say="Платёж больше не разделён";
+  if(none)delete r.split;
+  else if(Live.fee(r)){ui.split=null;S.inbox.includes(r)?renderInbox():renderLedger();return toast("Платёж с комиссией банка внутри не делится");}
+  else{const{left,parts}=splitDraft(r);if(left<-0.005)return toast("Части больше платежа: уменьшите одну из них");if(!FOUNDERS.some(k=>+ui.split.v[k]>0))return toast("Впишите хотя бы одну часть");
+   if(parts.length<2){delete r.split;r.l="HMRC"+(parts[0]&&parts[0].f?" "+FN[parts[0].f]:"");say=parts[0]&&parts[0].f?`Налог — ${FN[parts[0].f]}`:"Налог студии";}
+   else{r.split=parts;say="Платёж разделён: "+splitWords(parts,r.o.cur||"GBP");}}
+  ui.split=null;if(S.inbox.includes(r)){r.auto=false;r.touched=true;saveInbox();renderInbox();}else{saveMonths([r.d.slice(0,7)]);renderAll();}return toast(say);}
  if((x=c("th[data-m]"))){ui.scope="month";ui.period=x.dataset.m;return renderDash();}
  if(c("[data-acceptauto]"))return void accept(S.inbox.filter(q=>rowState(q)==="ok").map(q=>q.id));
  if(c("[data-accept]")){r=inboxRow(t);return void(r&&accept([r.id]));}
- if((x=c("[data-setc]"))){r=inboxRow(t);if(!r)return;unpair(r);r.c=x.dataset.setc;r.auto=false;r.touched=true;r.l=r.c==="skip"?"":r.l;delete r.vSet;r.v=vatOf(r);saveInbox();renderInbox();
+ if((x=c("[data-setc]"))){r=inboxRow(t);if(!r)return;unpair(r);r.c=x.dataset.setc;if(r.c!=="tax"){delete r.split;if(ui.split&&ui.split.id===r.id)ui.split=null;}r.auto=false;r.touched=true;r.l=r.c==="skip"?"":r.l;delete r.vSet;r.v=vatOf(r);saveInbox();renderInbox();
   const f=document.getElementById("l-"+r.id);if(f&&!f.value)f.focus();return;}
  if(c("[data-drop]")){r=inboxRow(t);if(!r)return;unpair(r);S.inbox=S.inbox.filter(q=>q!==r);saveInbox();renderInbox();$("#demoBanner").hidden=!S.tx.concat(S.inbox).some(q=>q.s==="demo");return toast("Убрано из разбора");}
  if(c("[data-nottwin]")){r=inboxRow(t);if(r){r.twin=null;saveInbox();renderInbox();}return;}
@@ -7472,8 +7596,8 @@ document.addEventListener("click",ev=>{
   else if(r.d!==d0&&o&&o.cur&&o.cur!=="GBP"&&o.r>0&&Object.keys(RATES.days).length){
    if(fxDayOn(RATES.days,o.cur,r.d)){reprice(r);r.a*=a0<0?-1:1;if(v&&v===(+r.v||0)&&a0)v=round2(v*r.a/a0);again=r.a!==a0;}
    else{delete o.r;delete o.rd;}}
-  r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=v;
-  ui.edit=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast(again?"Строка сохранена: фунты — по курсу нового дня":"Строка сохранена");}
+  r.c=cat;r.l=$("#e-l").value.trim();r.b=$("#e-b").value;r.v=v;if(r.c!=="tax")delete r.split;
+  ui.edit=null;ui.split=null;saveMonths([was,r.d.slice(0,7)]);renderAll();return toast(again?"Строка сохранена: фунты — по курсу нового дня":"Строка сохранена");}
  if((x=c("[data-edel]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
   r=S.tx.find(q=>q.id===ui.edit);if(r){S.tx=S.tx.filter(q=>q!==r);ui.edit=null;saveMonths([r.d.slice(0,7)]);renderAll();toast("Строка удалена");}return;}
  if(c("[data-eclose]")){ui.edit=null;return renderLedger();}
@@ -7487,6 +7611,8 @@ document.addEventListener("keydown",ev=>{
 });
 document.addEventListener("input",ev=>{const t=ev.target;
  if(t.id==="ruleQ"){ui.ruleQ=t.value;$("#ruleBody").innerHTML=ruleRows();}
+ // A part typed in «Разделить…» is kept as it is typed, so a press on «Остаток» draws the form again with it.
+ if(t.matches&&t.matches("[data-spf]")&&ui.split){ui.split.v[t.dataset.spf]=t.value;const r=spRow(ui.split.id),box=t.closest(".sp-ask"),n=box&&box.querySelector("[data-spnote]");if(r&&n)n.textContent=splitNote(r);}
  if(t.id==="rep-q"){rp.q=t.value;saveRep();paintSums();renderRepOut();}});
 document.addEventListener("change",ev=>{
  const t=ev.target;

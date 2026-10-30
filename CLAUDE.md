@@ -445,6 +445,37 @@ a deploy:
   `fees-comma` and `checks/withdrawals/` (cases 6-11, the properties P and G)
   hold it. `FEES` is its one-line switch; `docs/handoff.md`, rule 14 and the
   entry of 19 October.
+- **A tax payment for more than one founder is split in the reports
+  alone** (the owner's decision of 30 October 2026, «А»). A tax row of the
+  table may hold `split:[{f,n}]` - `f` a founder or `""` the studio, `n` in
+  the statement's own currency, the parts adding up to the payment - and
+  keeps its key, amount, label and block as filed. `counted()` turns it into
+  one copy per part (`pw`, which `owner` reads first), so «Месяцы» and
+  «Отчёты» count each part as that one's tax; the plan reads the row by its
+  label, as one payment that closes the line it always closed. A split with a
+  bank's fee inside, a part of nobody, or a block other than «Налоги» is
+  none, and the row counts whole. «Разделить…» stands in «Разбор» and in the
+  card of «Таблица»; `toTx` carries the field. The check `tax-split` holds it.
+- **A line of the plan takes the payment a founder names** («Выбрать
+  платёж…», the same day, «да»). The page deals a label's payments to its
+  monthly lines by date, whatever the sum, and never a payment of another
+  name; on every line but a withdrawal and a computed tax the card now
+  offers the table's payments near its day, of any label and any bank. The
+  choice is the hand tie `tx` plus `closed` (`Live.write.pick`), so nothing
+  else of the label is dealt on top; «Ни один» clears both and writes the
+  rows that closed the line into its `notx` (it is not offered on a line a
+  mark holds: «Вернуть в план» takes a mark back). A payment another line
+  holds by itself, picked for a second one, is tied to both, so neither is
+  owed again; one a withdrawal or a computed tax holds is not offered. A
+  payment short of its line closes it at what came, at once, so nothing else
+  of the label is dealt to it on top. One payment may close several
+  lines, each at its own sum, and what a row tied by hand leaves over
+  beyond its lines (none of them a withdrawal), measured without the bank's
+  fee inside it, stands «вне плана» as a part, as the rest of a row
+  withdrawals took in part does. A split keeps the row's label, so the plan
+  reads a payment filed as one founder's as his, split or not. Withdrawals are
+  untouched: `checks/withdrawals/` reads every plan as before. The check
+  `pick-pay` holds it.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two
