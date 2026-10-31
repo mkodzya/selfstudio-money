@@ -13,5 +13,14 @@ const parts = [
   span(/^const fxSorted=/, /^function fxDayOn/), one(/^const uid=/), one(/^const round2=/), one(/^const norm=/), one(/^const owner=/), one(/^const FN=/),
   span(/^const Live=\(\(\)=>\{/, /^\}\)\(\);/), may(/^const text120=/),
 ];
-fs.writeFileSync(out, parts.join('\n') + '\nmodule.exports={Live,FOUNDERS,CURS,BANKS,uid,norm,text120:typeof text120==="function"?text120:null};\n');
-console.log('built', out, parts.join('\n').length);
+// The owner's answer 15 of 31 October 2026 («15 да»), written into a page of before that lacks it: a row of a typed
+// balance's own day goes after that balance by its mark only when the mark was made after the balance was typed. The
+// pages these scripts compare with (dev, pre) count such a row after the balance whenever the mark is of a later day;
+// the answer changes «Денег сейчас» exactly there, so without it F and P report every such life as a difference.
+// The page as it is has the rule already and is built untouched; a page that has neither line stops the build.
+const B15old = 'else if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)))a.after+=f.a;', B15 = 'else if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)&&(+p.at||0)>A.at))a.after+=f.a;';
+let code = parts.join('\n'), note = '';
+if (code.includes(B15old)) { code = code.replace(B15old, B15); note = ' (answer 15 of 31 October 2026 written in)'; }
+else if (!code.includes(B15)) throw new Error('rule 4 of the typed balance\'s own day not found: ' + src);
+fs.writeFileSync(out, code + '\nmodule.exports={Live,FOUNDERS,CURS,BANKS,uid,norm,text120:typeof text120==="function"?text120:null};\n');
+console.log('built', out, code.length + note);
