@@ -6688,6 +6688,19 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
     ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. Нижняя точка — £6,900, 25 октября.', 'vR', 'vR', 6900, '2026-10-25'],
     '«Что если» a hire of £100 a month from October: the lowest point £6,900 on 25 Oct (7,000 − 100), and no «хватает» in the trial either');
   same(await text(pg, F + '.wi-plan').catch(() => null), null, '… and, the plan being the same verdict, nothing about the plan after it');
+  // «+ и ещё…» a hire of £2,500 a month as well: 25 Oct comes to £4,400 (7,000 − 100 − 2,500), under the cushion -
+  // vR in the place of v3 in the trial, while the plan's is in the place of v1: the answer says the plan's lowest
+  // point is over the cushion, so that it is plain the trial took it under (the review of 31 October 2026).
+  await pg.click(F + '[data-wi-more]');
+  await pg.click(F + '[data-wi-kind="cost"]');
+  await pg.selectOption(F + '[data-wi-f="from"]', '2026-10');
+  await pg.fill(F + '[data-wi-f="amt"]', '2500');
+  await pg.click(F + '[data-wi-go]');
+  await pg.waitForFunction((sel) => /4,400/.test((document.querySelector(sel) || {}).textContent || ''), F + '[data-wi-k="say"]');
+  const t1b = await ask(pg, [...hire(100), ...hire(2500)]);
+  same([await text(pg, F + '[data-wi-k="say"]'), t1b.plan.base, t1b.trial.id, t1b.trial.base, t1b.trial.low],
+    ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. 25 октября останется £4,400 — меньше запаса £5,000. По плану нижняя точка выше запаса.', 'v1', 'vR', 'v3', 4400],
+    'two hires, £100 and £2,500: the trial goes under the cushion and the answer says the plan does not');
   same([store.led.puts, store.cash.puts], [0, 0], 'nothing is saved: the page, the line and the trial write nothing');
   await pg.context().close();
   // ---- 2. Wise £5,500: under the cushion as well.
@@ -6696,7 +6709,8 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   same([S.M.verdict.id, S.M.verdict.base, S.M.own, S.M.LOW], ['vR', 'v3', -4500, 4500], 'its own money 5,500 − 10,000 = −4,500; the lowest point 4,500 under the cushion: vR in the place of v3');
   same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-say', 'td-own', 'note', 'row'], btn: ['Как подстраховаться'], red: true },
     'no «хватает, но впритык»: no money of its own, then the day under the cushion with «Как подстраховаться», and the line between the sentence and the lines under it');
-  same(await pg.$eval('#view-today .td-verdict', (e) => getComputedStyle(e).borderLeftStyle), 'solid', 'the card of vR has the side line of v3');
+  // (width and colour: every card has a 1px solid border, and v4's side line is of another colour)
+  same(await pg.$eval('#view-today .td-verdict', (e) => { const c = getComputedStyle(e); return [c.borderLeftWidth, c.borderLeftColor]; }), ['3px', 'rgb(154, 107, 0)'], 'the card of vR has the side line of v3 - 3px of --warn');
   // «Что если» a hire of £100 a month from October: 25 Oct comes to £4,400 (4,500 − 100), the lowest point, still under
   // the cushion and still no money of its own - the trial names that day, as vR in the place of v3 does on the page.
   await pg.click('#view-today .td-wi > summary');
@@ -6708,8 +6722,8 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   await pg.waitForSelector(F + '[data-wi-k="say"]');
   const t2 = await ask(pg, hire(100));
   same([await text(pg, F + '[data-wi-k="say"]'), t2.plan.id, t2.trial.id, t2.trial.base, t2.trial.low, t2.trial.lowDay],
-    ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. 25 октября останется £4,400 — меньше запаса £5,000.', 'vR', 'vR', 'v3', 4400, '2026-10-25'],
-    '«Что если» under the cushion with no money of its own: no «хватает, но впритык» in the trial either, and the day under the cushion named');
+    ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. 25 октября останется £4,400 — меньше запаса £5,000. По плану тоже меньше запаса.', 'vR', 'vR', 'v3', 4400, '2026-10-25'],
+    '«Что если» under the cushion with no money of its own: no «хватает, но впритык» in the trial either, the day under the cushion named - and the plan is under it too (the review of 31 October 2026: the change is not blamed)');
   await pg.context().close();
   // ---- 3. Wise £12,000: some of its own.
   pg = await scene('own money, above zero', led(), P(12000));
@@ -6729,6 +6743,12 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   S = await holds(pg, 'nothing held for taxes');
   same([S.M.verdict.id, S.M.taxes.reserve, S.M.own, await seen(pg)], ['v1', 0, 8000, { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £7,000, 20 октября.', own: null, order: ['td-say'], btn: [], red: false }],
     'nothing held for taxes: no line - it would only say «Денег сейчас» again - and the sentence as it was');
+  // Below zero with nothing held for taxes - Wise −£200 typed for today, Client A's £10,000 due today, Person B on
+  // 20 Oct: an overdraft, not taxes the accounts cannot cover. The lowest point £8,800 is over the cushion: v1 as it
+  // was, not vR, whose sentence would name the taxes (the review of 31 October 2026), and no «Своих денег» either.
+  const od = await pg.evaluate(({ L, P, T }) => { const M = window.__money.compute(L, P, T, { H: 30 }); return [M.verdict.id, M.own, M.taxes.reserve, M.LOW]; },
+    { L: led(0), P: plan3({ banks: [bal('Wise', 'GBP', -200, T)], team: [row('rB', 'Person B', 1000, '2026-10-20')], inflows: [row('cA', 'Client A', 10000, T)], tax: { rules: [VAT()] } }), T });
+  same(od, ['v1', -200, 0, 8800], 'an overdraft with nothing held for taxes is v1, as it was: no «своих денег нет — под налоги…»');
   await pg.context().close();
   // ---- 6. A thin plan: the line under vT's sentence, and the trial as it was.
   const hist = HALF.map((m, i) => sheet('pb' + i, m + '-20', 6000, 'cogs', 'Person B'));

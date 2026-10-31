@@ -3925,13 +3925,11 @@ const Cash=(()=>{
 //                                  through = later of asOf and cov; age = T − through in days (null if unknown)
 //    stale                         "" | "ask" (9–15 days without a statement) | "old" (16+); material accounts only
 //    handDays, handOld             days since the balance was typed; true when that is over 30 (material only)
-//    stmt{to, bal, est, hold}      for «Загрузка» (30 October 2026): the day of the account's newest row that came from
+//    stmt{to, bal, est}            for «Загрузка» (30 October 2026): the day of the account's newest row that came from
 //                                  a statement (not the sheet's), and of the newest balance a statement gave it that
 //                                  the page takes (rule 12 - its `anchor` when that is fresher); "" where there is none.
 //                                  est: native, what the account held at the end of `to` by the page's own count - est
 //                                  less the rows dated after `to` and the marks of a later day; null without a balance.
-//                                  hold: how many of the account's rows dated `to` a line marked «Оплачено» on a later
-//                                  day holds - a balance typed for `to` would count each again, after itself
 //  missing[]                       keys of active accounts without an anchor (v0 ⇔ not empty)
 //  now, nowApprox                  Σ gbp over anchored accounts, or null in v0; approx when an account is stale or
 //                                  handOld, or a hand mark is counted in it
@@ -5749,10 +5747,12 @@ const Live=(()=>{
   // «Своих денег» (the owner's word of 30 October 2026, «давай»): «Денег сейчас» less «под налоги», the two figures
   // «Счета» shows. Below zero the accounts hold less than the taxes they owe, and the sentence does not say «хватает»
   // on that money (Mika, 31 October 2026, «16 да»): vR stands where v1 or v3 would (`base`), and every other verdict
-  // is as it was - a minus, a thin plan and «Разбор» are said before it, as they were before v1.
+  // is as it was - a minus, a thin plan and «Разбор» are said before it, as they were before v1. Only where something
+  // is held for taxes - where «Своих денег» is drawn: accounts below zero with no tax held are an overdraft, not taxes
+  // the accounts cannot cover, and the sentence would name a cause that is not there.
   const ownG=v0?null:r2(r2(nowRaw)-r2(RES0));
   const lowRes=li>=0?days[li].res:0,id0=v0?"v0":empty?"vE":LOW<0?"v4":LOW<cushion?"v3":free&&free.thin&&free.thin.half?"vT":inbox.inN&&LOW-inbox.inGbp<cushion?"vi":"v1",subs=[];
-  const id=ownG!=null&&ownG<0&&(id0==="v1"||id0==="v3")?"vR":id0;
+  const id=ownG!=null&&ownG<0&&r2(RES0)>0.5&&(id0==="v1"||id0==="v3")?"vR":id0;
   if(between.n)subs.push("between");if(inbox.n-inbox.prov>0)subs.push("inbox");if(ACC.some(a=>a.stale||a.handOld))subs.push("stale");
   if(!v0&&!empty&&lowRes>0.005&&LOW-lowRes<cushion)subs.push("tax");
   // With an empty plan the one thing the line can still say is that a tax alone takes the accounts below zero.
@@ -6473,16 +6473,21 @@ const Trial=(()=>{
   row("res","Под налоги",fmt(A.res),fmt(B.res));
   // The sentence is the page's own verdict of the copy (held), and after it what the plan itself stands at. (vR - no
   // money of the studio's own, 31 October 2026: no «хватает» in the trial where the page says none.)
-  const id=B.id,lowAt=`${fmt(B.low)}, ${dYF(M,B.lowDay)}`,too=A.id===id;
+  // (vR stands for v1 or v3: the plan and the trial are «the same» only when both stand for the same one; that there is
+  // no money of the studio's own in the plan as well is said by the «тоже» of the trial's own sentence.)
+  const id=B.id,lowAt=`${fmt(B.low)}, ${dYF(M,B.lowDay)}`,too=A.id===id&&(A.base||"")===(B.base||""),under=X=>`${dYF(M,X.lowDay)} останется ${fmt(X.low)} — меньше запаса`;
   const say=id==="v4"?`В этом случае <span class="wi-neg">${dYF(M,B.minusDay||B.lowDay)} не хватит ${fmt(-(B.minusDay?B.minus:B.low))}</span>${B.minusDay&&B.minusDay!==B.lowDay?` — это первый минус. Глубже всего ${dYF(M,B.lowDay)}: не хватит ${fmt(-B.low)}.`:"."}`
    :id==="v3"?`В этом случае хватает, но впритык: ${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`
    :id==="vT"?`План расходов не дописан, поэтому «денег хватает» ${too?"не скажу и про этот случай":"про этот случай не скажу"}. Нижняя точка по вписанному — ${lowAt}.`
    :id==="vi"?`Сначала разберите поступления в «Разборе»: пока они там, «денег хватает» ${too?"не скажу и про этот случай":"про этот случай не скажу"}. Нижняя точка — ${lowAt}.`
    :id==="v1"?`В этом случае денег ${too?"тоже ":""}хватает на ${H} дней. Нижняя точка — ${lowAt}.`
-   :id==="vR"?`В этом случае минуса в ближайшие ${H} дней нет, но своих денег ${too?"тоже ":""}нет — под налоги нужно больше, чем лежит на счетах. ${B.base==="v3"?`${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${lowAt}.`}`
+   :id==="vR"?`В этом случае минуса в ближайшие ${H} дней нет, но своих денег ${A.id==="vR"?"тоже ":""}нет — под налоги нужно больше, чем лежит на счетах. ${B.base==="v3"?`${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${lowAt}.`}`
    :`Нижняя точка в этом случае — ${lowAt}.`;
-  const plan=too?(id==="v4"?"По плану денег тоже не хватает.":id==="v3"?"По плану тоже впритык.":"")
-   :A.id==="v1"?"По плану денег хватает.":A.id==="v3"?"По плану хватает впритык.":A.id==="vR"?"По плану минуса нет, но своих денег нет.":A.id==="v4"?`По плану ${dYF(M,A.minusDay||A.lowDay)} не хватает ${fmt(-(A.minusDay?A.minus:A.low))}.`
+  const plan=too?(id==="v4"?"По плану денег тоже не хватает.":id==="v3"?"По плану тоже впритык.":id==="vR"&&B.base==="v3"?"По плану тоже меньше запаса.":"")
+   :A.id==="v1"?"По плану денег хватает.":A.id==="v3"?"По плану хватает впритык."
+   :A.id==="vR"?(id==="vR"?(A.base==="v3"?`По плану ${under(A)}.`:"По плану нижняя точка выше запаса.")
+    :`По плану минуса нет, но своих денег нет${A.base==="v3"?`; ${under(A)}`:""}.`)
+   :A.id==="v4"?`По плану ${dYF(M,A.minusDay||A.lowDay)} не хватает ${fmt(-(A.minusDay?A.minus:A.low))}.`
    :A.id==="vi"?"По плану сначала нужно разобрать поступления.":A.id==="vT"?"По плану «хватает» сказать нельзя: он не дописан.":"";
   const none=skip.length>=changes.length;
   let h=out.length?`<p class="wi-say" data-wi-k="say">${say}${plan?` <span class="wi-plan">${plan}</span>`:""}</p><table class="wi-t"><thead><tr><th></th><th>по плану</th><th>в этом случае</th></tr></thead><tbody>${out.join("")}</tbody></table>`
