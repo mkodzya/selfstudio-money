@@ -34,8 +34,13 @@ const item = (M, id) => M.items.find((it) => it.id === id) || null;
 // (item.wd.by), that a withdrawal is a record (item.wd.rec, 17 October 2026 - W1), what was paid outside the
 // plan (months.by[ym].off, .wait) - and the bank's fees (19 October 2026, `bareFee`).
 // `bareFee` takes out only what the model has gained since develop before the fees (008462e): the running month's
-// row of fees (month.blocks.fee) and a month's fees by bank (months.by[ym].fees). Nothing else of a model is new.
-const bareFee = (M) => { if (M.month && M.month.blocks) delete M.month.blocks.fee; Object.values((M.months && M.months.by) || {}).forEach((o) => { delete o.fees; }); return M; };
+// row of fees (month.blocks.fee) and a month's fees by bank (months.by[ym].fees) - and, newer than both pages and
+// asked of neither, how far each account's statements reach for «Загрузка», and what the account held at the end of
+// that day (accounts[].stmt, 30 October 2026: it reads the model's rows and marks and moves nothing); and «Своих
+// денег» of the same day - `own`, «Денег сейчас» less «под налоги», which no other figure and no verdict reads.
+// Nothing else of a model is new.
+const bareFee = (M) => { if (M.month && M.month.blocks) delete M.month.blocks.fee; Object.values((M.months && M.months.by) || {}).forEach((o) => { delete o.fees; });
+  (M.accounts || []).forEach((a) => { delete a.stmt; }); delete M.own; return M; };
 const bare = (M) => { M.items.forEach((it) => { delete it.saw; delete it.sawDay; if (it.wd) { delete it.wd.by; delete it.wd.rec; } });
   Object.values((M.months && M.months.by) || {}).forEach((o) => { delete o.off; delete o.wait; }); return bareFee(M); };
 // The owner's decisions of 17 October 2026, written out here a second time, apart from the page, so that the scripts

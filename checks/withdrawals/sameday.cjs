@@ -21,7 +21,7 @@
 //      byte; and F is asked of them, and only where no withdrawal is a record (W1): those are counted.
 //   W. What lib.cjs, `wCheck`, holds of every record and every rest (W1, W2).
 //   P. (19 October 2026) A table that holds no fee is read as develop before the fees read it (pre.cjs), byte for byte
-//      but for what the fees add (lib.cjs, `bareFee`).
+//      but for what the fees add, accounts[].stmt and «Своих денег» (lib.cjs, `bareFee`).
 //   G. What lib.cjs, `gCheck`, holds of the fees, where the table holds one (each fee once; every account and every line
 //      other than a withdrawal as with the fees' words taken out) - and there D and W count a row without its
 //      fee, and F is not asked. A third of the lives are given the fees by a stream of their own (gen.cjs, `fees`).

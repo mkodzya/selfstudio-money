@@ -270,6 +270,16 @@ a deploy:
   document travels in it as a string, with its quotes escaped, so the document
   itself has to be somewhat smaller. The plan's last save while a tab closes
   uses `fetch` with `keepalive`, and browsers cap such a body at 64 KiB.
+  Since 30 October 2026 the plan carries a journal of its changes (`log`,
+  «Журнал правок»), which no figure reads; the page bounds it as each entry is
+  written - twelve months, 1,000 entries, 200,000 characters - and the save
+  made as a tab closes goes with as many of its newest entries as fit in
+  63 KiB, so that the change itself is not refused. Since the same day it also
+  carries one stamp for every month a founder closed in «Месяцы» (`closes`,
+  «Закрыть {месяц}»: the month's totals and what was missing - from a few
+  hundred bytes to about a kilobyte and a half each), which no figure reads
+  either; nothing bounds them, and they go whole with every save, that one
+  too.
 - **Every save raises the revision**, and every other open page then gets
   `409` and stops saving until it is reloaded. So a save that nobody asked
   for — on open, on a timer — shuts the other founders' pages. The page makes

@@ -26,7 +26,8 @@
 //      the same model - where no other withdrawal waits with a mark, and where one does but neither order left a
 //      memory. Where one did, the pair is counted and nothing is asked of it.
 //   P. (19 October 2026) A table that holds no fee is read as develop before the fees read it (pre.cjs, 008462e),
-//      byte for byte but for the fields the fees add (lib.cjs, `bareFee`) - at every step, memory or not.
+//      byte for byte but for the fields the fees add, accounts[].stmt and «Своих денег» (lib.cjs, `bareFee`) - at every step, memory
+//      or not.
 //   G. What lib.cjs, `gCheck`, holds of the fees, at every step whose table holds one: each fee counted once, in its
 //      month and its bank; none outside the plan; every account the same money, and every line other than a withdrawal
 //      closed and paid the same, as with the fees' words taken out.

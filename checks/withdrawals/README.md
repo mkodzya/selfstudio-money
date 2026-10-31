@@ -77,7 +77,8 @@ The owner's decisions of 17 October 2026 (`docs/handoff.md`, the entry of that d
   - for the row, never the other fees of its text without them - and Mosta's figure ends at a space, «·» or the
   text's end («комиссия 1e-7» is no fee, not 1). **P**: a table that holds no fee at
   all is read as develop before the fees read it (`pre.cjs`, 008462e) byte for byte, but for the two fields the fees
-  add (`bareFee`: `month.blocks.fee`, `months.by[ym].fees`) - every model, memory or record or not. **G** (`gCheck`):
+  add (`bareFee`: `month.blocks.fee`, `months.by[ym].fees`), the one «Загрузка» reads since 30 October 2026
+  (`accounts[].stmt`) and «Своих денег» of the same day (`own`) - every model, memory or record or not. **G** (`gCheck`):
   where the table holds a fee, every fee is counted once, in its month and its bank, to the penny; no fee row of its
   own stands outside the plan, and no row there stands at more than its worth; every account stands on the same
   balance and counts the same money after it as with every fee's words taken out (`unfee`) - but for a row dated on a
@@ -134,7 +135,9 @@ label; and (`sameday.cjs`) a record written before its rows came, whose nearer r
   (see, change, keep - `Plan.edit`), `raw` is the bare writer: a page from before the rule; the decisions of
   17 October 2026 written out apart from the page - `named`, `toOwn`, `isDaily`, `wCheck`; and the fees of
   19 October 2026 - `feeOf` (and `figOf`, a fee's figure), `worth`, `nat`, `hasFee`, `unfee`, `gCheck`, and `bareFee`
-  (what the fees add to a model; `bare` takes it out too).
+  (what the fees add to a model, and since 30 October 2026 how far each account's statements reach for «Загрузка»
+  and what the account held at the end of that day, `accounts[].stmt`, which no page of before has, and «Своих
+  денег», `own`; `bare` takes all of it out too).
 - `gen.cjs` - seeded random plans and ledgers; `news` and `fees` are the streams of 17 and 19 October 2026.
 - `cases.cjs` - the reviews' cases, by hand; it asks the page as it is (`new.cjs`) alone - case 7 has `pre.cjs` write
   the memory it reads; case 11 asks `new.cjs`'s `text120` (`pre.cjs`'s with `ENGINE=pre`).
