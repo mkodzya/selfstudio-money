@@ -150,4 +150,14 @@ to what of a row is a bank's fee (`Live.fee`), is not finished until these runs 
 and `all … held` - and the checks `rv-wdmark`, `rv-wdday`, `records`, `rest`, `daily`, `fees` and `fees-comma` are
 green in CI. The
 one exception is K in the lives named above as known, which is put to the owner (`docs/handoff.md`, «Решения,
-которые ждут Мику», 14); K failing in any other life is a change not finished.
+которые ждут Мику», 14 - answered «А», accepted as a boundary); K failing in any other life is a change not finished.
+
+**Answer 15 of 31 October 2026** changed `B` itself: a row of a typed balance's own day goes after that balance by its
+mark only when the mark was made after the balance was typed (`docs/handoff.md`, «Решения Мики» of that day). The
+pages these scripts compare with count such a row after the balance whenever its mark is of a later day, so
+`engine.mjs` writes the answer into a page that lacks it, and says so as it builds (`answer 15 of 31 October 2026
+written in`); the page as it is has it already. Run once without that, every F and P difference - 13 lives across
+`lives.cjs` and `sameday.cjs` - went the moment the old pages had the one condition; with it the runs above say what
+they said before: `all 39 held`, `0 differ`, `every property held`, and K only in the known lives (370 and 496 of
+`lives.cjs 1500 rich`; 1302, 1360, 2012, 2374, 2564 and 3860 of `sameday.cjs 4000`). `ON=dev` still fails B, as it
+should: that is the rule of 13 October, not this one.
