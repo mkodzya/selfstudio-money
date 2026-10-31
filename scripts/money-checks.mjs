@@ -6697,6 +6697,19 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-say', 'td-own', 'note', 'row'], btn: ['Как подстраховаться'], red: true },
     'no «хватает, но впритык»: no money of its own, then the day under the cushion with «Как подстраховаться», and the line between the sentence and the lines under it');
   same(await pg.$eval('#view-today .td-verdict', (e) => getComputedStyle(e).borderLeftStyle), 'solid', 'the card of vR has the side line of v3');
+  // «Что если» a hire of £100 a month from October: 25 Oct comes to £4,400 (4,500 − 100), the lowest point, still under
+  // the cushion and still no money of its own - the trial names that day, as vR in the place of v3 does on the page.
+  await pg.click('#view-today .td-wi > summary');
+  await pg.waitForSelector(F + '[data-wi-panel]');
+  await pg.click(F + '[data-wi-kind="cost"]');
+  await pg.selectOption(F + '[data-wi-f="from"]', '2026-10');
+  await pg.fill(F + '[data-wi-f="amt"]', '100');
+  await pg.click(F + '[data-wi-go]');
+  await pg.waitForSelector(F + '[data-wi-k="say"]');
+  const t2 = await ask(pg, hire(100));
+  same([await text(pg, F + '[data-wi-k="say"]'), t2.plan.id, t2.trial.id, t2.trial.base, t2.trial.low, t2.trial.lowDay],
+    ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. 25 октября останется £4,400 — меньше запаса £5,000.', 'vR', 'vR', 'v3', 4400, '2026-10-25'],
+    '«Что если» under the cushion with no money of its own: no «хватает, но впритык» in the trial either, and the day under the cushion named');
   await pg.context().close();
   // ---- 3. Wise £12,000: some of its own.
   pg = await scene('own money, above zero', led(), P(12000));
@@ -7117,8 +7130,11 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   await lt.context().close();
 
   // ---- 6. A plan that is «впритык» by itself.
+  // (The cushion is raised by £50,000 rather than Wise cut by as much: the lowest point stands £841 under it all the
+  // same, and the accounts still hold more than the taxes take - with less, the sentence is vR, «своих денег нет»,
+  // since Mika's «16 да» of 31 October 2026, and that case is own-money's.)
   const P6 = demoPlan(T);
-  P6.banks.find((b) => b.bank === 'Wise' && b.cur === 'GBP').amt -= 50000;
+  P6.cushion += 50000;
   const tight = await scene('what if, a plan under its cushion', demoLedger(T), P6, { H: 60 });
   same((await holds(tight, 'a plan whose low point is under the cushion')).M.verdict.id, 'v3', 'the plan itself is «впритык»');
   await unfold(tight);
