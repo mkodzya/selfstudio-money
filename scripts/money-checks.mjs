@@ -6195,7 +6195,7 @@ await run('up-need', '«Загрузка» says, account by account, from which 
   await pg.context().close();
 });
 
-await run('up-bal', 'a statement that gives no balance of its own asks for one on its card in «Загрузка» - the page\'s figure for the end of its last day already in the field, said to be the page\'s, and written as «Вписать остаток» writes it; never over a fresher typed balance, and never where a row of that day would then be counted twice', async () => {
+await run('up-bal', 'a statement that gives no balance of its own asks for one on its card in «Загрузка» - the page\'s figure for the end of its last day already in the field, said to be the page\'s, and written as «Вписать остаток» writes it; never over a fresher typed balance; and a row of that day held by a mark made before the balance is inside it', async () => {
   // Mika, 30 October 2026, «давай»: «Остаток прямо на карточке загруженного файла для Barclays CSV, Mosta и Revolut,
   // расчётная сумма уже подставлена. Выписка и остаток вносятся за одну минуту, и пропадают предупреждения вроде «£X
   // возможно посчитаны дважды»». A made-up studio on T = 6 Oct, the page open at 11:00, three accounts (made-up figures):
@@ -6226,7 +6226,7 @@ await run('up-bal', 'a statement that gives no balance of its own asks for one o
       row('o-svc', 'Example service', 100, '2026-10-05', { bank: 'Revolut' })] });
   let pg = await scene('a balance on the card of a statement', L, P);
   const twice = async () => (await texts(pg, '#view-today .td-verdict .note')).filter((s) => /между выписками/.test(s));
-  const accts = () => pg.evaluate(() => { const M = window.__money.model({ H: 30 }); return [M.accounts.map((a) => [a.key, a.est, a.stmt.to, a.stmt.est, a.stmt.hold]), M.between.n, M.now, M.nowDate, M.nowIsToday]; });
+  const accts = () => pg.evaluate(() => { const M = window.__money.model({ H: 30 }); return [M.accounts.map((a) => [a.key, a.est, a.stmt.to, a.stmt.est]), M.between.n, M.now, M.nowDate, M.nowIsToday]; });
   const toUpload = async () => { await pg.click('.nav [data-tab="settings"]'); await pg.click('#view-settings .set-nav [data-tabgo="upload"]'); };
   const box = (k) => `#view-upload [data-up-bacct="${k}"]`;
   const card = (k) => pg.$eval(box(k), (e) => [(e.querySelector('label span') || {}).textContent || '', e.querySelector('[data-up-bamt]') ? e.querySelector('[data-up-bamt]').value : null,
@@ -6242,8 +6242,8 @@ await run('up-bal', 'a statement that gives no balance of its own asks for one o
       'CARD-8002,04-10-2026,-20.00,GBP,Card transaction of 20.00 GBP issued by EXAMPLE TOOL,,1965.00,,,EXAMPLE TOOL,', 'CARD-8001,04-10-2026,-15.00,GBP,Card transaction of 15.00 GBP issued by EXAMPLE APP,,1985.00,,,EXAMPLE APP,'].join('\n')) }]);
   await puts('led', 1);
   await toUpload();
-  same(await accts(), [[['Wise|GBP', 1965, '2026-10-04', 1965, 0], ['Barclays|GBP', 9586, '2026-10-04', 9636, 0], ['Revolut|GBP', 5000, '2026-10-04', 5040, 0]], 1, 16551, '2026-10-04', false],
-    'the model: what each account held at the end of the day its statements now reach - 9,586 + 50 on Barclays, 5,000 + 40 on Revolut; Wise stands on its statement\'s own balance; no row of that day is held by a later mark; «Денег на 4 окт»');
+  same(await accts(), [[['Wise|GBP', 1965, '2026-10-04', 1965], ['Barclays|GBP', 9586, '2026-10-04', 9636], ['Revolut|GBP', 5000, '2026-10-04', 5040]], 1, 16551, '2026-10-04', false],
+    'the model: what each account held at the end of the day its statements now reach - 9,586 + 50 on Barclays, 5,000 + 40 on Revolut; Wise stands on its statement\'s own balance; «Денег на 4 окт»');
   same([await card('Barclays|GBP'), await card('Revolut|GBP')],
     [['Сколько было на счёте на 4 окт по банку, £', '9636', SAYS, ''], ['', null, '', FRESH]],
     'the Barclays card asks what the account held by the bank at the end of 4 Oct, with the page\'s own figure in the field and words that say so; the Revolut card asks nothing - its balance typed for 6 Oct is the fresher one');
@@ -6266,7 +6266,7 @@ await run('up-bal', 'a statement that gives no balance of its own asks for one o
     [9620, '2026-10-04', 'Mika', true, Object.keys(bankRow('b-Wise-GBP')).sort(), 'Остаток вписан: Barclays GBP на 4 окт'],
     'written as «Вписать остаток» writes it: the sum, the day the statement ends, when and by whom - and no field the plan did not hold');
   const [A1, between1, , nowDate1, today1] = await accts();
-  same([await card('Barclays|GBP'), A1[1], between1, nowDate1, today1, (await need())[1]], [['', null, '', 'Остаток Barclays GBP на 4 окт вписан: £9,620, Mika'], ['Barclays|GBP', 9570, '2026-10-04', 9620, 0], 1, '2026-10-04', false, ['Barclays|GBP', 'выписка с 5 окт']],
+  same([await card('Barclays|GBP'), A1[1], between1, nowDate1, today1, (await need())[1]], [['', null, '', 'Остаток Barclays GBP на 4 окт вписан: £9,620, Mika'], ['Barclays|GBP', 9570, '2026-10-04', 9620], 1, '2026-10-04', false, ['Barclays|GBP', 'выписка с 5 окт']],
     'the card says the balance of that day is typed; the account stands on it, and the mark of 5 Oct is counted after it: 9,620 − 50; the day of «Денег на …» has not moved; and «Что выгрузить» asks for no balance any more');
   same([await card('Revolut|GBP'), bankRow('b-Revolut-GBP').asOf, store.cash.puts], [['', null, '', FRESH], T, 1], 'Revolut\'s typed balance of 6 Oct stands, untouched');
   await pg.click('.nav [data-tab="today"]');
@@ -6277,27 +6277,35 @@ await run('up-bal', 'a statement that gives no balance of its own asks for one o
   // A made-up studio on T = 6 Oct, Barclays GBP alone: £10,000 typed for 1 Oct. Mika's transfer −£1,000 of 5 Oct came
   // with a statement uploaded today at 09:00; his withdrawal «Mika» £1,000 of 5 Oct was marked «Оплачено» today at
   // 08:30, so the transfer stands in that mark's place. A Barclays CSV read now brings −64 on 5 Oct. The account holds
-  // 10,000 − 1,000 − 64 = 8,936, and so it did at the end of 5 Oct (stmt.est), which is also what the bank says. But
-  // a balance typed for 5 Oct reads the transfer of that day as after itself - its mark is of 6 Oct (rule 4) - so
-  // 8,936 typed for 5 Oct would make «Денег сейчас» 8,936 − 1,000 = 7,936, £1,000 counted twice (the review of
-  // 30 October 2026, the hand case on the engine). The card asks nothing and says why; «Денег сейчас» is today's
-  // (statements to 5 Oct, T − 1) and stays so; «Что выгрузить» still asks for the balance.
+  // 10,000 − 1,000 − 64 = 8,936, and so it did at the end of 5 Oct (stmt.est), which is also what the bank says.
+  // Until 31 October 2026 a balance typed for 5 Oct read the transfer of that day as after itself - its mark is of
+  // 6 Oct - and 8,936 typed made «Денег сейчас» 7,936, £1,000 counted twice; the card asked nothing (the review of
+  // 30 October 2026). Mika, 31 October, «15 да»: a row of the balance's day goes after it by its mark only when the
+  // mark was made after the balance was typed (rule 4). The mark of 08:30 is before any balance typed now: the card
+  // asks, with 8,936 in the field, and the balance it writes leaves «Денег сейчас» at 8,936.
   const LM = ledger([filed('x-m', '2026-10-05', -1000, 'mika', 'Mika', { b: 'Barclays', at: ms('2026-10-06T09:00:00Z') })]);
   const PM = plan3({ banks: [bal('Barclays', 'GBP', 10000, '2026-10-01')], div: [row('wM', 'Mika', 1000, '2026-10-05', { blk: 'div', bank: 'Barclays', paid: paid(T, ms('2026-10-06T08:30:00Z')) })] });
-  pg = await scene('a balance on the card, a row of its day held by a later mark', LM, PM);
+  pg = await scene('a balance on the card, a row of its day held by a mark made before it', LM, PM);
   await toUpload();
   await pg.setInputFiles('#fileIn', { name: 'barclays-oct.csv', mimeType: 'text/csv', buffer: Buffer.from('Number,Date,Account,Amount,Subcategory,Memo\n,05/10/2026,20-00-00 00000000,-64.00,Direct Debit,EXAMPLE UTILITY') });
   await puts('led', 1);
   await toUpload();
-  same(await accts(), [[['Barclays|GBP', 8936, '2026-10-05', 8936, 1]], 0, 8936, '2026-10-05', true],
-    'the model: 10,000 − 1,000 − 64 = 8,936 now and at the end of 5 Oct; one row of 5 Oct (the transfer) is held by the mark of 6 Oct; «Денег сейчас» is today\'s');
-  // What the field would have done: the plan with 8,936 typed for 5 Oct, as «Вписать остаток» writes it, through the engine.
-  const typed = await pg.evaluate(({ L, T }) => { const P = JSON.parse(JSON.stringify(window.__cash.state())); P.banks[0] = { ...P.banks[0], amt: 8936, asOf: '2026-10-05', at: Date.now(), by: 'Mika' }; return window.__money.compute(L, P, T, { H: 30 }).now; }, { L: store.led.doc, T });
-  same(typed, 7936, 'typed for 5 Oct, the bank\'s own 8,936 would leave «Денег сейчас» at 7,936 - the transfer counted again after it');
-  same([await card('Barclays|GBP'), await pg.$$(box('Barclays|GBP') + ' input').then((l) => l.length), (await need())[0]],
-    [['', null, '', 'Остаток Barclays GBP на 5 окт здесь не спрашиваю: платёж этого дня отмечен «Оплачено» позже, и после такого остатка он посчитался бы второй раз. Впишите остаток на сегодня — «Вписать остаток» на «Сегодня».'], 0, ['Barclays|GBP', 'выписка с 6 окт и впишите остаток']],
-    'the card has no field: it says, in plain words, why, and where to type the balance instead; «Что выгрузить» still asks for it');
-  same([store.cash.puts, (await accts())[2]], [0, 8936], 'nothing is saved, and «Денег сейчас» has not moved');
+  same(await accts(), [[['Barclays|GBP', 8936, '2026-10-05', 8936]], 0, 8936, '2026-10-05', true],
+    'the model: 10,000 − 1,000 − 64 = 8,936 now and at the end of 5 Oct; «Денег сейчас» is today\'s');
+  same([await card('Barclays|GBP'), (await need())[0]], [['Сколько было на счёте на 5 окт по банку, £', '8936', SAYS, ''], ['Barclays|GBP', 'выписка с 6 окт и впишите остаток']],
+    'the card asks, with the page\'s own 8,936 in the field - the transfer of 5 Oct held by the mark of this morning is no reason to ask nothing any more');
+  // What the engine makes of the balance a founder types later in the day - the bank's own 8,936 for 5 Oct - and of
+  // one typed BEFORE the mark (a balance of 5 Oct at 08:00, the mark at 08:30): the first holds the transfer, the
+  // second does not, and the transfer is counted after it, as rule 4 has always said.
+  const two = await pg.evaluate(({ L, T, early }) => { const P = JSON.parse(JSON.stringify(window.__cash.state())), now = (at) => { P.banks[0] = { ...P.banks[0], amt: 8936, asOf: '2026-10-05', at, by: 'Mika' }; return window.__money.compute(L, P, T, { H: 30 }).now; };
+    return [now(Date.now()), now(early)]; }, { L: store.led.doc, T, early: ms('2026-10-06T08:00:00Z') });
+  same(two, [8936, 7936], 'typed after the mark, 8,936 for 5 Oct holds the transfer: «Денег сейчас» 8,936; typed before the mark, the mark is counted after it: 7,936');
+  await pg.click(box('Barclays|GBP') + ' [data-up-bsave]');
+  await puts('cash', 1);
+  const bM = store.cash.doc.banks.find((r) => r.id === 'b-Barclays-GBP');
+  same([bM.amt, bM.asOf, (await accts())[2], await card('Barclays|GBP'), (await need())[0]],
+    [8936, '2026-10-05', 8936, ['', null, '', 'Остаток Barclays GBP на 5 окт вписан: £8,936, Mika'], ['Barclays|GBP', 'выписка с 6 окт']],
+    'pressed: 8,936 written for 5 Oct; «Денег сейчас» has not moved; the card says the balance is typed, and «Что выгрузить» asks for no balance any more');
   await pg.context().close();
 });
 
@@ -6629,28 +6637,31 @@ await run('tax-hint', 'a receipt in «Разбор» says what to put aside for 
   await p2.context().close();
 });
 
-await run('own-money', '«Сегодня» says «Своих денег» under its sentence - what the accounts hold less what is held for taxes, of the day «Денег сейчас» is of - and the sentence itself is as it was; so is «Что если»', async () => {
+await run('own-money', '«Сегодня» says «Своих денег» under its sentence - what the accounts hold less what is held for taxes, of the day «Денег сейчас» is of - and with less on the accounts than the taxes take the sentence never says «хватает»; nor does «Что если»', async () => {
   // Mika, 30 October 2026, «давай», on: «Строка «Своих денег»: на счетах минус то, что лежит под налоги. Сейчас это
-  // видно только мелкой подписью.» - the line, and nothing else: the sentence is not changed by it (a sentence that
-  // stops saying «хватает» below zero was built at first and taken out by the review of the same day - Mika was not
-  // asked for it). A made-up studio on T = 6 Oct (made-up figures), UK VAT its one rule, the cushion £5,000. The table
+  // видно только мелкой подписью.» - the line. And, 31 October 2026, «16 да»: below zero the sentence stops saying
+  // «хватает» (vR, in the place of v1 or v3; built on the 30th, taken out by that day's review because Mika had not
+  // been asked, put back on his word). A made-up studio on T = 6 Oct (made-up figures), UK VAT its one rule, the cushion £5,000. The table
   // holds one receipt: 2 Oct, +£60,000 on Wise from Acme Ltd, VAT £10,000 - IV кв. is running and is due 7 Feb 2027,
   // past the walk, so «под налоги» is £10,000 and no payment of it is in the plan. The plan: Person B −£1,000 on
   // 20 Oct. Wise is typed for 5 Oct, the receipt inside it: «Денег сейчас» is today's.
   //  · Wise £8,000: «Своих денег −£2,000: на счетах £8,000, под налоги £10,000» (8,000 − 10,000), its minus red. The
-  //    lowest point, £7,000 on 20 Oct (8,000 − 1,000), is over the cushion: v1, «Денег хватает на 30 дней …», as it was;
-  //    the line stands between it and the line about the taxes in the lowest point (7,000 − 10,000 is under the cushion).
+  //    lowest point, £7,000 on 20 Oct (8,000 − 1,000), is over the cushion: v1 on the page as it was, «Денег хватает на
+  //    30 дней …»; now vR in its place - no minus, but no money of its own - with the lowest point and no button. The
+  //    line stands between it and the line about the taxes in the lowest point (7,000 − 10,000 is under the cushion).
   //  · Wise £5,500: −£4,500 (5,500 − 10,000); the lowest point, £4,500 on 20 Oct, is under the cushion: v3, «Хватает,
-  //    но впритык», with «Как подстраховаться», as it was - and the line under it.
+  //    но впритык», as it was; now vR in its place, naming 20 October, £4,500 and the cushion, with «Как
+  //    подстраховаться» - and the line under it.
   //  · Wise £12,000: £2,000 of its own (12,000 − 10,000) - v1, and the line under it.
-  //  · Wise £8,000 typed for 3 Oct: «Денег на 3 окт», «Своих денег на 3 окт −£2,000: …», «По остаткам на 3 октября: …».
+  //  · Wise £8,000 typed for 3 Oct: «Денег на 3 окт», «Своих денег на 3 окт −£2,000: …», «По остаткам на 3 октября:
+  //    минуса …».
   //  · the receipt without its VAT: nothing held for taxes - no line, and v1 as it was.
   // «Что если» on the first, a hire of £100 a month from October: 25 Oct is inside the thirty days, the lowest point is
-  // £6,900 on it (7,000 − 100), still over the cushion: «В этом случае денег тоже хватает …», both verdicts v1 through
-  // the script. And a thin plan: Person B £6,000 a month in the table from April to September, £1,000 a month written
+  // £6,900 on it (7,000 − 100), still over the cushion, and no money of its own in the copy either: «В этом случае
+  // минуса … нет, но своих денег тоже нет …», both verdicts vR in the place of v1 through the script. And a thin plan: Person B £6,000 a month in the table from April to September, £1,000 a month written
   // (1,000 of a usual 6,000 - under half: vT), Wise £12,000, VAT £15,000 held (−£3,000 of its own): the line stands under
   // vT's sentence too, and a hire of £2,500 tried - the copy alone 3,500 of 6,000, v1 at its lowest point of £8,500
-  // (12,000 − 1,000 − 2,500) - is vT in the trial, as before. Nothing is saved. The page as it was draws no «Своих денег».
+  // (12,000 − 1,000 − 2,500), so vR in its place - is vT in the trial: a thin plan comes first. Nothing is saved. The page as it was draws no «Своих денег».
   const led = (vat = 10000, amt = 60000, hist = []) => ledger([...hist, filed('v1', '2026-10-02', amt, 'rev', 'Acme Ltd', { v: vat })]);
   const P = (w, day = '2026-10-05', team = [row('rB', 'Person B', 1000, '2026-10-20')]) => plan3({ banks: [bal('Wise', 'GBP', w, day)], team, tax: { rules: [VAT()] } });
   const seen = async (pg) => ({ say: await text(pg, '#view-today .td-say'), own: (await pg.$('#view-today .td-own')) ? await text(pg, '#view-today .td-own') : null,
@@ -6662,9 +6673,9 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   let pg = await scene('own money, below zero', led(), P(8000));
   let S = await holds(pg, 'Wise £8,000, £10,000 held for taxes');
   same(plain(await pg.$eval('#view-today .td-wi > summary .td-meta', (e) => e.textContent)), 'платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму', 'the folded «Что если» names four things to ask: no client owes a payment here');
-  same([S.M.verdict.id, 'base' in S.M.verdict, S.M.own, S.M.LOW, S.M.LOWDAY], ['v1', false, -2000, 7000, '2026-10-20'], 'its own money 8,000 − 10,000 = −2,000; the lowest point 7,000 on 20 Oct over the cushion: v1, and no other verdict in its place');
-  same(await seen(pg), { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £7,000, 20 октября.', own: 'Своих денег −£2,000: на счетах £8,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: true },
-    'the sentence as it was; the line under it, above the line about the taxes in the lowest point, gives the three sums, and its minus is red');
+  same([S.M.verdict.id, S.M.verdict.base, S.M.own, S.M.LOW, S.M.LOWDAY], ['vR', 'v1', -2000, 7000, '2026-10-20'], 'its own money 8,000 − 10,000 = −2,000; the lowest point 7,000 on 20 Oct over the cushion: vR in the place of v1');
+  same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. Нижняя точка — £7,000, 20 октября.', own: 'Своих денег −£2,000: на счетах £8,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: true },
+    'no «хватает»: no minus, but no money of its own, and the lowest point; the line under it, above the line about the taxes in the lowest point, gives the three sums, and its minus is red');
   await pg.click('#view-today .td-wi > summary');
   await pg.waitForSelector(F + '[data-wi-panel]');
   await pg.click(F + '[data-wi-kind="cost"]');
@@ -6674,29 +6685,31 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   await pg.waitForSelector(F + '[data-wi-k="say"]');
   const t1 = await ask(pg, hire(100));
   same([await text(pg, F + '[data-wi-k="say"]'), t1.plan.id, t1.trial.id, t1.trial.low, t1.trial.lowDay],
-    ['В этом случае денег тоже хватает на 30 дней. Нижняя точка — £6,900, 25 октября.', 'v1', 'v1', 6900, '2026-10-25'],
-    '«Что если» a hire of £100 a month from October: the lowest point £6,900 on 25 Oct (7,000 − 100), and the trial says what the page would say of it');
+    ['В этом случае минуса в ближайшие 30 дней нет, но своих денег тоже нет — под налоги нужно больше, чем лежит на счетах. Нижняя точка — £6,900, 25 октября.', 'vR', 'vR', 6900, '2026-10-25'],
+    '«Что если» a hire of £100 a month from October: the lowest point £6,900 on 25 Oct (7,000 − 100), and no «хватает» in the trial either');
+  same(await text(pg, F + '.wi-plan').catch(() => null), null, '… and, the plan being the same verdict, nothing about the plan after it');
   same([store.led.puts, store.cash.puts], [0, 0], 'nothing is saved: the page, the line and the trial write nothing');
   await pg.context().close();
   // ---- 2. Wise £5,500: under the cushion as well.
   pg = await scene('own money, below zero and under the cushion', led(), P(5500));
   S = await holds(pg, 'Wise £5,500');
-  same([S.M.verdict.id, S.M.own, S.M.LOW], ['v3', -4500, 4500], 'its own money 5,500 − 10,000 = −4,500; the lowest point 4,500 under the cushion: v3');
-  same(await seen(pg), { say: 'Хватает, но впритык: 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-say', 'td-own', 'note', 'row'], btn: ['Как подстраховаться'], red: true },
-    '«Хватает, но впритык» and «Как подстраховаться» as they were, and the line between the sentence and the lines under it');
+  same([S.M.verdict.id, S.M.verdict.base, S.M.own, S.M.LOW], ['vR', 'v3', -4500, 4500], 'its own money 5,500 − 10,000 = −4,500; the lowest point 4,500 under the cushion: vR in the place of v3');
+  same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-say', 'td-own', 'note', 'row'], btn: ['Как подстраховаться'], red: true },
+    'no «хватает, но впритык»: no money of its own, then the day under the cushion with «Как подстраховаться», and the line between the sentence and the lines under it');
+  same(await pg.$eval('#view-today .td-verdict', (e) => getComputedStyle(e).borderLeftStyle), 'solid', 'the card of vR has the side line of v3');
   await pg.context().close();
   // ---- 3. Wise £12,000: some of its own.
   pg = await scene('own money, above zero', led(), P(12000));
   S = await holds(pg, 'Wise £12,000');
-  same([S.M.verdict.id, S.M.own, await seen(pg)], ['v1', 2000, { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £11,000, 20 октября.', own: 'Своих денег £2,000: на счетах £12,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: false }],
-    '£2,000 of its own (12,000 − 10,000): the sentence is v1 as it was, and the line stands under it');
+  same([S.M.verdict.id, 'base' in S.M.verdict, S.M.own, await seen(pg)], ['v1', false, 2000, { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £11,000, 20 октября.', own: 'Своих денег £2,000: на счетах £12,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: false }],
+    '£2,000 of its own (12,000 − 10,000): the sentence is v1 as it was, with no other in its place, and the line stands under it');
   await pg.context().close();
   // ---- 4. Typed for 3 Oct: the day «Денег на 3 окт» is of.
   pg = await scene('own money, as of 3 Oct', led(), P(8000, '2026-10-03'));
   S = await holds(pg, 'Wise £8,000 typed for 3 Oct');
   const s4 = await seen(pg);
-  same([S.M.nowIsToday, S.M.nowDate, S.M.verdict.id, await text(pg, '#view-today .td-at .td-tl'), s4.own, s4.say.startsWith('По остаткам на 3 октября: денег хватает на 30 дней')],
-    [false, '2026-10-03', 'v1', 'Денег на 3 окт', 'Своих денег на 3 окт −£2,000: на счетах £8,000, под налоги £10,000', true], 'balances of 3 Oct: «Денег на 3 окт», and the line and the sentence of that day too');
+  same([S.M.nowIsToday, S.M.nowDate, S.M.verdict.id, await text(pg, '#view-today .td-at .td-tl'), s4.own, s4.say.startsWith('По остаткам на 3 октября: минуса в ближайшие 30 дней по плану нет, но своих денег нет')],
+    [false, '2026-10-03', 'vR', 'Денег на 3 окт', 'Своих денег на 3 окт −£2,000: на счетах £8,000, под налоги £10,000', true], 'balances of 3 Oct: «Денег на 3 окт», and the line and the sentence of that day too');
   await pg.context().close();
   // ---- 5. Nothing held for taxes.
   pg = await scene('own money, nothing held for taxes', led(0), P(8000));
@@ -6710,7 +6723,7 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   S = await holds(pg, 'a thin plan, £3,000 short of the taxes');
   const t6 = await ask(pg, hire(2500));
   same([S.M.verdict.id, S.M.own, S.M.free.thin.half, (await seen(pg)).own, t6.plan.id, t6.trial.id, t6.trial.low], ['vT', -3000, true, 'Своих денег −£3,000: на счетах £12,000, под налоги £15,000', 'vT', 'vT', 8500],
-    'a thin plan with −£3,000 of its own (12,000 − 15,000) is vT, with the line under it; a hire of £2,500 tried keeps it vT, as before');
+    'a thin plan with −£3,000 of its own (12,000 − 15,000) is vT, with the line under it; a hire of £2,500 tried keeps it vT - the copy\'s vR in the place of v1 is held thin');
   same([store.led.puts, store.cash.puts], [0, 0], '… and nothing is saved');
   await pg.context().close();
 });

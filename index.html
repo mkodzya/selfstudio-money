@@ -545,7 +545,7 @@ table.grp{min-width:560px}table.rws{min-width:620px}
    guess. The only red on the screen is a minus. */
 .td-verdict{padding:22px 24px}
 .td-verdict.td-v4{border-left:3px solid var(--mark-crit)}
-.td-verdict.td-v3{border-left:3px solid var(--warn)}
+.td-verdict.td-v3,.td-verdict.td-vR{border-left:3px solid var(--warn)}
 /* «Своих денег»: one plain line under the sentence - in full ink and a size above the muted lines under it, its own
    figure in bold; red only when it is a minus */
 .td-own{margin:10px 0 0;font-size:15px;line-height:1.45;max-width:86ch}
@@ -2069,10 +2069,9 @@ function upNeedDraw(){const b=$("#up-need");if(b&&S.loaded)b.innerHTML=upNeed();
 // (the card says «остаток по выписке» then); a balance of that day typed after the file was read is the answer, and
 // the card says so. Nor - the review of 30 October 2026 - where:
 //  · the account stands on a balance typed for a later day: it is the fresher one, and one of the file's last day in
-//    its place would move the account back to that day - «Денег сейчас» could become «Денег на …»; the card says so;
-//  · a row of the file's last day is held by a line marked «Оплачено» on a later day (`stmt.hold`): a balance typed
-//    for that day reads the row as after itself, while the bank's figure already holds it - the row would be counted
-//    twice. The card sends the founder to «Вписать остаток» for today, whose balance holds that day whole.
+//    its place would move the account back to that day - «Денег сейчас» could become «Денег на …»; the card says so.
+// (A row of that day held by a line marked «Оплачено» on a later day asked for nothing either, until Mika's decision
+// of 31 October 2026: a balance typed now is typed after every mark there is, and holds such a row - rule 4.)
 // A statement's own balance is read as before: this is only the balance typed by hand. Drawn from the two documents
 // while «Загрузка» is in view, and again when the plan changes - never under the cursor; it writes nothing until the
 // button is pressed.
@@ -2082,10 +2081,9 @@ function upBal(f,M){
  Object.keys(f.last||{}).forEach(c=>{if(!(days[k(c)]>=f.last[c]))days[k(c)]=f.last[c];});if(f.lastAny&&!(days[k(f.cur)]>=f.lastAny))days[k(f.cur)]=f.lastAny;
  return Object.keys(days).sort().map(c=>{const D=days[c],a=Live.home(M.accounts,f.bank,c,ac),A=a&&a.anchor;
   if(!a||a.stmt.to!==D||a.stmt.bal===D||D>M.T)return "";
-  const note=t=>`<div class="up-bal note" data-up-bacct="${esc(a.key)}">${t}</div>`,n=a.stmt.hold;
+  const note=t=>`<div class="up-bal note" data-up-bacct="${esc(a.key)}">${t}</div>`;
   if(A&&!A.file&&A.asOf===D&&A.at>=(+f.read||0))return note(`Остаток ${esc(acName(a))} на ${dRu(D)} вписан: ${natU(A.amt,a.cur)}${A.by?", "+esc(A.by):""}`);
   if(A&&!A.file&&A.asOf>D)return note(`Остаток ${esc(acName(a))} вписан на ${dRu(A.asOf)} — он свежее этой выписки, новый не нужен.`);
-  if(n)return note(`Остаток ${esc(acName(a))} на ${dRu(D)} здесь не спрашиваю: ${n===1?"платёж этого дня отмечен":"платежи этого дня отмечены"} «Оплачено» позже, и после такого остатка ${n===1?"он посчитался бы":"они посчитались бы"} второй раз. Впишите остаток на сегодня — «Вписать остаток» на «Сегодня».`);
   const est=a.stmt.est,v=est==null?"":est,sym=(SYM[a.cur]||"").trim()||a.cur;
   return `<div class="up-bal" data-up-bacct="${esc(a.key)}" data-up-bday="${D}" data-up-bcur="${esc(a.cur)}" data-up-best="${v}">
    <label class="fld"><span>Сколько было на счёте на ${dRu(D)} по банку, ${esc(sym)}</span><input type="number" step="any" inputmode="decimal" data-up-bamt value="${v}" aria-label="Сколько было на счёте ${esc(acName(a))} на ${dRu(D)} по банку"></label>
@@ -4081,12 +4079,14 @@ const Cash=(()=>{
 //      asked, look                 see state · it was due before the page began to answer for the rule
 //      item, row, parts[], rows[]  its computed line's id ("" if none) · its whole-bill row · its part rows · the
 //                                  ledger payments given to it
-//  verdict{id, asOf, subs[], short, lowRes}
+//  verdict{id, base, asOf, subs[], short, lowRes}
 //                                  id, top down: v0 no balance · vE the plan is empty · v4 minus · v3 under the
 //                                  cushion · vT the plan is thin (free.thin.half) · vi unrecognised incoming rows in
 //                                  «Разбор» that could change the answer — were they all money the plan still
 //                                  waits for, the lowest point would be under the cushion; a smaller sum is the
-//                                  sub-line "inbox" · v1 enough by what is written. asOf: the date for «По остаткам на …»
+//                                  sub-line "inbox" · v1 enough by what is written. vR (Mika, 31 October 2026, «16
+//                                  да») stands in the place of v3 or v1 - which, `base` says (vR only) - where `own`
+//                                  is below zero: no minus, but no money of the studio's own either. asOf: the date for «По остаткам на …»
 //                                  ("" when balances are fresh, and for v0 and vi). subs, in priority order (draw the
 //                                  first two): "between" · "inbox" · "stale" · "tax" (lowRes > 0 and LOW − lowRes
 //                                  is under the cushion). short: vE only — {d, name, gbp}, the tax that alone takes
@@ -5487,7 +5487,10 @@ const Live=(()=>{
   // A statement row dated on the very day a balance was typed for is taken to be inside it — with two exceptions.
   // The row that closed a line a founder had marked paid AFTER typing that balance: the mark was counted on top of
   // the balance while it stood, so the row that takes its place must be too, or the payment drops out of «сейчас»
-  // and out of the plan at once. (Of the rows that paid a month of a repeating row, that is only those uploaded
+  // and out of the plan at once. After the typing, not only on a later day (Mika's decision of 31 October 2026, «15
+  // да»): a mark pressed on the 6th, before a balance of the 5th was typed on the 7th from the bank, is inside that
+  // balance - the bank's figure for the end of the 5th already holds the row of the 5th that took the mark's place,
+  // and counting it after the balance took the payment off «Денег сейчас» a second time. (Of the rows that paid a month of a repeating row, that is only those uploaded
   // after the mark: a part that was on the page when the rest was marked had been taken out of what the mark was
   // worth.) And, for a balance typed «на сейчас» — for the very day it was typed on — a payment OUT of that day
   // that was uploaded after the typing: nobody can tell whether it left before or after the figure was read off
@@ -5524,16 +5527,11 @@ const Live=(()=>{
     if(!sole&&!(f.ac&&a.ac.length>=3&&(f.ac.endsWith(a.ac)||a.ac.endsWith(f.ac)))){a.unsure=true;return;}
     if(!end||f.d>end.d||(f.d===end.d&&f.balAt>end.balAt))end=f;});
    if(end&&(!a.anchor||end.d>a.anchor.asOf||(end.d===a.anchor.asOf&&end.balAt>a.anchor.at)))a.anchor={amt:end.bal,asOf:end.d,at:end.balAt,read:end.balIn,by:"",file:true};
-   a.stmt={to:"",bal:end?end.d:"",est:null,hold:0};});
+   a.stmt={to:"",bal:end?end.d:"",est:null};});
   // What «Загрузка» asks for (30 October 2026): how far the statements of each account reach - its newest row that
   // came from a statement (the founders' sheet is none, nor the example), by the account rowHome gives it - beside the
   // day of the newest balance a statement gave it that the page takes (`end`, above). Nothing else reads them.
   facts.forEach(f=>{const a=rowHome.get(f);if(a&&(anyRow[f.id]||{}).s==="file"&&f.d>a.stmt.to)a.stmt.to=f.d;});
-  // … and how many rows of that very day a line marked «Оплачено» on a later day holds (`stmt.hold`). A balance typed
-  // for that day reads each of them as after itself (rule 4: «Оплачено» after the balance says after), while the
-  // bank's own figure for the end of the day already holds them - typed, the row would be counted twice. «Загрузка»
-  // asks for no balance of that day while there is one (the review of 30 October 2026).
-  facts.forEach(f=>{const a=rowHome.get(f),p=tookMark.get(f.id);if(a&&a.stmt.to&&f.d===a.stmt.to&&p&&p.on>f.d)a.stmt.hold++;});
   // … and what the page makes the account to have held at the END of that day (`stmt.est`, below): the figure a
   // statement without a balance of its own puts in its field in «Загрузка», for a founder to check against the bank
   // and type over. Every row of an account is in `est` once - inside its balance, or after it - and so is every mark
@@ -5546,7 +5544,7 @@ const Live=(()=>{
    const ownDay=A.at>0&&dayOf(A.at)===A.asOf,to=a.stmt.to;let past=0;
    facts.forEach(f=>{if(rowHome.get(f)!==a)return;const p=tookMark.get(f.id);if(to&&f.d>to)past+=f.a;
     if(A.file){if(f.d>A.asOf||(f.d===A.asOf&&f.at>A.read))a.after+=f.a;}
-    else if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)))a.after+=f.a;
+    else if(f.d>A.asOf||(f.d===A.asOf&&p&&later(p,A)&&(+p.at||0)>A.at))a.after+=f.a;
     else if(f.d===A.asOf&&!p&&ownDay&&f.at>A.at&&f.a<0){a.after+=f.a;a.same+=f.a;}});
    items.forEach(it=>{if(it.acct!==a.key||!it.done||it.done.by!=="mark")return;const p=it.paid,n=it.cur===a.cur?it.dir*it.rem*it.vk:nat(it.cash0,a.cur);
     it.counts=later(p,A);if(to&&p.on>to)past+=n;
@@ -5749,9 +5747,12 @@ const Live=(()=>{
   const btw=items.filter(it=>{const a=accK[it.acct];return it.state==="blind"&&a&&a.anchor&&it.date<=a.anchor.asOf;}),between=cut(btw.length,btw.map(it=>it.id),sum(btw,it=>Math.abs(it.cash)));
   const inbox={n:inb.length,gbp:r2(sumA(inb)),inN:unrec.length,inGbp:r2(unrecG),prov:prov.length,provGbp:r2(sumA(prov))};
   // «Своих денег» (the owner's word of 30 October 2026, «давай»): «Денег сейчас» less «под налоги», the two figures
-  // «Счета» shows - a line under the sentence, and nothing else: the verdict does not read it.
+  // «Счета» shows. Below zero the accounts hold less than the taxes they owe, and the sentence does not say «хватает»
+  // on that money (Mika, 31 October 2026, «16 да»): vR stands where v1 or v3 would (`base`), and every other verdict
+  // is as it was - a minus, a thin plan and «Разбор» are said before it, as they were before v1.
   const ownG=v0?null:r2(r2(nowRaw)-r2(RES0));
-  const lowRes=li>=0?days[li].res:0,id=v0?"v0":empty?"vE":LOW<0?"v4":LOW<cushion?"v3":free&&free.thin&&free.thin.half?"vT":inbox.inN&&LOW-inbox.inGbp<cushion?"vi":"v1",subs=[];
+  const lowRes=li>=0?days[li].res:0,id0=v0?"v0":empty?"vE":LOW<0?"v4":LOW<cushion?"v3":free&&free.thin&&free.thin.half?"vT":inbox.inN&&LOW-inbox.inGbp<cushion?"vi":"v1",subs=[];
+  const id=ownG!=null&&ownG<0&&(id0==="v1"||id0==="v3")?"vR":id0;
   if(between.n)subs.push("between");if(inbox.n-inbox.prov>0)subs.push("inbox");if(ACC.some(a=>a.stale||a.handOld))subs.push("stale");
   if(!v0&&!empty&&lowRes>0.005&&LOW-lowRes<cushion)subs.push("tax");
   // With an empty plan the one thing the line can still say is that a tax alone takes the accounts below zero.
@@ -5843,7 +5844,7 @@ const Live=(()=>{
     wd:it.wd?Object.assign({from:it.w0||"",to:it.w1||"",got:r2(nat(it.gotG,it.cur)),by:tookBy(it)},it.record?{rec:true}:{}):null,saw:it.wd&&it.w0&&it.wt&&it.lat?sawOf(it):undefined,sawDay:it.wd&&it.w0&&it.on&&it.amt>0&&it.paid&&!word(it)&&!(it.wt&&it.lat)?sawOf(it,true):undefined,whose:it.whose||"",ptax:it.ptax,of:it.of,guess:it.guess,tax:it.tax,payer:dl?{sk:dl.sk,label:dl.label,id:dl.id}:null,
     twins:it.src==="row"&&it.date?twinsOf(it.lab,it.list,it.ym,it.id):[],pays:it.pays||[]};};
   const outAcc=a=>({key:a.key,id:a.id,bank:a.bank,cur:a.cur,name:a.name,title:a.title,ac:a.ac,inPlan:a.inPlan,active:a.active,material:a.material,anchor:a.anchor,typed:a.typed||null,unsure:!!a.unsure,legacy:a.legacy,old:a.old,after:r2(a.after),same:r2(a.same),marks:r2(a.marks),est:a.est==null?null:r2(a.est),gbp:a.gbp==null?null:r2(a.gbp),
-   cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld,stmt:{to:a.stmt.to,bal:a.stmt.bal,est:a.stmt.est==null?null:r2(a.stmt.est),hold:a.stmt.hold}});
+   cov:a.cov,through:a.through,age:a.age,stale:a.stale,handDays:a.handDays,handOld:a.handOld,stmt:{to:a.stmt.to,bal:a.stmt.bal,est:a.stmt.est==null?null:r2(a.stmt.est)}});
   const outItems=items.map(outItem),mins=days.reduce((m,x)=>Math.min(m,x.e),0);
   const outPer=X=>({key:X.key,rule:X.rule.id,per:X.per,name:X.rule.name+" за "+pname(X),pname:pname(X),start:X.start,end:X.end,due:X.due,date:X.d0,accF:r2(X.accF),accN:r2(X.accN),sheet:!!X.sheet,accP:r2(X.accP),
    owed:r2(X.owed||X.accF+X.accP),paid:r2(X.paid),found:r2(X.found),left:r2(X.state==="paid"||X.state==="word"||X.state==="none"||!counts(X.rule)?0:X.left),approx:!(X.W||X.st.amt!=null),
@@ -5854,7 +5855,7 @@ const Live=(()=>{
    LATE:r2(LATE),late:{n:new Set(lateIn.map(it=>it.name)).size,name:worst?worst.name:"",days:worst?worst.late:0},need:v0?r2(Math.max(0,-mins)+cushion):null,plusDay,minusDay:!v0&&dip?dip.d:"",minus:!v0&&dip?dip.e:0,inbox,undated,between,
    free,taxes:{since,reserve:v0?null:r2(RES0),rate:topRate,rules:RULES.map(r=>({id:r.id,name:r.name,base:r.base,rate:r.rate,acct:r.acct,per:r.per,day:r.day,off:r.off,on:r.on,ask:r.ask,away:r.away,from:r.from,pay:r.pay,builtin:r.builtin,
      first:r.first||""})),periods:PER.filter(X=>X.state!=="gone").map(outPer)},
-   verdict:{id,asOf:id!=="v0"&&id!=="vi"&&!nowIsToday?nowDate:"",subs,short:lack,lowRes:r2(lowRes)},cards,
+   verdict:Object.assign({id,asOf:id!=="v0"&&id!=="vi"&&!nowIsToday?nowDate:"",subs,short:lack,lowRes:r2(lowRes)},id==="vR"?{base:id0}:{}),cards,
    month:{ym:ymT,inInbox:r2(inInbox),through:mThrough,byWord:r2(byWord),before:{ym:prev,in:r2(before.in),out:r2(before.out)},blocks,accrued:r2(accrued),M_EXP:blocks.result.total},
    months:{list:[...mset].sort(),by:months,to60:m60,more:MORE},clients,helper};
  }
@@ -6378,12 +6379,13 @@ const Trial=(()=>{
  // hundred, and nothing under a hundred, as «Сегодня» shows it.
  const NOSUM={stale:"остатки на счетах старые",noout:"в плане впереди не вписаны расходы",thin:"план расходов не дописан"};
  const read=M=>{const F=M.free,no=!F||!!NOSUM[F.why],v=F?down(F.now):0;
-  return{id:M.verdict.id,low:M.LOW,lowDay:M.LOWDAY,minusDay:M.minusDay||"",minus:M.minus||0,IN:M.IN,OUT:M.OUT,res:M.taxes.reserve,now:M.now,
+  return{id:M.verdict.id,base:M.verdict.base||"",low:M.LOW,lowDay:M.LOWDAY,minusDay:M.minusDay||"",minus:M.minus||0,IN:M.IN,OUT:M.OUT,res:M.taxes.reserve,now:M.now,
    free:no?null:v>=100?v:0,freeWhy:no&&F?F.why:"",tight:F&&F.tight||null,wd:F&&F.wd?F.wd.gbp:0,thin:!!(F&&F.thin&&F.thin.half)};};
  // What may be said of the copy - on the screen and through the script alike: no sum where the page names none of
  // the plan, and a thin plan stays thin, because a cost that is only tried does not write the plan out. (A minus
- // and a low point under the cushion are said of a thin plan too: v4, v3, then vT is the page's own order.)
- const held=(A,B)=>{if(A.free===null){B.free=null;B.freeWhy=A.freeWhy||B.freeWhy;}if(A.thin&&(B.id==="v1"||B.id==="vi"))B.id="vT";return B;};
+ // and a low point under the cushion are said of a thin plan too: v4, v3, then vT is the page's own order - and a vR
+ // in the place of v1 is a v1 for it: thin comes first.)
+ const held=(A,B)=>{if(A.free===null){B.free=null;B.freeWhy=A.freeWhy||B.freeWhy;}if(A.thin&&(B.id==="v1"||B.id==="vi"||(B.id==="vR"&&B.base==="v1"))){B.id="vT";B.base="";}return B;};
  const can=M=>!!(M&&!M.v0&&!M.empty&&M.free&&Plan.doc());
 
  // ---- a change, in words ----
@@ -6469,16 +6471,18 @@ const Trial=(()=>{
   row("in",`Придёт за ${H} дней`,fmt(A.IN),fmt(B.IN),diff(A.IN,B.IN));
   row("out",`Уйдёт за ${H} дней`,fmt(A.OUT),fmt(B.OUT),diff(A.OUT,B.OUT));
   row("res","Под налоги",fmt(A.res),fmt(B.res));
-  // The sentence is the page's own verdict of the copy (held), and after it what the plan itself stands at.
+  // The sentence is the page's own verdict of the copy (held), and after it what the plan itself stands at. (vR - no
+  // money of the studio's own, 31 October 2026: no «хватает» in the trial where the page says none.)
   const id=B.id,lowAt=`${fmt(B.low)}, ${dYF(M,B.lowDay)}`,too=A.id===id;
   const say=id==="v4"?`В этом случае <span class="wi-neg">${dYF(M,B.minusDay||B.lowDay)} не хватит ${fmt(-(B.minusDay?B.minus:B.low))}</span>${B.minusDay&&B.minusDay!==B.lowDay?` — это первый минус. Глубже всего ${dYF(M,B.lowDay)}: не хватит ${fmt(-B.low)}.`:"."}`
    :id==="v3"?`В этом случае хватает, но впритык: ${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`
    :id==="vT"?`План расходов не дописан, поэтому «денег хватает» ${too?"не скажу и про этот случай":"про этот случай не скажу"}. Нижняя точка по вписанному — ${lowAt}.`
    :id==="vi"?`Сначала разберите поступления в «Разборе»: пока они там, «денег хватает» ${too?"не скажу и про этот случай":"про этот случай не скажу"}. Нижняя точка — ${lowAt}.`
    :id==="v1"?`В этом случае денег ${too?"тоже ":""}хватает на ${H} дней. Нижняя точка — ${lowAt}.`
+   :id==="vR"?`В этом случае минуса в ближайшие ${H} дней нет, но своих денег ${too?"тоже ":""}нет — под налоги нужно больше, чем лежит на счетах. ${B.base==="v3"?`${dYF(M,B.lowDay)} останется ${fmt(B.low)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${lowAt}.`}`
    :`Нижняя точка в этом случае — ${lowAt}.`;
   const plan=too?(id==="v4"?"По плану денег тоже не хватает.":id==="v3"?"По плану тоже впритык.":"")
-   :A.id==="v1"?"По плану денег хватает.":A.id==="v3"?"По плану хватает впритык.":A.id==="v4"?`По плану ${dYF(M,A.minusDay||A.lowDay)} не хватает ${fmt(-(A.minusDay?A.minus:A.low))}.`
+   :A.id==="v1"?"По плану денег хватает.":A.id==="v3"?"По плану хватает впритык.":A.id==="vR"?"По плану минуса нет, но своих денег нет.":A.id==="v4"?`По плану ${dYF(M,A.minusDay||A.lowDay)} не хватает ${fmt(-(A.minusDay?A.minus:A.low))}.`
    :A.id==="vi"?"По плану сначала нужно разобрать поступления.":A.id==="vT"?"По плану «хватает» сказать нельзя: он не дописан.":"";
   const none=skip.length>=changes.length;
   let h=out.length?`<p class="wi-say" data-wi-k="say">${say}${plan?` <span class="wi-plan">${plan}</span>`:""}</p><table class="wi-t"><thead><tr><th></th><th>по плану</th><th>в этом случае</th></tr></thead><tbody>${out.join("")}</tbody></table>`
@@ -7643,6 +7647,12 @@ const Today=(()=>{
    s=cap(M.minusDay&&M.minusDay!==M.LOWDAY?`${dRuF(M.minusDay)} не хватит ${fmt(-M.minus)} — это первый минус. Глубже всего ${dRuF(M.LOWDAY)}: не хватит ${fmt(-M.LOW)}. ${out}`:`${dRuF(M.LOWDAY)} не хватит ${fmt(-M.LOW)}. ${out}`);
    btn=`<button data-td-days="${M.minusDay||M.LOWDAY}" data-td-why>Как закрыть</button>`;}
   else if(v.id==="v3"){s=cap(`Хватает, но впритык: ${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`," ");btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
+  // No money of the studio's own (vR, Mika's «16 да» of 31 October 2026): the plan stays above zero only on money the
+  // taxes are owed, so the sentence says so and never «хватает». In the place of v3 it still names the day under the
+  // cushion, with its button.
+  else if(v.id==="vR"){const low=v.base==="v3";
+   s=cap(`Минуса в ближайшие ${H} дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. ${low?`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`}`);
+   if(low)btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
   else if(v.id==="vi"){s=`Сначала разберите ${count(M.inbox.inN,"поступление","поступления","поступлений")} на ${fmt(M.inbox.inGbp)}: часть ожидаемых денег, возможно, уже пришла.`;btn='<button class="primary" data-tabgo="inbox">Разобрать</button>';}
   // A plan with less than half a usual month of costs written is not one to say «денег хватает» about.
   else if(v.id==="vT"){const t=M.free.thin;
@@ -8265,7 +8275,7 @@ document.addEventListener("click",ev=>{
  if((x=c("[data-up-bsave]"))){const box=x.closest("[data-up-bacct]"),v=box?box.querySelector("[data-up-bamt]").value:"";if(!box||!Plan.doc())return;
   const a=Plan.model().accounts.find(q=>q.key===box.dataset.upBacct),D=box.dataset.upBday;if(!a||!D||D>Live.today())return;
   // (what the card was drawn over may have changed since: the same tests as upBal, at the press)
-  if(a.stmt.to!==D||a.stmt.hold||(a.anchor&&!a.anchor.file&&a.anchor.asOf>D))return void upBalDraw();
+  if(a.stmt.to!==D||(a.anchor&&!a.anchor.file&&a.anchor.asOf>D))return void upBalDraw();
   if(v===""||!isFinite(+v))return toast("Впишите, сколько было на счёте по банку — хотя бы 0");
   return void Ed.bal(a,+v,D);}
  if((x=c("[data-reset]"))){if(!x.dataset.armed){x.dataset.armed="1";x.textContent="Точно убрать всё из выписок?";x.classList.add("danger");return;}

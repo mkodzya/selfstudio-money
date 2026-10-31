@@ -317,9 +317,11 @@ a deploy:
   that lets a trial write, or lets its figures stand in for the plan's, breaks
   rule 1 of the page; the check `rv-whatif` holds both. A trial says what the
   page would say of a plan written so and no more: no «Можно вывести» and no
-  «денег хватает» where the page itself gives none, a split row (`rec.chain`)
-  as one payment, a part that has come counted once - `rv-whatif-rules`
-  holds each of these, and `docs/handoff.md`, rule 13, lists them.
+  «денег хватает» where the page itself gives none (since 31 October 2026 nor
+  with less on the accounts than the taxes take - `own-money`), a split row
+  (`rec.chain`) as one payment, a part that has come counted once -
+  `rv-whatif-rules` holds each of these, and `docs/handoff.md`, rule 13, lists
+  them.
 - **The exchange rates come from the stand, by day** (the owner's decision of
   9 October 2026). The page asks `GET /api/rates` once when it opens, and
   again only by somebody's own act - before it reads a statement whose days
