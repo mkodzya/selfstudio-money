@@ -482,8 +482,9 @@ a deploy:
 - **A line of the plan takes the payment a founder names** («Выбрать
   платёж…», the same day, «да»). The page deals a label's payments to its
   monthly lines by date, whatever the sum, and never a payment of another
-  name; on every line but a withdrawal and a computed tax the card now
-  offers the table's payments near its day, of any label and any bank -
+  name; on every line but a withdrawal and a computed tax the card offers,
+  under «Ещё…» («Выбрать платёж из выписки…»), the table's payments near its
+  day, of any label and any bank -
   those of the line's own label and those already named for another line
   first, then the nearest in sum. The
   choice is the hand tie `tx` plus `closed` (`Live.write.pick`), so nothing
@@ -504,6 +505,28 @@ a deploy:
   reads a payment filed as one founder's as his, split or not. Withdrawals are
   untouched: `checks/withdrawals/` reads every plan as before. The check
   `pick-pay` holds it.
+- **A row's card keeps what is known apart from what can be done** (the
+  owner's choice of 1 November 2026, layout 1 «Стопкой»). «Сведения»
+  (`.ed-rc-info`) hold no control at all, for an editor or a reader; every
+  control is in the band «Действия» (`.ed-rc-act`) or under its «Ещё…», and
+  the × in the corner (`data-ed-x`) closes. A new control of the card goes
+  into the band, never into «Сведения» - and, if it writes, into `ACT` as
+  well. A press that writes leaves the card open with «Отменить» alone in
+  the band (`did`), tied to the number of its own change (`Cash.top()` /
+  `Plan.top()`), so it never takes back a change made after it elsewhere.
+  «Удалить строку» is under «Ещё…» on every tab: three presses (this
+  supersedes the two of 8 October 2026 in «Касса · По месяцам»). **On a
+  month of a repeat, what the line is - its name, bank, currency, VAT and
+  «это подписка» - changes from that month on, without a question, and the
+  months before keep theirs** (the same day: «кейс, платят 6 месяцев на
+  барклейс и со следующего месяца начинается на револют, зачем менять
+  предыдущте?»). It goes through `Live.write.onward`, as «{Октябрь} и
+  дальше» does - on the row's first month that is the row itself. «С какого
+  месяца?» is asked about the sum and the day alone; «Чей вывод» and «К чему
+  относится» stay the whole row's. This reverses the rule until that day,
+  under which these fields changed every month of the row even with «Только
+  {месяц}». The check `row-card` holds it; `docs/handoff.md`, the entry of
+  1 November 2026.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two

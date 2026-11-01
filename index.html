@@ -734,6 +734,58 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .ed-pk input{margin:0;flex:0 0 auto;accent-color:var(--accent)}
 .ed-pk .note{font-size:12px}
 .ed-pk .ed-pk-a{margin-left:auto}
+/* The card of one row (the owner's layout 1 «Стопкой», 1 November 2026): two blocks strictly apart. «Сведения» on
+   white - the name, then a list of label and value, and nothing to press; «Действия» on a grey band under one rule -
+   the controls and nothing else. A quiet × in the corner closes it. Narrower than 520px the four answers stand two
+   by two. */
+.ed-rc{position:relative;padding:0;gap:0;container-type:inline-size}
+.ed-rc-x{position:absolute;top:9px;right:9px;z-index:1;width:30px;height:30px;padding:0;border:0;border-radius:100px;background:none;color:var(--text-muted);font-family:var(--sans);font-size:20px;font-weight:400;line-height:1;text-transform:none;letter-spacing:0}
+.ed-rc-x:hover{background:var(--accent-dim);color:var(--text-primary)}
+.ed-rc-info{padding:16px 18px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ed-rc-h{margin:0;padding-right:36px;font-size:17px;font-weight:600;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
+.ed-rc-dl{display:grid;grid-template-columns:80px minmax(0,1fr);gap:9px 14px;align-items:baseline;margin:2px 0 0}
+.ed-rc-dl dt{margin:0;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
+.ed-rc-dl dd{margin:0;min-width:0;overflow-wrap:anywhere;font-size:14px;line-height:1.45}
+.ed-rc .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px}
+.ed-rc-warn{color:var(--warn)}
+.ed-rc-sub{display:block;margin-top:2px;font-size:12.5px;line-height:1.45;color:var(--text-muted)}
+.ed-rc-info .ed-why{color:var(--text-muted)}
+.ed-rc-info .ed-grid{padding-right:30px}
+.ed-rc-act{background:var(--panel-alt);border-top:1px solid var(--border-strong);padding:14px 18px 12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ed-rc-blk{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ed-rc-q{margin:0;font-size:12.5px;line-height:1.45;color:var(--text-muted);overflow-wrap:anywhere}
+.ed-rc-ans{display:flex;flex-wrap:wrap;gap:8px}
+.ed-rc-more{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border)}
+.ed-rc-act>.ed-rc-more:first-child{border-top:0;padding-top:0}
+.ed-rc-more>button{padding:0 12px}
+.ed-rc-more>button:first-child{margin-left:-12px}
+.ed-rc-more>button:last-child{margin-right:-12px}
+.ed-rc-more>[data-ed-more]{margin-left:auto}
+.ed-rc-more>button[aria-expanded="true"]{color:var(--text-primary)}
+.ed-rc-menu{list-style:none;margin:-4px 0 2px;padding:0;border-top:1px solid var(--border)}
+.ed-rc-menu li{border-bottom:1px solid var(--border)}
+.ed-rc-menu li:last-child{border-bottom:0}
+.ed-rc-menu button{display:block;width:100%;height:auto;margin:0;padding:9px 6px;border:0;border-radius:0;background:none;color:var(--text-primary);font-family:var(--sans);font-size:14px;font-weight:400;line-height:1.35;text-transform:none;letter-spacing:0;text-align:left;white-space:normal}
+.ed-rc-menu button:hover{background:var(--panel-raised)}
+.ed-rc-menu button:active{transform:none}
+.ed-rc-menu button:focus-visible{outline-offset:-2px}
+.ed-rc-menu small{display:block;margin-top:1px;font-size:12px;color:var(--text-muted)}
+.ed-rc-menu .ed-rc-bad{color:var(--bad)}
+.ed-rc-act .ed-ask{border-top:0;padding:0}
+.ed-rc-act [data-ed-saves]>span{font-size:12.5px;color:var(--text-muted);flex:1 1 100%}
+.cs-rows tr.cs-edrow .ed-rc{padding:0}
+.cs-rows tr.cs-edrow .ed-rc-info{padding:6px 10px 14px}
+.cs-rows tr.cs-edrow .ed-rc-act{padding:12px 10px}
+.cs-rows tr.cs-edrow .ed-rc-x{top:0;right:0}
+@container (max-width:520px){
+  .ed-rc-info{padding:14px 14px 16px}
+  .ed-rc-act{padding:12px 14px 10px}
+  .ed-rc-dl{grid-template-columns:70px minmax(0,1fr);gap:8px 12px}
+  .ed-rc-ans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ed-rc-ans>button{width:100%;min-width:0;padding:0 8px}
+  .ed-rc-info .ed-grid{padding-right:0}
+  .ed-rc-info .ed-grid>.fld:first-child{padding-right:30px}
+}
 /* «Настройки»: the tax rules, each a card of its own; the clients, each a line with a two-way switch. */
 .ed-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:14px}
 .ed-rule{border:1px solid var(--border-strong);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -2608,7 +2660,7 @@ const Cash=(()=>{
  const cu={view:"plan",month:"",subs:false,scope:"__all",sel:null,open:null,past:false,V:null,sugg:[],auto:null,addAt:"",follow:null,edit:"",imp:null,impText:"",impMsg:"",impOpen:false,line:null,helper:null,land:""};
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  const monL=ym=>MONF[+ym.slice(5)-1].toLowerCase(),monP=ym=>MONP[+ym.slice(5)-1],monG=ym=>MONGF[+ym.slice(5)-1];
- const undoStack=[];
+ const undoStack=[];let undoN=0;
 
  // A date a row may carry: a day of the calendar, and not more than two years off — a year typed with a slip of the
  // finger (2062 for 2026) would otherwise open a month nobody can get back from. Read against today's date each time.
@@ -2785,8 +2837,11 @@ const Cash=(()=>{
  // The whole plan as it stood before a change, thirty changes deep. Taking one back puts that plan in place and
  // saves it like any other change. The journal is no part of what is taken back: the copy is kept without it, the
  // plan put back keeps the journal it has, and «Отменено: …» is one entry more (Journal) - when anything came back.
+ // Each copy carries a number of its own (n), never given twice: a row's card that has just written holds the number
+ // of its change, and offers its own «Отменить» only while that change is still the last one (top) - an «Отменить»
+ // that took back a later change, made elsewhere, would take back what nobody pressed it for.
  const bare=P=>JSON.stringify(Object.assign({},P,{log:undefined}));
- function pushUndo(label){undoStack.push({label,data:bare(plan)});if(undoStack.length>30)undoStack.shift();}
+ function pushUndo(label){undoStack.push({label,data:bare(plan),n:++undoN});if(undoStack.length>30)undoStack.shift();}
  function popUndo(){if(Plan.lost())return;const u=undoStack.pop();if(!u)return;const was=plan,same=bare(was)===u.data;plan=JSON.parse(u.data);plan.log=Array.isArray(was.log)?was.log:[];
   if(!same)Journal.note(was,plan,"Отменено: "+u.label,Date.now(),Plan.by());
   cu.edit="";cu.imp=null;save();toast("Отменено: "+u.label);Plan.redraw();}
@@ -3052,8 +3107,8 @@ const Cash=(()=>{
   const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)+(k==="other"?feesHTML():"")).join("")}</div>`;
   return `<div id="cs-plan" class="stack">${sw}${back}${past}${outs}${wait}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
-   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: название, банк, дата, «каждый месяц» и всё, что со строкой можно сделать. Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
-    <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — третий ответ: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
+   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: сверху — что о строке известно, снизу — что с ней можно сделать: «Получено» или «Оплачено», «Частично…», «Перенести…», «Не придёт…». Название, сумму, банк, дату и «каждый месяц» меняет «Изменить строку»; выбрать платёж из выписки, «Что если…» и «Удалить строку» — в «Ещё…». Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
+    <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — ответ рядом: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Подписки</b> — те же прочие расходы в своей графе; она свёрнута в одну строку, пока её не откроют. Строку переносит туда и обратно галочка «это подписка» в её карточке.
     <b>Даты.</b> Строка без даты остаётся в своём месяце, но в расчёт по дням не идёт.</p>
    ${old()}</div>`;
@@ -3522,7 +3577,7 @@ const Cash=(()=>{
  // changed from outside (it is saved; the redraw is Plan's), keep a copy for «Отменить» and take one back, and open
  // «По дням» on a day.
  return{load:fetchPlan,show,resize,draw,view:setView,test,
-  plan:()=>ready?plan:null,status:()=>!ready?(failed?"bad":"wait"):stale?"stale":"ok",changed(){if(ready)save();},snap:pushUndo,undo(){popUndo();},
+  plan:()=>ready?plan:null,status:()=>!ready?(failed?"bad":"wait"):stale?"stale":"ok",changed(){if(ready)save();},snap:pushUndo,undo(){popUndo();},top:()=>undoStack.length?undoStack[undoStack.length-1].n:0,
   day(d,why){cu.view="days";cu.why=!!why;if(d){cu.sel=d;if(cu.open)cu.open.add(d);}},
   // «Заполнить {октябрь}» and «Подставить по прошлым месяцам» on «Сегодня»: the month to type into, and the helper open.
   // Each lands on what it promised (show): on a phone the month and the helper lie more than a screen below the
@@ -3758,7 +3813,11 @@ const Cash=(()=>{
 //                                  row is split — the old one gets to = the month before, a copy with id `id`, the
 //                                  new values, the same c0, rec.from = this month, rec.chain and the x of this month
 //                                  and later takes over. v: {name, amt, cur, bank, vat, date, whose}; whose goes to
-//                                  every part of the chain from this month on; a date is the new day
+//                                  every part of the chain from this month on; a date is the new day. The row's card
+//                                  writes through here, besides «{Октябрь} и дальше», a change of name, bank, currency,
+//                                  VAT or «это подписка» made on a month of a repeat, whatever «С какого месяца?» was
+//                                  answered (the owner's decision of 1 November 2026): what the line is changes from
+//                                  that month on, and the sum and the day of «Только» go into the new row's x[ym]
 //  same(P, it, id, now, by)        «И дальше так же» on a month paid at another sum: onward from the NEXT month at
 //                                  what came (it.done.got without the tax on top)
 //  end(P, it) / stop(P, it)        «…и дальше» of a delete or of «Не придёт»: rec.to = the month before (the row goes
@@ -6197,7 +6256,9 @@ const Plan=(()=>{
   // (A change that changed the document is one entry of the journal, in its own words: Journal.)
   edit(label,fn){const P=Cash.plan();if(!P||this.lost())return false;const was=JSON.stringify(P),seen=this.see(P),now=Date.now();Cash.snap(label);fn(P,now,who);
    if(JSON.stringify(P)!==was){this.keep(P,seen);Journal.note(JSON.parse(was),P,label,now,who);}Cash.changed();redraw();return true;},
-  undo(){Cash.undo();}};
+  undo(){Cash.undo();},
+  // The number of the last change «Отменить» would take back (Cash: pushUndo), 0 when there is none.
+  top:()=>Cash.top()};
 })();
 Plan.watch(()=>Cash.draw());
 
@@ -6691,8 +6752,9 @@ const Trial=(()=>{
 // a time on the whole page. Every attribute and class starts with ed-. A tab's part of the bargain:
 //  · Ed.use(M) before it draws — the model its rows come from;
 //  · data-ed-open="<item id>" on a row (or a button) opens that item's card; where a tab draws one item in two
-//    places, data-ed-at names the place; data-ed-focus="date" puts the cursor on the date; data-ed-ask="part" opens
-//    it on the question «Частично» asks — how much has been paid, and on what day the rest will be;
+//    places, data-ed-at names the place; data-ed-focus="date" opens it on «Перенести…» (on a row without a date
+//    «Поставить дату…»), the cursor on the date; data-ed-ask="part" opens it on the question «Частично» asks — how
+//    much has been paid, and on what day the rest will be;
 //  · Ed.under(id, at) right after the row — the card, or nothing;
 //  · data-ed-add opens «Добавить» (data-ed-add="inflows|team|taxes|other|div" skips its first question, data-ed-mon
 //    gives the month an undated row belongs to, data-ed-amt and data-ed-date fill the sum and the day in);
@@ -6708,11 +6770,15 @@ const Trial=(()=>{
 //  · for a tab whose rows are typed into where they stand (the monthly constructor): Ed.apply(plan, item, row as it
 //    should read, which fields changed, now, who) writes what the card's «Сохранить» would; Ed.does(verb, item id)
 //    is a data-ed-do pressed from the script (a tick is not a button); Ed.names(list) the names the table offers.
-// A row's card has one button that is not the plan's: «Что если…» (data-wi-open) turns the card over into the trial
-// (Trial, above; `wi` on the open card). It is drawn for a reader too, and is in no list of things that write. It
-// stands only in the card of a row there is something to ask about (Trial.fits): a client's payment, a client that
-// repeats, a monthly withdrawal, and since 30 October 2026 a client's overdue payment - a cost or a tax has no such
-// button, and never a question about another row.
+// A row's card (layout 1 «Стопкой», the owner's choice of 1 November 2026 - «the card of one row», below) is two
+// blocks: «Сведения», what is known of the line, with nothing to press; and «Действия», a grey band of controls -
+// a question, its answers, «Изменить строку» and «Ещё…». A press that writes leaves the card open on what it did,
+// with «Отменить» alone in the band (did); data-ed-x, the × in its corner, closes it.
+// One button in it is not the plan's: «Что если…» (data-wi-open, under «Ещё…») turns the band over into the trial
+// (Trial, above; `wi` on the open card). It is drawn for a reader too - his band holds nothing else - and is in no
+// list of things that write. It stands only in the card of a row there is something to ask about (Trial.fits): a
+// client's payment, a client that repeats, a monthly withdrawal, and since 30 October 2026 a client's overdue
+// payment - a cost or a tax has no such button, and never a question about another row.
 const Ed=(()=>{
  const BLOCKS={inflows:["rev"],team:["cogs"],taxes:["tax"],other:["fixed","other","behalf"],div:[]},BLK0={inflows:"rev",team:"cogs",taxes:"tax",other:"other",div:"div"};
  const WHAT=[["inflows","Поступление"],["team","Команда"],["subs","Подписка"],["other","Прочий расход"],["taxes","Налог студии"],["div","Дивиденды"]],NEW={inflows:"От кого",team:"Кому",taxes:"Какой налог",div:"Что",other:"На что",subs:"Сервис"};
@@ -6735,9 +6801,11 @@ const Ed=(()=>{
  // out. An empty box would store «nothing this month» without a word; the tick says that.
  const forecast=it=>it.src!=="row";
  const okDate=d=>!d||(/^\d{4}-\d{2}-\d{2}$/.test(d)&&d<=dAdd(Live.today(),731));
- // In the card a row of a month opens under itself «Удалить» is one press, as the cross at the end of the row was
- // before the row became one line (Mika, 8 October 2026: «простой механизм нужен»): the toast offers «Отменить».
- const btn=(verb,label,it,cls)=>`<button class="sm${cls?" "+cls:""}" data-ed-do="${verb}" data-ed-id="${esc(it.id)}"${verb==="del"&&cur&&cur.at==="plan"?" data-ed-now":""}>${label}</button>`;
+ // «Удалить строку» acts at once, wherever the card stands (data-ed-now): it is under «Ещё…», and that press is the
+ // one that asks (the owner's decision of 1 November 2026 - three presses: the row, «Ещё…», «Удалить строку»; until
+ // then two in «Касса · По месяцам», since Mika's «простой механизм нужен» of 8 October 2026, and «Точно удалить?»
+ // elsewhere). The toast and the card's band offer «Отменить».
+ const btn=(verb,label,it,cls)=>`<button class="sm${cls?" "+cls:""}" data-ed-do="${verb}" data-ed-id="${esc(it.id)}"${verb==="del"?" data-ed-now":""}>${label}</button>`;
  const back=()=>Plan.undo();
 
  // What a row shows for money: the part still expected or, once it is done, the sum that came. A tax the page
@@ -6864,20 +6932,28 @@ const Ed=(()=>{
  // knows which it is, so the press asks. The account whose balance it is, or null when there is nothing to ask.
  const inBal=it=>{if(!M||it.src==="tax"||!it.date)return null;const a=M.accounts.find(a=>a.key===it.acct);return a&&a.anchor&&it.date<a.anchor.asOf?a:null;};
  // A press that has two answers opens the row's card on the question instead of doing one of them.
- const asks=(verb,it)=>verb==="part"?"part":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"&&!(verb==="del"&&it.occ.last)?verb:verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
+ // A press that has two answers opens the row's card on the question instead of doing one of them. («Убрать» of a
+ // month of a «каждый месяц» row is gone from the card: what it wrote is what «Не придёт… / Не платим…» writes - the
+ // month off, or the repeat ended before it - so a `del` that still reaches such a month asks that question.)
+ const asks=(verb,it)=>verb==="part"?"part":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"?"skip":verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
+ // The control a step was opened from inside the card, for the cursor to go back to when the step is left or its
+ // answer taken back: an item of «Ещё…» gives it back to «Ещё…», whose list has shut. Nothing for a press outside.
+ const retOf=x=>!x||!x.closest||!x.closest('[data-ed-card="row"]')?"":x.closest("[data-ed-menu]")?"[data-ed-more]":x.dataset.edDo?`[data-ed-do="${x.dataset.edDo}"]`:x.dataset.edAsk!==undefined?`[data-ed-ask="${x.dataset.edAsk}"]`:x.matches("[data-wi-open]")?"[data-wi-open]":"";
  function act(verb,x,direct){
   if(Plan.lost())return;
   const it=item(x.dataset.edId),V=VERBS[verb];if(!it)return;
   const a=direct?"":asks(verb,it);
-  if(a)return show({k:"row",id:it.id,at:x.dataset.edAt||(cur&&cur.k==="row"&&cur.id===it.id?cur.at:""),ask:a});
+  if(a)return show({k:"row",id:it.id,at:x.dataset.edAt||(cur&&cur.k==="row"&&cur.id===it.id?cur.at:""),ask:a,ret:retOf(x)});
   if(!V||((verb==="tx"||verb==="notx")&&!it.hint)||((verb==="payer"||verb==="nopayer")&&!it.payer)||(verb==="same"&&!(it.occ&&it.done&&it.done.got))||(verb==="tick"&&!(it.src==="row"&&it.date)))return;
-  if(verb==="del"&&!x.dataset.armed&&!("edNow" in x.dataset)){x.dataset.armed="1";x.textContent="Точно удалить?";x.classList.add("danger");return;}
-  const say=V[0](it);leave(()=>{cur=null;if(Plan.edit(say,(P,now,by)=>V[1](P,it,now,by)))toast(say,back);});
+  // «Повторять каждый месяц» makes the row the first month of a repeat, a line of another id: the card goes with it.
+  // «Удалить строку» leaves nothing for the card to stand under, and folds it at once.
+  const to=verb==="tick"?`${it.id}@${it.date.slice(0,7)}`:"";
+  did(V[0](it),(P,now,by)=>{V[1](P,it,now,by);return to;},verb==="del"?null:x,retOf(x));
  }
  // The second half of such a press: the answer chosen in the card.
  function go(what,card){
   const it=item(card.dataset.edId);if(!it||Plan.lost())return;
-  const ym=it.occ?it.occ.ym:"",done=(say,fn)=>leave(()=>{cur=null;if(Plan.edit(say,fn))toast(say,back);});
+  const ym=it.occ?it.occ.ym:"",done=(say,fn)=>did(say,fn,card,cur&&cur.ret);
   if(what==="skip-only")return done(`${it.name}: в ${monP(ym)} не жду`,P=>{W.off(P,it);});
   if(what==="del-only")return done(`${it.name}: ${mon(ym)} убран`,P=>{W.off(P,it);});
   if(what==="skip-onward"||what==="del-onward")return done(`${it.name}: с ${monG(ym)} больше не повторяю`,P=>{W.end(P,it);});
@@ -6904,7 +6980,37 @@ const Ed=(()=>{
   if(what==="paid-in")return done(`${VERBS.paid[0](it)} — уже в остатке`,(P,now,by)=>{W.mark(P,it,it.date,now,by);});
   if(what==="paid-after")return done(VERBS.paid[0](it),(P,now,by)=>{W.mark(P,it,Live.today(),now,by);});
  }
- const payRow=(it,id,whole)=>{const say=whole?`Оплачено: ${it.name}`:`${it.name}: платёж записан как часть`;cur=null;if(Plan.edit(say,(P,now,by)=>{W.pay(P,it.tax.key,id,whole,now,by);}))toast(say,back);};
+ const payRow=(it,id,whole,x)=>{const say=whole?`Оплачено: ${it.name}`:`${it.name}: платёж записан как часть`;did(say,(P,now,by)=>{W.pay(P,it.tax.key,id,whole,now,by);},x,cur&&cur.ret);};
+ // ---- what a press that wrote leaves behind ----
+ // The one way out of every press that writes a line (act, go, payRow, rowSave). The toast says what was done, with
+ // «Отменить», as it always has. A press made inside a row's card leaves that card open on what it did (the owner's
+ // layout 1, 1 November 2026): «Сведения» say the line as it now is, with the toast's words under its month, and the
+ // band holds one button, «Отменить», for as long as this change is the last one the plan holds (Plan.top) -
+ // another change anywhere, the toast's own «Отменить», or the card shut, and the band is back at rest. `fn` may
+ // return the id the line goes by from now on (a tick makes a row the first month of a repeat, «… и дальше» a new
+ // row of the chain): the card goes with it. A card whose line is no longer on the screen - deleted, moved to
+ // another month, gone from «Нужно решить» - folds away, as every card did after an answer before. A press
+ // outside a card folds whatever card is open, as before. `ret`: where the cursor goes back to when the change is
+ // taken back in the card; `tail`: what the toast adds that is known only once the change is made.
+ function did(say,fn,x,ret,tail){
+  const inCard=!!x&&!!x.closest&&!!x.closest('[data-ed-card="row"]')&&!!cur&&cur.k==="row";
+  if(!inCard)return leave(()=>{cur=null;fresh=false;if(Plan.edit(say,(P,now,by)=>{fn(P,now,by);}))toast(say+(tail?tail():""),back);});
+  const was=cur,g=grab(),c={k:"row",id:was.id,at:was.at||"",ask:"",focus:"",menu:false,wi:false,said:say,tok:-1,ret:ret||"",prev:was.id};
+  cur=c;fresh="done";
+  // (The card is drawn again inside Plan.edit, before it returns: the number of the change and the id the line goes
+  // by are taken there, once its copy for «Отменить» is kept and before anything is drawn.)
+  if(!Plan.edit(say,(P,now,by)=>{c.tok=Plan.top();const to=fn(P,now,by);if(typeof to==="string"&&to)c.id=to;})){cur=was;fresh=false;return;}
+  toast(say+(tail?tail():""),back);
+  if(cur===c&&!document.querySelector('[data-ed-card="row"]')){cur=null;fresh=false;Plan.redraw();drop(g);}
+ }
+ // The band's «Отменить»: the toast's, for this card's own change only. Any other change since, and there is nothing
+ // left for it to take back: the band is at rest again.
+ function undo(){const c=cur;if(!c||c.k!=="row")return;
+  if(!c.said||Plan.top()!==c.tok){c.said=null;return show(c);}
+  if(Plan.lost())return;
+  c.said=null;c.tok=0;if(c.prev)c.id=c.prev;fresh="again";Plan.undo();
+  if(cur===c&&!document.querySelector('[data-ed-card="row"]')){cur=null;fresh=false;Plan.redraw();}}
+ const said=()=>!!cur&&cur.k==="row"&&!!cur.said&&Plan.top()===cur.tok;
 
  // ---- the tax cards of «Нужно решить» ----
  function taxDo(x){
@@ -6924,61 +7030,122 @@ const Ed=(()=>{
  }
 
  // ---- the card of one row ----
- function why(it,quiet){
-  const d=it.done,inn=it.dir>0,out=[];
+ // Layout 1 «Стопкой» (the owner's choice of 1 November 2026). Two blocks, strictly apart:
+ //  · «Сведения» (.ed-rc-info) on white - what is known of the line, and nothing to press: its name; then a list of
+ //    label and value - Сумма, Повтор (a tax worked out by a rule: Период), Банк, Чей (a withdrawal), Относится (a row
+ //    of «Налоги»), and the line's month (a tax: Срок; a line without a date: Дата), whose value says in plain words
+ //    how the line stands, with one muted sentence under them; then, muted, where the line came from. «Изменить
+ //    строку» puts the line's form in its place, the same fields as ever (`fields`, below).
+ //  · «Действия» (.ed-rc-act) on a grey band under one rule - controls and nothing else: a muted question; its four
+ //    answers, «Получено» / «Оплачено» first; a hairline; «Изменить строку» on the left and «Ещё…» on the right
+ //    («Выбрать платёж из выписки…», «Что если…», «Удалить строку»). A question the page has to ask first - «Похоже,
+ //    уже пришло», «… в таблице — это …?», «К чему относится этот налог?» - is a block of its own above the answers. A
+ //    press that opens a step opens it in the band, in the answers' place; a press that writes leaves the band with
+ //    «Отменить» alone, and says what it did under the month (did, above). A quiet × in the corner closes the card.
+ // `cur` of a row's card: {k:"row", id, at, ask, focus, ret, menu, wi, said, tok, prev}. ask: "" the band at rest ·
+ // part · pick · skip · paid · pay (the questions of askBox) · move («Перенести…», or «Поставить дату…» on a line
+ // without a date) · edit (the form). focus: the field the cursor is put in. ret: the control the cursor goes back
+ // to when a step is left. menu: «Ещё…» is open. wi: the band is turned over to «Что если…». said, tok, prev: the
+ // words of the last answer given in the card, the number of its change, and the id the line had before it (did).
+ // What the card says of a line in sentences: where it came from (made - the muted line at the foot of «Сведения»;
+ // the repeat and the rest carried over are «Повтор», not said again) and how it stands (state - under the month's
+ // words, which say the same in fewer). The questions a line raises are the band's.
+ function parts(it){
+  const d=it.done,inn=it.dir>0,st=[];let made;
   if(it.kind==="tax"){const p=M.taxes.periods.find(x=>x.key===it.tax.key),r=M.taxes.rules.find(x=>x.id===it.tax.rule);
-   out.push(p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.");}
-  else out.push(`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"}${it.src==="occ"?` · каждый месяц, ${it.occ.day}-го`:""}${it.carry?` · остаток с ${monG(it.carry.ym)}`:""} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?(FN[it.whose]?`вывод ${FN[it.whose]}: закроется тем, что возьмёт ${FN[it.whose]}`:"вывод: закроется тем, что возьмут фаундеры"):it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`);
-  if(d)out.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":d.note==="hand"?"Закрыто платежом, который выбрали вы":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
+   made=p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}. Сумму по декларации и дату можно поправить.`:"Посчитано по правилу: налог студии за период.";}
+  else made=`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?(FN[it.whose]?`вывод ${FN[it.whose]}: закроется тем, что возьмёт ${FN[it.whose]}`:"вывод: закроется тем, что возьмут фаундеры"):it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`;
+  if(d)st.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":d.note==="hand"?"Закрыто платежом, который выбрали вы":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
   // What has happened is counted at the rate of its own day, and the card says which.
-  if(d&&d.fx>0)out.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
-  if(d){}
-  else if(it.part)out.push(it.wd?`Взято ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`:`Пришла часть: ${nat(it.part.got,it.cur)} из ${nat(it.part.of,it.cur)}.`);
-  else if(it.state==="late")out.push(`Просрочено на ${it.lateDays} дн.: в выписках ${it.bank} по ${dRu(it.cov)} ${inn?"денег":"платежа"} нет.`);
-  else if(it.state==="blind")out.push(`Дата прошла, а выписки ${it.bank} ${it.cov?"только по "+dRu(it.cov):"не загружены"}: считаю на сегодня.`);
-  else if(it.state==="doubt")out.push("Прошлый месяц этого клиента не пришёл, поэтому этот пока не считаю.");
-  else if(it.state==="missed")out.push("Платежа за этот месяц в выписках не было: больше его не жду.");
-  else if(it.state==="carry")out.push("Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.");
-  else if(it.state==="off")out.push("Выключено: в расчёт не идёт.");
-  const hint=it.hint&&!d?`<div class="row"><span>Похоже, уже ${inn?"пришло":"оплачено"}: ${inn?"+":"−"}${nat(it.hint.amt,it.hint.cur)} · ${dRu(it.hint.d)}${it.hint.label?" · "+esc(it.hint.label):""}</span>${btn("tx","Это оно",it)}${btn("notx",inn?"Нет, это новый счёт":"Нет, это другой платёж",it)}</div>`:"";
+  if(d&&d.fx>0)st.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
+  // (A part paid is in the month's own words - «частично £X из £Y» - and is not said twice.)
+  if(d||it.part){}
+  else if(it.state==="late")st.push(`В выписках ${it.bank}${it.cov?" по "+dRu(it.cov):""} ${inn?"денег":"платежа"} нет.`);
+  else if(it.state==="blind")st.push(`Дата прошла, а выписки ${it.bank} ${it.cov?"только по "+dRu(it.cov):"не загружены"}: считаю на сегодня.`);
+  else if(it.state==="doubt")st.push("Прошлый месяц этого клиента не пришёл, поэтому этот пока не считаю.");
+  else if(it.state==="missed")st.push("Платежа за этот месяц в выписках не было: больше его не жду.");
+  else if(it.state==="carry")st.push("Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.");
+  else if(it.state==="off")st.push("В расчёт не идёт.");
+  return{made,state:st};
+ }
+ // The month's words: what remark() says of the line in every list - and where that says nothing of the month (a
+ // line on its way, a month of a repeat, a tax worked out by the rule), what the line waits for and when.
+ function monthSay(it){
+  const r=remark(it),inn=it.dir>0,d=it.done;
+  if(it.state==="off"&&!d)return it.src==="tax"||!inn?"не платим":"не придёт";
+  if(it.state==="late")return `<span class="ed-rc-warn">${esc(r)}</span>`;
+  if(r&&r!=="посчитано по правилу"&&!(it.src==="occ"&&/^каждый месяц/.test(r)))return esc(r);
+  if(d)return esc(`${inn?"получено":"оплачено"} · ${d.by==="row"?"выписка":"отметка"}${d.on?" "+dRu(d.on):""}`);
+  if(it.state==="empty"||!(it.amt>0)&&it.src!=="tax")return "сумма не вписана";
+  if(!it.date)return "без даты";
+  return esc(`${it.src==="tax"?"до":inn?"ждём":"к оплате"} ${dRu(it.date)}`);
+ }
+ // What a row of «Налоги» is for, in the words of its select; "" where the founder has yet to choose.
+ const ofWords=it=>{const v=ofValue(it);if(!v)return "";if(v==="own")return "отдельный налог или платёж";const X=M.taxes.periods.find(p=>p.key===v.slice(2));return (v[0]==="p"?"часть ":"весь ")+(X?X.name:v.slice(2));};
+ // «Сведения»: the name, the list, the line it came from.
+ function info(it){
+  const inn=it.dir>0,tax=it.src==="tax",occ=it.src==="occ",S_=parts(it),ym=ymOf(it)||"",mono=s=>`<span class="mono">${esc(s)}</span>`;
+  const p=tax?M.taxes.periods.find(x=>x.key===it.tax.key):null,row=(k,v,a)=>`<dt>${k}</dt><dd${a||""}>${v}</dd>`;
+  let amt;
+  if(tax)amt=`${mono(tx10(it.amt))} · ${p&&!p.approx?"по декларации":"посчитано по правилу"}`;
+  else if(!(it.amt>0))amt="не вписана";
+  else{amt=mono(nat(it.amt,it.cur)+(SYM[it.cur]?"":" "+it.cur));
+   if(inn&&it.vat&&it.factor>1)amt+=` + VAT ${+((it.factor-1)*100).toFixed(2)}% = ${mono(nat(round2(it.amt*it.factor),it.cur))}`;
+   if(it.cur!=="GBP")amt+=` · ${mono(fmt(Math.round(lineG(it))))}`;}
+  const rep=tax?row("Период",esc(p?p.pname:"")):row("Повтор",esc((occ?`каждый месяц, ${it.occ.last?`${it.occ.day}-го · ${recNote("",it.occ)}`:recNote("",it.occ)}${it.occ.exc?` · в ${monP(it.occ.ym)} иначе`:""}`:`один раз${it.carry?` · остаток с ${monG(it.carry.ym)}`:""}`)+(it.sub?" · подписка":"")));
+  const of=it.list==="taxes"&&!tax&&!it.ptax?row("Относится",ofWords(it)?esc(ofWords(it)):'<span class="ed-rc-warn">не выбрано</span>'):"";
+  const mk=tax?"Срок":!it.date&&!occ||!ym?"Дата":MONF[+ym.slice(5)-1];
+  const sub=said()?cur.said:S_.state.join(" ");
+  return `<h3 class="ed-rc-h">${esc(it.name||"(без названия)")}</h3><dl class="ed-rc-dl">${row("Сумма",amt)}${rep}${row("Банк",esc([it.bank,it.cur].filter(Boolean).join(" · ")))}${it.wd?row("Чей",esc(whoseSay(it.whose))):""}${of}${row(mk,monthSay(it)+(sub?`<span class="ed-rc-sub">${esc(sub)}</span>`:""),' data-ed-month aria-live="polite"')}</dl><div class="ed-why">${esc(S_.made)}</div>`;
+ }
+ // The band at rest, by what the line is and how it stands: the blocks of question and answers, whether the line
+ // can be edited, and the items of «Ещё…». «Получено» / «Оплачено» comes first on every open line, and «Частично»
+ // beside it: paid means paid, and a debt remains only where a founder says so - and stands on the day he names.
+ // «Не придёт» / «Не платим» stands on every open line (the owner's decision of 1 November 2026), a one-off not yet
+ // overdue among them, and switches it off («Вернуть в план» brings it back); on a month of a repeat it asks, this
+ // month or from it on. A button that opens a step says so with «…»; one that does its thing at once does not.
+ function answers(it){
+  const inn=it.dir>0,d=it.done,tax=it.src==="tax",occ=it.src==="occ",own=it.src==="row",st=it.state,ym=ymOf(it)||"",b=(v,l,c)=>btn(v,l,it,c),blocks=[],menu=[],ask=(q,btns)=>{if(btns)blocks.push({q,btns});};
+  if(it.hint&&!d)ask(`Похоже, уже ${inn?"пришло":"оплачено"}: ${inn?"+":"−"}${nat(it.hint.amt,it.hint.cur)} · ${dRu(it.hint.d)}${it.hint.label?" · "+it.hint.label:""}`,b("tx","Это оно","primary")+b("notx",inn?"Нет, это новый счёт":"Нет, это другой платёж"));
   // A month of a row the table had no name for was closed by an amount: whose payment that was is asked once.
-  const payer=it.payer?`<div class="row"><span>${esc(it.payer.label)} в таблице — это «${esc(it.name)}»?</span>${btn("payer","Да",it)}${btn("nopayer","Нет, другой",it)}</div>`:"";
-  // For a reader: the same words, where the money goes through and when - the fields that said so are not drawn -
-  // and neither of the two questions, which are answers to give.
-  if(quiet)return `<div class="ed-why">${esc(out.concat(`Счёт: ${it.bank} ${it.cur}${it.date?", "+dRu(it.date):""}.`).join(" "))}</div>`;
-  return `<div class="ed-why">${esc(out.join(" "))}${hint}${payer}</div>`;
+  if(it.payer)ask(`${it.payer.label} в таблице — это «${it.name}»?`,b("payer","Да")+b("nopayer","Нет, другой"));
+  // A row of «Налоги» that does not say yet what it is for is not saved until it does.
+  if(!d&&it.list==="taxes"&&!tax&&!it.ptax&&ofValue(it)==="")ask("К чему относится этот налог?",'<button class="sm primary" data-ed-ask="edit" data-ed-focus="of">Выбрать…</button>');
+  const one=blocks.some(x=>/primary/.test(x.btns))?"":"primary",at=it.date||occ?` за ${mon(ym)}`:"";
+  const pay=b("paid",inn?"Получено":"Оплачено",one),part=tax?"":b("part","Частично…");
+  // A line that is paid can still be made to repeat: a first invoice marked received is often the first of many.
+  if(d)ask("",(d.by==="mark"||d.by==="ok"||d.by==="legacy"||d.note==="partial"?b("unpaid","Вернуть в план"):"")+(occ&&d.by==="row"&&d.note==="other"?b("same","И дальше так же","primary")+b("part","Частично…"):"")+(own&&it.date&&!it.carry?b("tick","Повторять каждый месяц"):""));
+  else if(st==="off")ask("",b("on","Вернуть в план","primary"));
+  else if(st==="missed")ask(`Платёж${at} был?`,pay+part);
+  else if(st==="doubt"){}
+  else if(st==="empty")ask(`Сумма${at} не вписана.`,'<button class="sm primary" data-ed-ask="edit" data-ed-focus="amt">Вписать сумму</button>');
+  else ask(tax?`Что с налогом за ${(M.taxes.periods.find(x=>x.key===it.tax.key)||{pname:mon(ym)}).pname}?`:`Что с ${it.wd?"выводом":inn?"деньгами":"оплатой"}${at}?`,
+   pay+part+b("move",it.date?"Перенести…":"Поставить дату…")+(tax?b("skip","Не платим"):occ?b("skip",inn?"Не придёт…":"Не платим…"):b("skip",inn?"Не придёт":"Не платим")));
+  // «Ещё…»: what is asked for less often. «Удалить строку» stands where the card had «Удалить» (the owner's
+  // decision of 1 November 2026: three presses everywhere - the row, «Ещё…», «Удалить строку»; it acts at once, and
+  // the toast and the band offer «Отменить»). Never on a month of a repeat: that ends with «Не придёт… → и дальше».
+  if(pickable(it))menu.push(`<button type="button" data-ed-do="pick" data-ed-id="${esc(it.id)}"><span>Выбрать платёж из выписки…</span><small>${d?"если строку закрыл не тот платёж":inn?"деньги пришли, а строка их не нашла":"платёж прошёл, а строка его не нашла"}</small></button>`);
+  if(Trial.fits(M,it))menu.push('<button type="button" data-wi-open><span>Что если…</span><small>проба: в план ничего не записывается</small></button>');
+  if(own&&!d&&st!=="late")menu.push(`<button type="button" data-ed-do="del" data-ed-id="${esc(it.id)}" data-ed-now><span class="ed-rc-bad">Удалить строку</span><small>уйдёт из плана; «Отменить» вернёт</small></button>`);
+  // «Изменить строку» on every line not closed (the sum of an empty one is typed through «Вписать сумму»), and on a
+  // closed one where something is still the founder's to say: what a tax row was for, whose a withdrawal is.
+  return{blocks,menu,edit:editable(it)&&st!=="empty"};
  }
- // By what the row is and where it stands. «Получено» / «Оплачено» comes first on every open row, and «Частично»
- // beside it: paid means paid, and a debt remains only where a founder says so — and stands on the day he names.
- function actions(it){
-  const inn=it.dir>0,late=it.state==="late",d=it.done,tax=it.src==="tax",b=(v,l,c)=>btn(v,l,it,c),pay=b("paid",inn?"Получено":"Оплачено"),pk=pickable(it)?b("pick","Выбрать платёж…"):"",part=(tax?"":b("part","Частично…"))+pk;
-  // A row that is paid can still be made to repeat: a first invoice marked received is often the first of many.
-  // And the payment that closed it can be named again: the page deals a label's payments by date, not by sum.
-  if(d)return (d.by==="mark"||d.by==="ok"||d.by==="legacy"||d.note==="partial"?b("unpaid","Вернуть в план"):"")+(it.occ&&d.by==="row"&&d.note==="other"?b("same","И дальше так же")+part:pk)+(it.src==="row"&&it.date&&!it.carry?b("tick","Повторять каждый месяц"):"");
-  // (A row of its own switched off had only its tick in the month's table to bring it back, and the table has none now.)
-  if(it.state==="off")return b("on","Вернуть в план")+(it.src==="row"?b("del","Удалить","ghost"):"");
-  if(it.state==="missed")return pay+part;
-  if(it.state==="empty"||it.state==="doubt")return (it.state==="doubt"?pk:"")+(it.src==="row"?b("del","Удалить","ghost"):"");
-  // (A row without a date had «частично» in its row of the month, and nowhere else; the month's row has no buttons now.)
-  if(it.state==="undated"||it.state==="carry")return pay+part+b("del","Удалить","ghost");
-  if(it.src!=="row")return pay+part+b("move","Перенести на…")+b("skip",tax?"Не платим":inn?"Не придёт":"Не платим")+(it.src==="occ"?b("del","Убрать","ghost"):"");
-  if(late)return pay+part+b("move","Перенести на…")+b("skip",inn?"Не придёт":"Не платим");
-  return pay+part+(inn?"":b("move","Перенести на…"))+b("del","Удалить","ghost");
- }
- // The questions a press may ask, inside the card, under the fields.
+ // The steps a press opens in the band, in the answers' place.
  function askBox(it){
   const a=cur&&cur.ask,inn=it.dir>0,x='<button class="sm ghost" data-ed-ask="">Отмена</button>';
   // «Частично» asks two things: how much has been paid, and on what day the rest will be. The day is a field of
-  // the question's own — not the card's «Дата», which is the row's (and which the card of a line already closed
-  // does not have) — and it starts empty: the founder names the day, the page proposes none.
+  // the question's own — not the row's date — and it starts empty: the founder names the day, the page proposes none.
   if(a==="part"&&it.src!=="tax"){const got=it.done&&it.done.got?it.done.got:it.part?it.part.got:"",T=Live.today();
    return `<div class="ed-ask" data-ed-askbox="part"><label class="fld" for="ed-part"><span>Сколько уже ${inn?"получено":"оплачено"}, ${esc((SYM[it.cur]||it.cur).trim())}</span><input id="ed-part" data-ed-part type="number" min="0" step="any" inputmode="decimal" value="${esc(got)}"></label>
     <span class="note" data-ed-partnote>${partNote(it,got)}</span>
     <label class="fld" for="ed-partdate"><span>${inn?"Когда придёт остаток":"Когда заплатите остаток"}</span><input id="ed-partdate" data-ed-partdate type="date" min="${T}" max="${dAdd(T,731)}"></label>
     <div class="row"><button class="sm primary" data-ed-go="part">Готово</button>${x}</div>
     <span class="note">Строка закроется за ${mon(ymOf(it))} на том, что ${inn?"получено":"оплачено"}. Остаток встанет отдельной строкой на выбранный день.</span></div>`;}
-  if((a==="skip"||a==="del")&&it.src==="occ"){const ym=it.occ.ym;
-   return `<div class="ed-ask" data-ed-askbox="${a}"><span>${a==="del"?"Убрать":inn?"Не придёт":"Не платим"}:</span><div class="row"><button class="sm primary" data-ed-go="${a}-only">только ${mon(ym)}</button><button class="sm" data-ed-go="${a}-onward">${mon(ym)} и дальше</button>${x}</div></div>`;}
+  // «Не придёт…» / «Не платим…» on a month of a repeat: this month, or this one and every one after it (the repeat
+  // ends before it - and goes, if this is its first month).
+  if(a==="skip"&&it.src==="occ"){const ym=it.occ.ym,Mo=MONF[+ym.slice(5)-1];
+   return `<div class="ed-ask" data-ed-askbox="skip"><span>${Mo} уберу из прогноза.</span><div class="row"><button class="sm primary" data-ed-go="skip-only">Только ${mon(ym)}</button><button class="sm" data-ed-go="skip-onward">${it.occ.last?`${Mo} и дальше`:inn?"Больше не ждать — и дальше":"Больше не платить — и дальше"}</button>${x}</div></div>`;}
   if(a==="paid"){const A=inBal(it);
    if(A)return `<div class="ed-ask" data-ed-askbox="paid"><span>Остаток ${esc(acName(A))} ${A.anchor.file?"— по выписке на":"вписан на"} ${dRu(A.anchor.asOf)}, а строка — от ${dRu(it.date)}. Эти деньги:</span><div class="row"><button class="sm primary" data-ed-go="paid-in">уже в остатке</button><button class="sm" data-ed-go="paid-after">${inn?"пришли":"ушли"} позже</button>${x}</div></div>`;}
   if(a==="pick"&&pickable(it))return pickBox(it,x);
@@ -7044,11 +7211,30 @@ const Ed=(()=>{
  // The first month of a repeat: with the tick taken off here nothing of the repeat is left but this month, and the
  // row is an ordinary one again (Live.write.untick). The card says that, not «закончится после {октября}».
  const lone=it=>it.src==="occ"&&it.occ.ym===it.occ.from&&it.occ.chain===it.row;
- // What saves the card of a month of a «каждый месяц» row: this month alone, or this month and every month after
- // it. With the tick taken off there is one thing to save, and the button says what it does.
- const saves=(it,on)=>!on&&ticked(it)?`<button class="sm primary" data-ed-save="only">${lone(it)?"Убрать повтор":`Закончить после ${monG(it.occ.ym)}`}</button>`
-  :it.occ.last?'<button class="sm primary" data-ed-save="only">Сохранить</button>'
-  :`<button class="sm primary" data-ed-save="only">Только ${mon(it.occ.ym)}</button><button class="sm" data-ed-save="onward">${MONF[+it.occ.ym.slice(5)-1]} и дальше</button>`;
+ // What saves the form, in the band, with «Отмена» beside it. On a month of a «каждый месяц» row there is one
+ // «Сохранить» too: «С какого месяца?» is asked after it, and only where the sum or the day was changed. With the
+ // tick taken off there is one thing to save, and the button says what it does.
+ const saveMode=(it,on)=>it.state!=="done"&&it.src==="occ"&&(it.occ.last||!on&&ticked(it))?"only":"";
+ const saves=(it,on)=>{const x='<button class="sm ghost" data-ed-ask="">Отмена</button>';
+  if(it.state==="done"||it.src!=="occ")return `<button class="sm primary" data-ed-save>Сохранить</button>${x}`;
+  if(!on&&ticked(it))return `<button class="sm primary" data-ed-save="only">${lone(it)?"Убрать повтор":`Закончить после ${monG(it.occ.ym)}`}</button>${x}`;
+  return `<button class="sm primary" data-ed-save="${saveMode(it,on)}">Сохранить</button>${x}`;};
+ // Asked in place of those buttons, with nothing drawn afresh, so that what is typed in the form stays. `L`: what
+ // the line is that was changed too - that goes from this month on whatever the answer, and the question says so.
+ const LW={name:"название",cur:"валюта",bank:"банк",vat:"VAT",sub:"«это подписка»"},and=l=>l.length>1?l.slice(0,-1).join(", ")+" и "+l[l.length-1]:l[0]||"";
+ const cap=t=>t.charAt(0).toUpperCase()+t.slice(1);
+ const scopeAsk=(it,L,md)=>`<span>${(L||[]).length?`${cap(md)} — с какого месяца? ${cap(and(L.map(k=>LW[k])))} — с ${monG(it.occ.ym)} в любом случае.`:"С какого месяца?"}</span><button class="sm primary" data-ed-save="only">Только ${mon(it.occ.ym)}</button><button class="sm" data-ed-save="onward">${MONF[+it.occ.ym.slice(5)-1]} и дальше</button><button class="sm ghost" data-ed-unask>Назад</button>`;
+ const guardAsk=(then,mode)=>`<span>Правки не сохранены.</span><button class="sm primary" data-ed-save="${mode}">Сохранить</button><button class="sm ghost" data-ed-discard="${then}">Не сохранять</button>`;
+ // «Перенести…» (on a line without a date, «Поставить дату…»): the date, a day earlier or later with ‹ ›, and on a
+ // month of a repeat that has months after it «и следующие месяцы на это число» - the day of every month on.
+ // Nothing but the date is saved with it.
+ const moveBox=it=>{const T=Live.today();
+  return `<div class="ed-ask" data-ed-askbox="move"><div class="fld"><label class="lbl" for="ed-date">${it.date?"Новая дата":"Дата"}</label><div class="ed-mv"><button type="button" data-ed-shift="-1" title="На день раньше" aria-label="На день раньше">‹</button><input id="ed-date" data-ed-f="date" type="date" max="${dAdd(T,731)}" value="${esc(it.date||"")}"><button type="button" data-ed-shift="1" title="На день позже" aria-label="На день позже">›</button></div></div>
+   ${it.src==="occ"&&!it.occ.last?'<label class="ed-chk"><input type="checkbox" data-ed-mvall><span>и следующие месяцы на это число</span></label>':""}
+   <div class="row"><button class="sm primary" data-ed-save="move">${it.date?"Перенести":"Поставить дату"}</button><button class="sm ghost" data-ed-ask="">Отмена</button></div></div>`;};
+ // Under the form of a month of a repeat: what goes from this month on, and what is asked about.
+ const occNote=it=>{const ym=it.occ.ym,l=["название","банк","валюта"].concat(it.list==="inflows"?["VAT"]:[],it.list==="other"?["«это подписка»"]:[]);
+  return `${and(l)} — с ${monG(ym)} и дальше, прошлые месяцы остаются как были${it.occ.last?"":"; сумма и дата — спрошу, с какого месяца"}${it.wd?"; «чей вывод» — для всех месяцев":""}`;};
  function fields(v,o){
   const box=(k,on,label,note)=>`<label class="ed-chk"><input type="checkbox" data-ed-f="${k}"${on?" checked":""}><span>${label}${note!==undefined?` <span class="note" data-ed-n="${k}">${esc(note)}</span>`:""}</span></label>`;
   const rate=M?M.taxes.rate:20;
@@ -7063,85 +7249,148 @@ const Ed=(()=>{
   </div>${o.lockName?"":`<datalist id="ed-names">${names(o.list).map(x=>`<option value="${esc(x.l)}">`).join("")}</datalist>`}
   ${boxes?`<div class="ed-chks">${boxes}</div>`:""}${o.note?`<span class="note">${o.note}</span>`:""}`;
  }
- function rowCard(it){
-  // «Что если…» turns the card over: where the row's fields stood, the trial stands (Trial, above) - with nothing
-  // of the row beside it that writes, and no «Сохранить» for Enter to press. The same for a reader and a writer:
-  // a trial changes no document. `cur.wi` is the face; the trial itself is Trial's and outlives the card.
-  if(cur.wi)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}"><div class="ed-why">Проба: в план ничего не записывается.</div><div data-ed-askbox="wi">${Trial.panel(M,{item:it.id})}</div><div class="ed-foot"><span></span><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
-  const wi=Trial.fits(M,it)?'<button class="sm ghost" data-wi-open>Что если…</button>':"";
-  if(RO)return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it,true)}<div class="ed-foot"><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button></div></div></article>`;
-  const done=it.state==="done",tax=it.src==="tax",occ=it.src==="occ";
-  let body="";
-  if(!done){
-   const o={list:it.list,lockName:tax,lockCur:tax,lockBank:tax,occ:it.occ};
-   if(it.list==="inflows")o.vat=it.vat;
-   if(tax)o.amtLabel="Сумма по декларации";
-   else{const all=it.wd?"название, банк, валюта и «чей вывод»":"название, банк и валюта";
-    o.monthly=ticked(it);if(it.list==="other")o.sub=!!it.sub;if(occ)o.note=it.occ.last?`${all} — для всех месяцев этой строки`:`сумма и дата — только для ${monG(it.occ.ym)}, если не нажать «${MONF[+it.occ.ym.slice(5)-1]} и дальше»; ${all} — для всех месяцев`;}
-   if(it.list==="taxes"&&!tax&&!it.ptax)o.of=ofValue(it);
-   if(it.wd)o.whose=it.whose||"";
-   body=fields({name:it.name,amt:tax?Math.round(it.amt):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
-  }
+ // A line whose form there is: every line not closed, and of a closed one what is still the founder's to say.
+ const editable=it=>it.state!=="done"||(it.list==="taxes"&&it.src!=="tax"&&!it.ptax)||!!it.wd;
+ // «Изменить строку»: the form in the place of «Сведения».
+ function form(it){
+  const tax=it.src==="tax",occ=it.src==="occ";
   // A closed row has nothing left to change - except what a tax row was for. A payment the bank showed before
   // anybody tied its row to a quarter stood beside that quarter as a tax of its own, and the quarter went on owing
   // it (Mika, 8 October 2026: three instalments paid, two counted, and no way to say so on a row already closed).
-  const ofOnly=done&&it.list==="taxes"&&!tax&&!it.ptax;
-  if(ofOnly)body=`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
   // The same for a withdrawal that is closed: whose it is can still be said. A row called after one founder and
   // used up by what the others took is closed - and it is the row this field was asked for (Mika, 12 October 2026).
-  const whoseOnly=done&&!!it.wd;
-  if(whoseOnly)body=`<div class="ed-grid">${whoseSelect(it.whose||"")}</div>${occ?'<span class="note">«чей вывод» — для всех месяцев этой строки</span>':""}`;
-  const save=ofOnly||whoseOnly?'<button class="sm primary" data-ed-save>Сохранить</button>':done?"":occ?`<span class="row" data-ed-saves>${saves(it,ticked(it))}</span>`:'<button class="sm primary" data-ed-save>Сохранить</button>';
-  return `<article class="ed-card" data-ed-card="row" data-ed-id="${esc(it.id)}">${why(it)}${body}${askBox(it)}
-   <div class="ed-foot"><div class="row">${actions(it)}</div><div class="row">${wi}<button class="sm ghost" data-ed-x>Закрыть</button>${save}</div></div></article>`;
+  if(it.state==="done")return it.wd?`<div class="ed-grid">${whoseSelect(it.whose||"")}</div>${occ?'<span class="note">«чей вывод» — для всех месяцев этой строки</span>':""}`:`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
+  const o={list:it.list,lockName:tax,lockCur:tax,lockBank:tax,occ:it.occ};
+  if(it.list==="inflows")o.vat=it.vat;
+  if(tax)o.amtLabel="Сумма по декларации";
+  else{o.monthly=ticked(it);if(it.list==="other")o.sub=!!it.sub;if(occ)o.note=occNote(it);}
+  if(it.list==="taxes"&&!tax&&!it.ptax)o.of=ofValue(it);
+  if(it.wd)o.whose=it.whose||"";
+  return fields({name:it.name,amt:tax?Math.round(it.amt):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
+ }
+ // «Действия». A reader has no band but «Что если…», where there is one; «Что если…» turns the band over into the
+ // trial (Trial, above), with nothing that writes beside it and no «Сохранить» for Enter to press - a trial changes
+ // no document. A step whose question no longer stands (the balance it asked about has gone) leaves the band at
+ // rest; a band with nothing in it is not drawn.
+ function band(it){
+  if(cur.wi)return `<p class="ed-rc-q">Проба: в план ничего не записывается.</p><div data-ed-askbox="wi">${Trial.panel(M,{item:it.id})}</div><div class="row"><button class="sm ghost" data-ed-x>Закрыть</button></div>`;
+  if(RO)return Trial.fits(M,it)?'<div class="ed-rc-ans"><button class="sm ghost" data-wi-open>Что если…</button></div>':"";
+  if(said())return '<div class="row"><button class="sm" data-ed-undo>Отменить</button></div>';
+  if(cur.ask==="edit"&&editable(it))return `<div class="row" data-ed-saves>${saves(it,ticked(it))}</div>`;
+  if(cur.ask==="move"&&it.state!=="done")return moveBox(it);
+  if(cur.ask&&cur.ask!=="edit"&&cur.ask!=="move"){const a=askBox(it);if(a)return a;}
+  cur.ask="";
+  const A=answers(it),blk=A.blocks.map(x=>`<div class="ed-rc-blk">${x.q?`<p class="ed-rc-q">${esc(x.q)}</p>`:""}<div class="ed-rc-ans">${x.btns}</div></div>`).join(""),n=A.menu.length;
+  const more=A.edit||n?`<div class="ed-rc-more">${A.edit?'<button class="sm ghost" data-ed-ask="edit">Изменить строку</button>':""}${n?`<button class="sm ghost" data-ed-more aria-expanded="${!!cur.menu}" aria-controls="ed-rc-menu">Ещё…</button>`:""}</div>${n?`<ul class="ed-rc-menu" id="ed-rc-menu" data-ed-menu${cur.menu?"":" hidden"}>${A.menu.map(m=>`<li>${m}</li>`).join("")}</ul>`:""}`:"";
+  return blk+more;
+ }
+ function rowCard(it){
+  const top=!RO&&!cur.wi&&cur.ask==="edit"&&editable(it)?form(it):info(it),act=band(it);
+  return `<article class="ed-card ed-rc" data-ed-card="row" data-ed-id="${esc(it.id)}" aria-label="${esc(it.name||"Строка")}"><button type="button" class="ed-rc-x" data-ed-x aria-label="Закрыть" title="Закрыть">×</button><div class="ed-rc-info" role="group" aria-label="Сведения">${top}</div>${act?`<div class="ed-rc-act" role="group" aria-label="Действия">${act}</div>`:""}</article>`;
  }
  const miss=(card,k,msg)=>{const f=q(card,`[data-ed-f="${k}"]`);if(f)f.focus();toast(msg);};
+ // What the card holds against what the line is. A field the card does not hold - «Перенести…» holds the date
+ // alone, a closed line's form one select - reads as unchanged. `dirty`: anything typed or chosen, what «Правки не
+ // сохранены» asks about («К чему относится» left as the page proposed it is not).
+ // (Whose a withdrawal is: «Чей вывод» is written when the founder chose in it - it differs from what the row would
+ // be under its new name with nobody's hand on it (whoseUnder: the select followed the name as it was typed). A
+ // rename alone writes no owner: «Вывод» renamed «Vanya» is Vanya's by its name, «Vanya» renamed «Вывод» is
+ // everybody's - and whose:"" is written only where «общий» was chosen. The toast says whose the row now is
+ // whenever that changed, by the choice or by the name.)
+ function readCard(card,it){
+  const f=k=>q(card,`[data-ed-f="${k}"]`),tick0=ticked(it),tax=it.src==="tax",amt0=tax?Math.round(it.amt):it.amt,of0=f("of")?ofValue(it):"";
+  const v={name:f("name")?f("name").value.trim():it.name,amt:f("amt")?+f("amt").value:amt0,cur:f("cur")?f("cur").value:it.cur,bank:f("bank")?f("bank").value:it.bank,date:f("date")?f("date").value:it.date||"",vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:"",sub:f("sub")?f("sub").checked:!!it.sub,whose:f("whose")?f("whose").value:it.whose||""};
+  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==(it.date||""),vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.wd?whoseUnder(it,v.name):it.whose||"")};
+  const whose1=!!f("whose")&&(FOUNDERS.includes(v.whose)?v.whose:"")!==(it.whose||""),ofd=!!f("of")&&v.of!==of0;
+  const dirty=it.state==="done"?whose1||ofd:Object.keys(ch).some(k=>k==="of"?ofd:k==="whose"?ch.whose||whose1:ch[k]);
+  return{v,ch,whose1,dirty,raw:f("amt")?f("amt").value:String(amt0)};
+ }
+ const dirty=card=>{const it=card&&item(card.dataset.edId);return !!it&&!!cur&&cur.k==="row"&&cur.ask==="edit"&&readCard(card,it).dirty;};
+ // What the line IS - its name, bank, currency, VAT, «это подписка» - changes on a month of a repeat from that month
+ // on, and without a question (the owner's decision of 1 November 2026: «платят 6 месяцев на Barclays и со
+ // следующего месяца начинается на Revolut — зачем менять предыдущие?»). Until then these changed every month of
+ // the row, even under «Только {октябрь}». The sum and the day are this month's unless «{Октябрь} и дальше» is
+ // answered; «Чей вывод» and «К чему относится» stay the whole row's, as they were.
+ const LINE=["name","cur","bank","vat","sub"];
  function rowSave(card,mode){
   const it=item(card.dataset.edId);if(!it||Plan.lost())return;
-  // The card of a closed row holds one field: whose a withdrawal is, or what a tax row was for.
-  if(it.state==="done"){const w=q(card,'[data-ed-f="whose"]');
-   if(w){const to=FOUNDERS.includes(w.value)?w.value:"";if(to===(it.whose||"")){cur=null;return Plan.redraw();}
-    const say=`${it.name}: ${whoseSay(to)}${it.src==="occ"?" — для всех месяцев":""}`,n0=nowOf();cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{whose:to},now,by);}))toast(say+nowSay(n0),back);return;}
-   const e=q(card,'[data-ed-f="of"]');if(!e)return;
+  const occ=it.src==="occ",tax=it.src==="tax",ym=occ?it.occ.ym:"",f=k=>q(card,`[data-ed-f="${k}"]`),ret=mode==="move"?'[data-ed-do="move"]':'[data-ed-ask="edit"]';
+  // Nothing to save: the band is back at rest, and the cursor on what opened the form.
+  const rest=()=>{cur.ask="";cur.focus="";cur.ret=cur.ret||ret;show(cur);};
+  // The form of a closed line holds one field: whose a withdrawal is, or what a tax row was for.
+  if(it.state==="done"){const w=f("whose");
+   if(w){const to=FOUNDERS.includes(w.value)?w.value:"";if(to===(it.whose||""))return rest();
+    const say=`${it.name}: ${whoseSay(to)}${occ?" — для всех месяцев":""}`,n0=nowOf();
+    return did(say,(P,now,by)=>{W.set(P,it,{whose:to},now,by);},card,ret,()=>nowSay(n0));}
+   const e=f("of");if(!e)return;
    if(e.value==="")return miss(card,"of","Выберите, к чему относится этот налог");
-   if(e.value===ofValue(it)&&it.of!==null){cur=null;return Plan.redraw();}
+   if(e.value===ofValue(it)&&it.of!==null)return rest();
    const say=`${it.name}: ${e.options[e.selectedIndex].textContent.trim().replace(/^./,c=>c.toLowerCase())}`,of=ofStore(e.value);
-   cur=null;if(Plan.edit(say,(P,now,by)=>{W.set(P,it,{of},now,by);}))toast(say,back);return;}
-  const f=k=>q(card,`[data-ed-f="${k}"]`),was=it.src==="occ",tick0=ticked(it),tax=it.src==="tax",amt0=tax?Math.round(it.amt):it.amt,of0=f("of")?ofValue(it):"";
-  const v={name:f("name").value.trim(),amt:+f("amt").value,cur:f("cur").value,bank:f("bank").value,date:f("date").value,vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:"",sub:f("sub")?f("sub").checked:!!it.sub,whose:f("whose")?f("whose").value:it.whose||""};
-  if(f("amt").value===""||!(v.amt>=0))return miss(card,"amt","Впишите сумму");
+   return did(say,(P,now,by)=>{W.set(P,it,{of},now,by);},card,ret);}
+  // «Перенести…»: the date alone - this month's, or with «и следующие месяцы на это число» the day of every month
+  // on. It refuses what the form would: a row of «Налоги» is saved only once it says what it is for.
+  const moving=mode==="move";
+  if(moving){const e=f("date");
+   if(!e||!e.value){if(e)e.focus();return toast(forecast(it)?"У этой строки дата есть всегда":"Укажите дату");}
+   if(it.list==="taxes"&&!tax&&!it.ptax&&ofValue(it)==="")return toast("Сначала выберите, к чему относится этот налог: «Изменить строку»");
+   const all=q(card,"[data-ed-mvall]");mode=occ?(all&&all.checked?"onward":"only"):"";}
+  const R=readCard(card,it),v=R.v,ch=R.ch;
+  if(R.raw===""||!(v.amt>=0))return miss(card,"amt","Впишите сумму");
   // A month of a repeating row with no amount is not a month of nothing: the tick says that.
   if(!(v.amt>0)&&forecast(it))return miss(card,"amt",NOZERO);
   if(!okDate(v.date))return miss(card,"date",FARMSG);
   if(!v.date&&(v.mon||forecast(it)))return miss(card,"date",forecast(it)?"У этой строки дата есть всегда":"Чтобы повторять каждый месяц, нужна дата");
   if(f("of")&&v.of==="")return miss(card,"of","Выберите, к чему относится этот налог");
-  // (Whose a withdrawal is: «Чей вывод» is written when the founder chose in it - it differs from what the row would
-  // be under its new name with nobody's hand on it (whoseUnder: the select followed the name as it was typed). A
-  // rename alone writes no owner: «Вывод» renamed «Vanya» is Vanya's by its name, «Vanya» renamed «Вывод» is
-  // everybody's - and whose:"" is written only where «общий» was chosen. The toast says whose the row now is
-  // whenever that changed, by the choice or by the name.)
-  const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==it.date,vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.wd?whoseUnder(it,v.name):it.whose||"")};
-  const whose1=!!f("whose")&&(FOUNDERS.includes(v.whose)?v.whose:"")!==(it.whose||"");
-  // Nothing of the row was changed and «Частично» stands open in the card: the press on the card's own button — or
-  // Enter in one of the row's fields — is the answer to that question, with its refusals. Read as «nothing to
-  // save», it closed the card without a word, and the sum and the day just typed went with it. A change to the row
-  // itself is saved as it always was; the question closes with the card, and if anything stood typed in it the
-  // toast says that it was not taken.
-  if(!Object.values(ch).some(Boolean)){if(cur&&cur.ask==="part"&&q(card,"[data-ed-part]"))return go("part",card);cur=null;return Plan.redraw();}
-  const left=!!cur&&cur.ask==="part"&&["[data-ed-part]","[data-ed-partdate]"].some(s=>q(card,s)&&q(card,s).value!=="");
-  const gone=grab();cur=null;
-  const onward=was&&mode==="onward"&&v.mon,tw=ch.mon&&v.mon&&!was?twins(it.list,v.name,(v.date||it.date).slice(0,7)):[];
-  // The end of a repeat, and its return, are said in the words the constructor uses for them.
+  // («… и следующие месяцы» on the day this month already has: the day of the months after it is what is new.)
+  if(moving&&mode==="onward"&&+v.date.slice(8)!==+it.occ.day)ch.date=true;
+  if(!Object.values(ch).some(Boolean))return rest();
+  // A month of a repeat whose sum or day was changed: this month alone, or from it on. Asked in place, so nothing
+  // typed is lost; typing on takes the question away (the input handler, below).
+  if(occ&&!mode&&ticked(it)&&v.mon&&(ch.amt||ch.date)){const b=q(card,"[data-ed-saves]");
+   if(b){b.dataset.edAsked="scope";b.innerHTML=scopeAsk(it,LINE.filter(k=>ch[k]),and([ch.amt?"сумма":"",ch.date?"дата":""].filter(Boolean)));const s=q(b,'[data-ed-save="only"]');if(s)s.focus({preventScroll:true});return;}}
+  if(occ&&!mode)mode="only";
+  const onward=occ&&mode==="onward"&&v.mon;
+  // A row of «Налоги» renamed after a founder is that founder's personal tax, all of it: it moves to «Дивиденды»
+  // whole, as it always did, and is not split.
   const moved=ch.name&&it.list==="taxes"&&!tax&&!!owner({c:"tax",l:v.name});
+  const L=occ&&!onward&&!moved?LINE.filter(k=>ch[k]):[],nm=v.name||it.name;
+  const tw=ch.mon&&v.mon&&!occ?twins(it.list,v.name,(v.date||it.date).slice(0,7)):[];
   // A row of its own whose new date is in another month leaves the month it was opened in: the toast says where to.
-  const away=ch.date&&!was&&!tax&&!!v.date&&!!it.ym&&v.date.slice(0,7)!==it.ym;
-  // «Чей вывод» is the row's: said of a month of a repeat it is written to every month, whatever the press was for.
-  const wt=whose1?" · "+whoseSay(v.whose)+(was&&!onward?" — для всех месяцев":""):"";
-  const say=was&&ch.mon?(v.mon?`${v.name||it.name}: повтор продолжается`:lone(it)?`${v.name||it.name}: больше не повторяется`:`${v.name||it.name}: повтор закончится после ${monG(it.occ.ym)}`)+wt
-   :`Сохранено: ${v.name||it.name}${was?(onward?` — с ${monG(it.occ.ym)}`:ch.amt||ch.date?` — только ${mon(it.occ.ym)}`:""):""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»"):""}${wt}${away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:""}`;
-  const n0=whose1?nowOf():null;
-  if(Plan.edit(say,(P,now,by)=>{if(onward)from(P,it,v,ch,now,by);else apply(P,it,v,ch,now,by);}))toast(say+(whose1?nowSay(n0):"")+(left?" · «Частично» не записано — ответьте на него заново":""),back);
-  drop(gone);
+  const away=ch.date&&!occ&&!tax&&!!v.date&&!!it.ym&&v.date.slice(0,7)!==it.ym,awayT=away?` · теперь в плане на ${ymFull(v.date.slice(0,7)).toLowerCase()}`:"";
+  // «Чей вывод» is the row's: said of a month of a repeat it is written to every month, unless «… и дальше» was pressed.
+  const wt=R.whose1?" · "+whoseSay(v.whose)+(occ&&!onward?" — для всех месяцев":""):"";
+  const lt=L.filter(k=>k!=="sub").length?` · ${and(L.filter(k=>k!=="sub").map(k=>LW[k]))} — с ${monG(ym)}`:"";
+  const st=ch.sub?(v.sub?" · теперь в «Подписках»":" · теперь в «Прочих расходах»")+(L.includes("sub")?` с ${monG(ym)}`:""):"";
+  const md=and([ch.amt?"сумма":"",ch.date?"дата":""].filter(Boolean));
+  // The end of a repeat, and its return, are said in the words the constructor uses for them.
+  const say=moving?(tax?`${nm}: срок — ${dRu(v.date)}`:onward?`${nm}: с ${monG(ym)} — ${+v.date.slice(8)}-го числа${v.date.slice(0,7)!==ym?` · ${mon(ym)} — на ${dRu(v.date)}`:""}`:occ?`${nm}: ${mon(ym)} — на ${dRu(v.date)}`:`${nm}: ${it.date?"перенесено на":"дата —"} ${dRu(v.date)}${awayT}`)
+   :occ&&ch.mon?(v.mon?`${nm}: повтор продолжается`:lone(it)?`${nm}: больше не повторяется`:`${nm}: повтор закончится после ${monG(ym)}`)+lt+st+wt
+   :`Сохранено: ${nm}${occ?(onward?` — с ${monG(ym)}`:md&&!L.length?` — только ${mon(ym)}`:""):""}${lt}${L.length&&md?` · ${md} — только ${mon(ym)}`:""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${st}${wt}${awayT}`;
+  const n0=R.whose1?nowOf():null;
+  return did(say,(P,now,by)=>{
+   // The card goes with the line: to the new row of the chain «… и дальше» or a change from this month on made, to
+   // the first month of the repeat the tick made, to the row a repeat of one month is again.
+   const r=onward?from(P,it,v,ch,now,by):L.length?only(P,it,v,ch,L,now,by):apply(P,it,v,ch,now,by);
+   if(ch.mon&&v.mon&&it.src==="row")return `${it.id}@${(v.date||it.date).slice(0,7)}`;
+   if(ch.mon&&!v.mon&&lone(it))return String(it.row);
+   return occ&&(onward||L.length)&&r&&String(r.id)!==String(it.row)?`${r.id}@${ym}`:"";
+  },card,cur&&cur.ret||ret,R.whose1?()=>nowSay(n0):null);
+ }
+ // A month of a repeat saved for this month (or with nothing to ask) that changed what the line is (`L`): that goes
+ // from this month on through the same hands as «{Октябрь} и дальше» (Live.write.onward - on the row's first month
+ // the row itself, from a later one a new row of the chain that takes over; the months before keep what they had);
+ // the rest - the sum and the day of this month among it, the tick - is then written to this month of the row that
+ // holds it now (apply); «к чему относится» stays the whole row's, the part before the split included.
+ function only(P,it,v,ch,L,now,by){
+  const o={};L.forEach(k=>{if(k!=="sub")o[k]=v[k];});
+  const r=W.onward(P,it,o,uid(),now,by);if(!r){apply(P,it,v,ch,now,by);return null;}
+  if(L.includes("sub")){if(v.sub)r.sub=true;else delete r.sub;}
+  if(ch.name)relink(r,it.list);
+  const it2=String(r.id)===String(it.row)?it:Object.assign({},it,{row:String(r.id)}),rest={};
+  Object.keys(ch).forEach(k=>{rest[k]=ch[k]&&!L.includes(k);});
+  apply(P,it2,v,rest,now,by);
+  if(ch.of&&it2!==it)W.set(P,it,{of:ofStore(v.of)},now,by);
+  return r;
  }
  // What a change to a row's fields writes. `v` is the row as it should now read, `ch` names the fields that differ
  // (v.mon is «каждый месяц»; left out, it stays as it was). The card's «Сохранить» writes through here, and so does
@@ -7167,6 +7416,10 @@ const Ed=(()=>{
   if(r&&ch.sub){if(v.sub)r.sub=true;else delete r.sub;}
   if(r&&ch.of)r.of=ofStore(v.of);
   if(r&&ch.name)relink(r,it.list);
+  // A date is the day of every month on - and this month's own date, which may be in another month («Перенести…»
+  // of 31 October to 7 November): Live.write.onward keeps only the day, and would have put October on the 7th. The
+  // date itself is written to this month of the row that holds it now (and is no exception where it is that day).
+  if(r&&ch.date&&v.date)W.set(P,String(r.id)===String(it.row)?it:Object.assign({},it,{row:String(r.id)}),{date:v.date},now,by);
   return r;
  }
 
@@ -7421,14 +7674,24 @@ const Ed=(()=>{
   const bar=document.querySelector(".topbar"),top=bar?Math.max(0,bar.getBoundingClientRect().bottom):0,t=box.top-up,bt=box.bottom-up;
   const dy=t<top+4||box.height>window.innerHeight-top-24&&bt>window.innerHeight-4?t-top-12:bt>window.innerHeight-4?bt-window.innerHeight+20:0;
   if(dy)window.scrollBy({top:dy,behavior:CALM()?"auto":"smooth"});
-  unfold(how==="new"?card:q(card,"[data-ed-askbox]"));
-  const f=cur.ask==="part"?q(card,"[data-ed-part]"):cur.focus?q(card,`[data-ed-f="${cur.focus}"]`):cur.k==="add"&&cur.what?q(card,`[data-ed-f="${cur.draft.name?"amt":"name"}"]`):null;
-  if(f){f.focus({preventScroll:true});if(cur.focus==="date")try{f.showPicker();}catch(e){}}
+  if(how==="new")unfold(card);else if(how==="again")unfold(q(card,"[data-ed-askbox]")||(cur.k==="row"&&cur.ask==="edit"?q(card,".ed-rc-info"):null));
+  // Where the cursor goes. In a row's card: after an answer, to the band's «Отменить» - the button pressed is gone,
+  // and a cursor left on the page would take Escape away from the card; in a step, to its first field or answer
+  // («Частично…» to the sum, «Перенести…» to the date, with the calendar open); in the form, to its first field (or
+  // the one an opener named); back at rest, to what the step was opened from.
+  let f=null;
+  if(cur.k==="row"){const B=".ed-rc-act ";
+   f=how==="done"?q(card,"[data-ed-undo]"):cur.ask==="part"?q(card,"[data-ed-part]"):cur.focus?q(card,`[data-ed-f="${cur.focus}"]`)
+    :cur.ask==="edit"?q(card,".ed-rc-info [data-ed-f]:not(:disabled)"):cur.ask||cur.wi?q(card,"[data-ed-askbox] :is(input,select,button):not(:disabled)")
+    :how==="again"?(cur.ret&&q(card,B+cur.ret))||q(card,B+"button"):null;}
+  else f=cur.focus?q(card,`[data-ed-f="${cur.focus}"]`):cur.k==="add"&&cur.what?q(card,`[data-ed-f="${cur.draft.name?"amt":"name"}"]`):null;
+  if(f){f.focus({preventScroll:true});if(cur.focus==="date"&&f.type==="date")try{f.showPicker();}catch(e){}}
   cur.focus="";
  }
  // A card that opens is "new"; the same card drawn again — on a question, on another kind of row to add — is not,
- // and only what has just appeared in it is unfolded.
- const show=c=>{const again=!!cur&&!!c&&cur.k===c.k&&(cur.id||"")===(c.id||"")&&(cur.at||"")===(c.at||"");wait=again?null:grab();cur=c;fresh=again?"again":"new";Plan.redraw();drop(wait);wait=null;};
+ // and only what has just appeared in it is unfolded. An opener that puts the cursor on a row's date
+ // (data-ed-focus="date": «Перенести на…» of «Нужно решить», a row without a date) opens it on «Перенести…».
+ const show=c=>{if(c&&c.k==="row"&&c.focus==="date"&&!c.ask)c.ask="move";const again=!!cur&&!!c&&cur.k===c.k&&(cur.id||"")===(c.id||"")&&(cur.at||"")===(c.at||"");wait=again?null:grab();cur=c;fresh=again?"again":"new";Plan.redraw();drop(wait);wait=null;};
  // ---- a card that goes while the page is drawn afresh ----
  // The page is drawn from scratch, so a card that was open and is open no longer is simply not drawn - and all that
  // stood under it leapt up by its height: when another row was pressed, when its «Оплачено» was, when the cursor
@@ -7460,14 +7723,31 @@ const Ed=(()=>{
  // A card shut by its own button, by a second press on its row or by Escape folds away first. If another card was
  // opened in that fifth of a second, it is left alone.
  const shut=card=>{const was=cur;fold(card||document.querySelector("[data-ed-card]"),()=>{if(cur===was){cur=null;Plan.redraw();}});};
+ // A row's card shut by ×, by Escape at rest or by the second press on its row - unless its form holds what has
+ // not been saved: then the band asks first, «Правки не сохранены» [Сохранить] [Не сохранять] (until 1 November
+ // 2026 what was typed went without a word).
+ const closeRow=card=>{card=card||document.querySelector('[data-ed-card="row"]');if(card&&dirty(card))return guard(card,"close");shut(card);};
+ // The two questions asked under the form in place of its buttons, and their way back - drawn into the band where
+ // it stands, so what is typed in the form stays as it is.
+ function guard(card,then){const it=item(card.dataset.edId),b=q(card,"[data-ed-saves]");if(!it||!b)return then==="close"?shut(card):void(cur.ask="",show(cur));
+  const t=q(card,'[data-ed-f="monthly"]');b.dataset.edAsked="guard";b.innerHTML=guardAsk(then,saveMode(it,t?t.checked:ticked(it)));const s=q(b,"[data-ed-save]");if(s)s.focus({preventScroll:true});}
+ function unask(card){const it=item(card.dataset.edId),b=q(card,"[data-ed-saves]");if(!it||!b)return;const t=q(card,'[data-ed-f="monthly"]');delete b.dataset.edAsked;b.innerHTML=saves(it,t?t.checked:ticked(it));
+  const f=q(card,".ed-rc-info [data-ed-f]:not(:disabled)");if(f)f.focus({preventScroll:true});}
+ // «Ещё…» opened and shut where it stands; the cursor goes to its first item, and back to «Ещё…».
+ function menu(card,open){const m=q(card,"[data-ed-menu]"),b=q(card,"[data-ed-more]");if(!m||!b)return;cur.menu=open;m.hidden=!open;b.setAttribute("aria-expanded",String(open));
+  if(open){unfold(m);const f=q(m,"button");if(f)f.focus({preventScroll:true});}else b.focus({preventScroll:true});}
 
  // ---- events: wherever a card or an opener stands ----
  document.addEventListener("click",ev=>{
   const t=ev.target,c=s=>t.closest&&t.closest(s);let x;const card=c("[data-ed-card]");
   if(card&&cur){
-   const kind=card.dataset.edCard;
-   if(c("[data-ed-x]"))return shut(card);
-   if(c("[data-wi-open]")&&kind==="row"){cur.wi=true;cur.ask="";Trial.from(item(cur.id));return show(cur);}
+   const kind=card.dataset.edCard,row=kind==="row"&&cur.k==="row";
+   if(c("[data-ed-x]"))return row?closeRow(card):shut(card);
+   if(row&&c("[data-ed-undo]"))return undo();
+   if(row&&c("[data-ed-more]"))return menu(card,!cur.menu);
+   if(row&&c("[data-ed-unask]"))return unask(card);
+   if(row&&(x=c("[data-ed-discard]"))){if(x.dataset.edDiscard==="close")return shut(card);cur.ask="";cur.focus="";return show(cur);}
+   if((x=c("[data-wi-open]"))&&row){Object.assign(cur,{wi:true,ask:"",menu:false,said:null,ret:retOf(x)});Trial.from(item(cur.id));return show(cur);}
    // A subscription is charged every month: the tick starts on, until the founder has set it himself.
    if((x=c("[data-ed-what]"))&&kind==="add"){cur.what=x.dataset.edWhat;if(!cur.monSet)cur.draft.monthly=cur.what==="subs";return show(cur);}
    // An account taken out of the plan: asked twice, as it was beside «Остатки» in «Касса», where this button stood
@@ -7478,19 +7758,22 @@ const Ed=(()=>{
    if((x=c("[data-ed-kind]"))&&kind==="add"){cur.kind=x.dataset.edKind;return show(cur);}
    if((x=c("[data-ed-shift]"))){const f=q(card,'[data-ed-f="date"]'),v=dAdd(f.value||Live.today(),f.value?+x.dataset.edShift:0);if(!okDate(v))return toast(FARMSG);f.value=v;if(kind==="add")cur.draft.date=v;return;}
    if((x=c("[data-ed-save]")))return kind==="add"?addSave(card):kind==="bal"?balSave(card):rowSave(card,x.dataset.edSave);
-   if((x=c("[data-ed-payrow]"))){const it=item(card.dataset.edId);return it&&it.src==="tax"&&!Plan.lost()?payRow(it,x.dataset.edPayrow,!!x.dataset.edWhole):null;}
+   if((x=c("[data-ed-payrow]"))){const it=item(card.dataset.edId);return it&&it.src==="tax"&&!Plan.lost()?payRow(it,x.dataset.edPayrow,!!x.dataset.edWhole,x):null;}
    if((x=c("[data-ed-go]")))return go(x.dataset.edGo,card);
-   if((x=c("[data-ed-ask]"))&&x.tagName==="BUTTON"){cur.ask=x.dataset.edAsk;return show(cur);}
-   if((x=c("[data-ed-do]"))){if(x.dataset.edDo==="move"){const f=q(card,'[data-ed-f="date"]');if(f){f.focus();try{f.showPicker();}catch(e){}}return;}
-    // «Частично…» pressed again while its question stands open: the cursor goes back to the sum. Drawn afresh, the
-    // question came back empty.
-    if(x.dataset.edDo==="part"&&cur.ask==="part"&&q(card,"[data-ed-part]"))return q(card,"[data-ed-part]").focus();
+   // A step opened, the form opened, or either left («Отмена»: data-ed-ask=""). The form left with changes in it asks
+   // first. A step remembers what opened it, for the cursor to go back to.
+   if((x=c("[data-ed-ask]"))&&x.tagName==="BUTTON"){const to=x.dataset.edAsk;
+    if(row&&to!=="edit"&&dirty(card))return guard(card,"rest");
+    Object.assign(cur,{ask:to,focus:x.dataset.edFocus||"",menu:false,said:null,wi:false});if(to&&row)cur.ret=retOf(x);return show(cur);}
+   if((x=c("[data-ed-do]"))){
+    // «Перенести…» / «Поставить дату…»: a step of its own - the date, and nothing else of the row.
+    if(x.dataset.edDo==="move"&&row){Object.assign(cur,{ask:"move",focus:"date",menu:false,said:null,wi:false,ret:retOf(x)});return show(cur);}
     return act(x.dataset.edDo,x);}
    return;
   }
   if((x=c("[data-ed-tax]")))return taxDo(x);
   if((x=c("[data-ed-do]")))return act(x.dataset.edDo,x);
-  if((x=c("[data-ed-open]"))){const id=x.dataset.edOpen,at=x.dataset.edAt||"",ask=x.dataset.edAsk||"";if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===at&&!x.dataset.edFocus&&!ask)return shut();return show({k:"row",id,at,focus:x.dataset.edFocus||"",ask});}
+  if((x=c("[data-ed-open]"))){const id=x.dataset.edOpen,at=x.dataset.edAt||"",ask=x.dataset.edAsk||"";if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===at&&!x.dataset.edFocus&&!ask)return closeRow();return show({k:"row",id,at,focus:x.dataset.edFocus||"",ask});}
   if((x=c("[data-ed-add]")))return show({k:"add",what:x.dataset.edAdd||"",kind:"wd",mon:x.dataset.edMon||"",draft:{name:x.dataset.edName||"",amt:x.dataset.edAmt||"",cur:"GBP",bank:"Wise",date:x.dataset.edDate||"",vat:false,monthly:x.dataset.edAdd==="subs"}});
   if((x=c("[data-ed-bal]")))return show({k:"bal",key:x.dataset.edBal||""});
   if((x=c("[data-ed-radd],[data-ed-rdel],[data-ed-rfrom],[data-ed-rset]")))return ruleDo(x);
@@ -7524,6 +7807,9 @@ const Ed=(()=>{
     if(s&&g!==cur.of){cur.of=g;s.closest("label").outerHTML=ofSelect(g);}}
    return;}
   if(card.dataset.edCard==="row"&&t.dataset.edF){const f=k=>q(card,`[data-ed-f="${k}"]`),it=item(card.dataset.edId);
+   // «С какого месяца?» and «Правки не сохранены» were asked of what stood typed then: typing on takes the question
+   // away, and «Сохранить» asks again.
+   const sv=q(card,"[data-ed-saves][data-ed-asked]");if(sv&&it){delete sv.dataset.edAsked;sv.innerHTML=saves(it,f("monthly")?f("monthly").checked:ticked(it));}
    // «Чей вывод» follows the name as it is typed - until the founder chooses in it himself (whoseUnder, above)
    if(t.dataset.edF==="whose")card.dataset.edWhoseHand="1";
    if(t.dataset.edF==="name"&&it&&it.wd&&f("whose")&&!card.dataset.edWhoseHand){const w=whoseUnder(it,t.value.trim());if(f("whose").value!==w)f("whose").value=w;}
@@ -7538,17 +7824,28 @@ const Ed=(()=>{
  document.addEventListener("keydown",ev=>{
   const t=ev.target;if(!t.matches)return;
   if((ev.key==="Enter"||ev.key===" ")&&t.matches("[data-ed-open]:not(button),[data-ed-bal]:not(button)")){ev.preventDefault();return t.click();}
-  // Enter in either field of «Частично» answers that question, whatever else was typed into the card. Left to the
-  // line below it would press the card's own button — which answers the question only while nothing of the row
-  // itself was changed, and saves the row otherwise.
+  // Enter in either field of «Частично» answers that question («Готово»). Anywhere else in a card it presses the
+  // first button that saves: in the form, its «Сохранить» (or the answer the band asks for in its place); in
+  // «Перенести…», «Перенести».
   if(ev.key==="Enter"&&t.matches("[data-ed-part],[data-ed-partdate]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
   if(ev.key==="Enter"&&t.matches("[data-ed-card] input:not([type=checkbox]):not([list])")){const b=t.closest("[data-ed-card]").querySelector("[data-ed-save]");if(b){ev.preventDefault();b.click();}}
   if(ev.key==="Enter"&&t.matches("[data-ed-rv]"))t.blur();
-  if(ev.key==="Escape"&&cur&&t.closest("[data-ed-card]"))shut(t.closest("[data-ed-card]"));
+  // Escape in a row's card undoes one thing at a time: «Ещё…» open shuts; a question asked under the form goes back
+  // to its buttons; a form with changes asks «Правки не сохранены»; a step opened in the card goes back to the band
+  // at rest. Then the card shuts - at once where the step was opened from outside the card («Частично…» or
+  // «Перенести на…» of «Нужно решить»), as Escape always did.
+  if(ev.key==="Escape"&&cur&&t.closest("[data-ed-card]")){const card=t.closest("[data-ed-card]");
+   if(card.dataset.edCard!=="row"||cur.k!=="row")return shut(card);
+   ev.preventDefault();
+   if(cur.menu&&q(card,"[data-ed-menu]:not([hidden])"))return menu(card,false);
+   if(q(card,"[data-ed-saves][data-ed-asked]"))return unask(card);
+   if(dirty(card))return guard(card,"rest");
+   if((cur.ask||cur.wi)&&cur.ret){Object.assign(cur,{ask:"",wi:false,focus:""});return show(cur);}
+   return shut(card);}
  });
  return{use,under,sheet,after,sum,remark,vatWords,names,apply,forecast,NOZERO,does:(verb,id)=>act(verb,{dataset:{edId:id}},true),
   // A row's card opened where the row stands - and shut by the same press on the row it is open under.
-  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return shut();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur)leave(()=>{cur=null;Plan.redraw();});},open:()=>cur,twinWords,
+  row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return closeRow();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,close(){if(cur)leave(()=>{cur=null;Plan.redraw();});},open:()=>cur,twinWords,
   // «Добавить» opened from outside «Касса» with what is known already in it - «+ возмещение в «Поступления»» of
   // «Разбор» (30 October 2026): the client, the sum and its currency, the bank - and the cursor on the date, which the
   // founder picks. The VAT box is what the client's mark gives that bank, as when the name is typed; the currency and
@@ -8048,7 +8345,7 @@ Plan.watch(()=>{if(S.loaded&&!$("#view-dashboard").hidden)renderDash();});
 // that the page sends no save (put, push, write, Plan.lost) and that the server takes none from a reader.
 // KEEP are the buttons that also say something - which block a row is in, whether a client pays VAT: they stay.
 // «Что если» (data-wi-*) is in neither list on purpose: a trial changes no document, and a reader may ask too.
-const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]","[data-ed-pick]",'button[data-ed-at="need"]',
+const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]","[data-ed-pick]","[data-ed-undo]","[data-ed-mvall]",'button[data-ed-at="need"]',
  "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
  "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","[data-taxsplit]","[data-spf]","[data-sprest]","[data-spok]","[data-spx]","[data-spedit]","[data-spnone]","input.lab","input.vat","[data-accept]","[data-behalf-back]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
  "[data-fx]","[data-fxo]","[data-fxdo]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-up-bamt]","[data-up-bsave]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
