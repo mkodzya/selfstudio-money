@@ -780,7 +780,8 @@ button.td-wk:focus-visible{outline-offset:-2px}
    the card in «Касса», whose band is padded 10px) */
 .cs-rows tr.cs-edrow .ed-rc-more>button:first-child{margin-left:-10px}
 .cs-rows tr.cs-edrow .ed-rc-more>button:last-child{margin-right:-10px}
-.cs-rows tr.cs-edrow .ed-rc-x{top:0;right:0}
+/* (in «Касса» the card runs to the column's edge, which clips: the × stands clear of it, focus ring and all) */
+.cs-rows tr.cs-edrow .ed-rc-x{top:2px;right:6px}
 @container (max-width:520px){
   .ed-rc-info{padding:14px 14px 16px}
   .ed-rc-act{padding:12px 14px 10px}
