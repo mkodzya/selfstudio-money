@@ -44,6 +44,19 @@ other set, counted without the fees inside it, comes to under the withdrawal's s
 from a third row by those fees, where a record takes its set and no more. In none of them does «Денег сейчас» move.
 Whether to take K's exception as it is or to rework W1 and the memory for it is put to the owner (`docs/handoff.md`,
 «Решения, которые ждут Мику», 14).
+A plan may hold, since 1 November 2026, what a repeating row IS from a month on (`rec.since`: a name, bank, currency,
+VAT or «это подписка» said of a month after the row's first - the owner's decision 3 of that day; `lineAt` in the page).
+`lives.cjs` and `sameday.cjs` write it: their change 11, a new name on a withdrawal, is one when it falls on a month of
+a repeat after its first. The two pages of before know no such field and would read every month by the row's own
+name, so `engines()` hands them every plan with it written out (`unsince` in `lib.cjs`, written apart from the page):
+the line stored as develop stores a line whose fields change from a month - a chain of rows, one from each month an
+entry names, with a withdrawal's owner by its name written on each as `named` writes it - and the model read back as
+the row's (the parts' ids are the row's; its months name the row's first and last month). `named` gives a renamed
+repeat its owner only when every name it goes by is that founder's: one that is his in some months only is his by
+its name in those months, which no owner by hand can say. Without the two, F, P and N/D failed in the lives where
+change 11 fell on such a month (`lives.cjs 600`: F in 164, 201, 255, 475; N/D in 156, 196, 358, 404, 468, 474, 516,
+556); with them the runs above say what they said before, K only in the known lives. A plan without `rec.since` is
+handed over as it is.
 `lives.cjs`, `dense.cjs` and `sameday.cjs` say at their head what they hold, and print how often each thing was
 looked at (and how often there was anything to move). `sameday.cjs` makes the lives the others make too rarely:
 a balance typed for today or for yesterday, withdrawals ticked in «Что из этого уже прошло?» or marked after it,
@@ -139,7 +152,7 @@ label; and (`sameday.cjs`) a record written before its rows came, whose nearer r
   (what the fees add to a model, and since 30 October 2026 how far each account's statements reach for «Загрузка»
   and what the account held at the end of that day, `accounts[].stmt`, which no page of before has, and «Своих
   денег», `own` with the verdict `vR` - `bareFee` puts back the verdict it stands for; `bare` takes all of it out
-  too).
+  too); and `unsince` (1 November 2026, above): how the pages of before are handed a plan with `rec.since`.
 - `gen.cjs` - seeded random plans and ledgers; `news` and `fees` are the streams of 17 and 19 October 2026.
 - `cases.cjs` - the reviews' cases, by hand; it asks the page as it is (`new.cjs`) alone - case 7 has `pre.cjs` write
   the memory it reads; case 11 asks `new.cjs`'s `text120` (`pre.cjs`'s with `ENGINE=pre`).

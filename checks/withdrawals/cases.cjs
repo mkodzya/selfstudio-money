@@ -362,5 +362,17 @@ const asRec = (P, id) => { const r = P.div.find((x) => x.id === id), w = r && r.
   }
   same([differ, tried > 19000], [0, true], '11: … and a text with one fee\'s words or none is cut exactly as 64975ab cut it');
 }
+// 12. (the review of 1 November 2026, the row's card) A withdrawal a founder made «общий» by hand (whose:"") whose name
+// is a founder's, repeating from October, with its bank changed from November (rec.since - the owner's decision of
+// 1 November: a change of the line from a month on keeps the months before). «Частично» on December writes its rest
+// as a row of its own, and the rest kept everything of the line but whose:"" - so the rest, renamed after the
+// founder, became his. It keeps «общий» now, as it does where the line has no rec.since. Made-up figures.
+if (process.env.ENGINE !== 'pre') {
+  const P = plan3({ div: [wd('wG', 1000, '2026-10-20', { name: 'Mika', whose: '', rec: { day: 20, from: '2026-10', since: { '2026-11': { bank: 'Revolut' } } } })] });
+  delete P.div[0].date;
+  const L = ledger([]), M = C(L, P, '2026-10-06'), it = M.items.find((x) => x.id === 'wG@2026-12');
+  const Q = clone(P), z = NEW.write.partial(Q, it, 400, 'rest1', ms('2026-10-06T10:00:00Z'), 'Mika', '2026-10-06', '2026-12-30');
+  same([!!it, z && z.whose, z && z.bank, z && z.amt], [true, '', 'Revolut', 600], '12: the rest of a «общий» withdrawal after «Частично» keeps whose:"" where rec.since changed its bank - and takes the bank of its month');
+}
 console.log(bad ? `${bad} of ${n} failed` : `all ${n} held`);
 process.exit(bad ? 1 : 0);

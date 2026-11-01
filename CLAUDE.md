@@ -506,27 +506,72 @@ a deploy:
   untouched: `checks/withdrawals/` reads every plan as before. The check
   `pick-pay` holds it.
 - **A row's card keeps what is known apart from what can be done** (the
-  owner's choice of 1 November 2026, layout 1 «Стопкой»). «Сведения»
-  (`.ed-rc-info`) hold no control at all, for an editor or a reader; every
-  control is in the band «Действия» (`.ed-rc-act`) or under its «Ещё…», and
-  the × in the corner (`data-ed-x`) closes. A new control of the card goes
-  into the band, never into «Сведения» - and, if it writes, into `ACT` as
-  well. A press that writes leaves the card open with «Отменить» alone in
-  the band (`did`), tied to the number of its own change (`Cash.top()` /
-  `Plan.top()`), so it never takes back a change made after it elsewhere.
+  owner's choice of 1 November 2026, layout 1 «Стопкой»). At rest «Сведения»
+  (`.ed-rc-info`) hold no control, for an editor or a reader; every control
+  is in the band «Действия» (`.ed-rc-act`) or under its «Ещё…», and the × in
+  the corner (`data-ed-x`) closes. The one exception is the line's form:
+  «Изменить строку» - or «Вписать сумму» / «Выбрать…», the answers of a
+  question the band asks first - puts it in the place of «Сведения», inside
+  `.ed-rc-info`, with «Сохранить» and «Отмена» alone in the band. A new
+  control of the card goes into the band, never into «Сведения» - and, if it
+  writes, into `ACT` as well. A press that writes leaves the card open with
+  «Отменить» alone in the band (`did`), tied to the number of its own change
+  (`Cash.top()` / `Plan.top()`), so it never takes back a change made after
+  it elsewhere; while that change is still the last, the toast's «Отменить»
+  does the same. A line that has left the screen takes its card with it -
+  deleted by «Удалить строку», moved to another month, gone from «Нужно
+  решить» - and
+  «Отменить» is then the toast's alone. What is typed in the form is not
+  dropped without a question: ×, Escape, «Отмена», a press on this row or
+  another, «Добавить» and the cursor put into a cell of «Касса» ask
+  «Правки не сохранены» first (`guard`, `show`). A change of month or tab,
+  and a `data-ed-do` pressed outside the card (an answer of «Нужно решить»,
+  «✓ оплачено» on a row of «Касса»), still drop it without a word.
   «Удалить строку» is under «Ещё…» on every tab: three presses (this
   supersedes the two of 8 October 2026 in «Касса · По месяцам»). **On a
   month of a repeat, what the line is - its name, bank, currency, VAT and
   «это подписка» - changes from that month on, without a question, and the
   months before keep theirs** (the same day: «кейс, платят 6 месяцев на
   барклейс и со следующего месяца начинается на револют, зачем менять
-  предыдущте?»). It goes through `Live.write.onward`, as «{Октябрь} и
-  дальше» does - on the row's first month that is the row itself. «С какого
-  месяца?» is asked about the sum and the day alone; «Чей вывод» and «К чему
-  относится» stay the whole row's. This reverses the rule until that day,
-  under which these fields changed every month of the row even with «Только
-  {месяц}». The check `row-card` holds it; `docs/handoff.md`, the entry of
-  1 November 2026.
+  предыдущте?»). **The row stays one stored row**: the change is dated on
+  it, `rec.since` - `{"YYYY-MM": {name?, bank?, cur?, vat?, sub?, sk?,
+  skBy?, blk?}}`, the last three the link of the name - and each field holds
+  from its month until a later entry sets it otherwise; before the first,
+  the row's own field holds. `Live.write.set` writes it - a field that is
+  what holds just before the month is not written - and on the row's first
+  month changes the row itself, every month, leaving a later entry as it is
+  (a founder's change of his own); `Live.compute` reads each month by what
+  holds there (`lineAt`, and `Live.line` for the card, the journal and «Что
+  если»). Everything else - the tick taken off and put back, «Не придёт… →
+  и дальше», «Больше не повторять», «… и дальше», «И дальше так же», a mark,
+  «Частично», a delete, «Отменить» - acts on that one row exactly as on
+  `develop`, and a plan without `rec.since` is written and counted to the
+  byte as `develop` writes and counts it (`checks/withdrawals/README.md`).
+  `rec.since` is a stored field of the plan like any other: it rides in
+  `rec`, which `V2ROW` names and `docOf` and `sig` carry with its row, and
+  `rv-save` holds it through a reload and through the next save. **A change
+  of what the line is never splits the row.** Until the fourth review of that
+  day it did - the row cut
+  into a chain at that month, through `Live.write.onward` - and every
+  operation on the line then had to be taught about the chain: each review
+  found one that went wrong there (a sum «… и дальше» stopping at the split,
+  a line ended from an earlier month going on under its new name, a month
+  and its mark gone once the line was ended twice and the tick put back),
+  and each fix (later parts reached by `partsAfter`, parts kept aside by
+  `rec.cut`) brought more. A chain that «{Октябрь} и дальше» of a sum or a
+  day makes is `develop`'s, as before: the new part takes as its own what
+  holds in its month and keeps the later entries, the old part keeps those
+  before; a name changed from an earlier month stops where the next part
+  begins, and the card's message says so («с ноября по декабрь»). «С какого
+  месяца?» is asked about the sum and the day alone. «Чей вывод» goes to
+  every part of the row's chain and «К чему относится» to the stored row -
+  unless «{Октябрь} и дальше» is the answer, offered only when the sum or
+  the day changed too: then both go from that month on with the rest. A row
+  of «Налоги» renamed after a founder moves to «Дивиденды» whole, under that
+  name in every month. This reverses the rule until that day, under which
+  these fields changed every month of the row even with «Только {месяц}».
+  The checks `row-card`, `rv-chain`, `rv-band` and `rv-save` hold it;
+  `docs/handoff.md`, the entry of 1 November 2026.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two
