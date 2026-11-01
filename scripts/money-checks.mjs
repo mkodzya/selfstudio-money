@@ -5667,10 +5667,14 @@ await run('rv-band', 'the rest of the review of the row\'s card: a tax in rouble
   await shutRow(pg);
   await rowCard(pg, 'inflows', 'rA@2026-10');
   opened.push(await focus());
+  // (in «Касса» the card runs to the column's edge, which clips: the × - and the ring of the cursor on it - stands clear
+  // of that edge; on the test stand of 1 November the ring was cut in half)
+  const xr = await pg.$eval('[data-ed-card="row"] .ed-rc-x', (x) => { const r = x.getBoundingClientRect(), c = x.closest('[data-ed-card]').getBoundingClientRect(); return [Math.round(c.right - r.right), Math.round(r.top - c.top)]; });
   await pg.keyboard.press('Escape');
   opened.push(await gone(pg));
   same(opened, ['×', 'Оплачено', true, true, true, '×', true],
     'a card that opens - by Enter on a row of «Сегодня», by «…» in «Касса» - has the cursor on its ×, not on «Оплачено» that heads its band: Enter pressed again shuts it and writes nothing, Enter held writes nothing, and Escape shuts it');
+  ok(xr[0] >= 4 && xr[1] >= 1, 'in «Касса» the card\'s × stands clear of the column\'s edge, so the ring of the cursor on it is drawn whole', xr);
   // A row's form with what was typed and not saved: another row's «…», or the cursor put into another row's cell,
   // asks first - «Правки не сохранены» [Сохранить] [Не сохранять] - as × and Escape do. Until this review what was
   // typed went without a word.
