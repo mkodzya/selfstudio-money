@@ -3,9 +3,46 @@
 const fs = require('fs'), path = require('path');
 if (fs.existsSync(path.join(__dirname, '..', '..', 'data'))) { console.error('checks/withdrawals: this checkout holds data/ - not here'); process.exit(2); }
 // ENGINES names a folder with new.cjs (the page as it is), dev.cjs (the page before the rule of 13 October 2026) and
-// pre.cjs (develop before the bank's fees of 19 October 2026, 008462e) - see README.md
+// pre.cjs (develop before the bank's fees of 19 October 2026, 008462e) - see README.md. The two pages of before are
+// handed every plan with rec.since written out (`unsince`, below).
 const engines = () => { const dir = process.env.ENGINES; if (!dir || !['new', 'dev', 'pre'].every((k) => fs.existsSync(path.join(dir, k + '.cjs')))) { console.error('ENGINES=<a folder with new.cjs, dev.cjs and pre.cjs>: see checks/withdrawals/README.md'); process.exit(2); }
-  return { NEW: require(path.resolve(dir, 'new.cjs')).Live, DEV: require(path.resolve(dir, 'dev.cjs')).Live, PRE: require(path.resolve(dir, 'pre.cjs')).Live }; };
+  return { NEW: require(path.resolve(dir, 'new.cjs')).Live, DEV: before(require(path.resolve(dir, 'dev.cjs')).Live), PRE: before(require(path.resolve(dir, 'pre.cjs')).Live) }; };
+// rec.since (the owner's decision of 1 November 2026): what a repeating row IS from a month on - its name, bank,
+// currency, VAT, «это подписка», link - kept on the one stored row, each entry holding from its month until the next
+// that sets the same field (the page: `lineAt`). No page of before knows the field, and each would read every month
+// as the row's own. So they are handed the plan as develop itself stores a line whose fields change from a month: a
+// chain of rows, one from each month an entry names (ids «<row>~since~<month>»), each the line as it is in force in
+// that month with its months' exceptions - and on each, a withdrawal's owner by its name written out as `named`
+// writes it (the page of 13 October 2026 reads no owner from a name). The model they give back is read as the row's:
+// the parts' ids are the row's, and its months name the row's first and last month. Written apart from the page, as
+// N and D are. A plan without rec.since is handed over as it is.
+const SINCE = ['name', 'bank', 'cur', 'vat', 'sub', 'sk', 'skBy', 'blk'], CURS = ['GBP', 'USD', 'EUR', 'RUB', 'AMD'];
+const isYm = (s) => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+const ymNext = (ym, k) => { const n = +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1) + k; return Math.floor(n / 12) + '-' + String((n % 12) + 1).padStart(2, '0'); };
+const sinceOf = (r) => { const s = r && r.rec && typeof r.rec === 'object' && r.rec.since && typeof r.rec.since === 'object' && !Array.isArray(r.rec.since) ? r.rec.since : null; if (!s) return [];
+  return Object.keys(s).filter((m) => isYm(m) && s[m] && typeof s[m] === 'object' && !Array.isArray(s[m])).sort().map((m) => { const e = {};
+    SINCE.forEach((f) => { const v = s[m][f]; if (f === 'cur' ? CURS.includes(v) : f === 'vat' || f === 'sub' ? typeof v === 'boolean' : typeof v === 'string') e[f] = v; }); return [m, e]; }).filter((x) => Object.keys(x[1]).length); };
+const put1 = (r, f, v) => { if ((f === 'sk' || f === 'skBy' || f === 'blk') && v === '') delete r[f]; else if (f === 'sub' && !v) delete r.sub; else r[f] = v; };
+const unsince = (P) => {
+  if (!P || typeof P !== 'object') return null; let any = false; const Q = clone(P), rows = {};
+  ['inflows', 'team', 'taxes', 'other', 'div'].forEach((k) => { if (!Array.isArray(Q[k])) return; const out = [];
+    Q[k].forEach((r) => { out.push(r); const rec = r && r.rec; if (!rec || typeof rec !== 'object' || rec.since === undefined) return;
+      const S = sinceOf(r); delete rec.since; if (!S.length || !isYm(rec.from) || !(+rec.day >= 1 && +rec.day <= 31)) return; any = true;
+      const base = clone(r), to = isYm(rec.to) ? rec.to : '', x = rec.x && typeof rec.x === 'object' ? rec.x : {};
+      const at = (m) => { const o = {}; S.forEach(([ym, e]) => { if (ym <= m) Object.assign(o, e); }); return o; };
+      const xs = (o, a, b) => { const y = {}; Object.keys(x).forEach((m) => { if (m >= a && (!b || m < b)) y[m] = clone(x[m]); }); if (Object.keys(y).length) o.rec.x = y; else delete o.rec.x; };
+      const line = (o, m) => { const a = at(m); Object.keys(a).forEach((f) => put1(o, f, a[f])); if (k === 'div' && !o.ptax && o.whose === undefined) { const w = nameOf(o.name); if (w) o.whose = w; } };
+      const bs = [...new Set(S.map((e) => e[0]).filter((m) => m > rec.from))].sort();
+      rows[String(r.id)] = { from: rec.from, to };
+      line(r, rec.from); if (bs.length && !(to && to < bs[0])) r.rec.to = ymNext(bs[0], -1); xs(r, '', bs[0]);
+      bs.forEach((b, i) => { if (to && b > to) return; const p = clone(base); delete p.rec.since; p.id = String(base.id) + '~since~' + b; p.rec.from = b; p.rec.chain = String(base.rec.chain || base.id);
+        const nx = bs[i + 1]; if (nx && !(to && to < nx)) p.rec.to = ymNext(nx, -1); else if (to) p.rec.to = to; else delete p.rec.to; xs(p, b, nx); line(p, b); out.push(p); }); });
+    Q[k] = out; });
+  return any ? { Q, rows } : null; };
+const back = (M, u) => { const R = JSON.parse(JSON.stringify(M).replace(/~since~\d{4}-(0[1-9]|1[0-2])/g, ''));
+  (R.items || []).forEach((it) => { const o = u.rows[String(it.row)]; if (o && it.occ) { it.occ.from = o.from; it.occ.to = o.to; } });
+  (R.clients || []).forEach((c) => { if (Array.isArray(c.rows)) c.rows = [...new Set(c.rows)]; }); return R; };
+const before = (Live) => Object.assign(Object.create(Live), { compute: (L, P, T, o) => { const u = unsince(P); return u ? back(Live.compute(L, u.Q, T, o), u) : Live.compute(L, P, T, o); } });
 const ms = (iso) => Date.parse(iso);
 const round2 = (v) => Math.round(v * 100) / 100;
 const FX = { USD: 1.35, EUR: 1.17, RUB: 118, AMD: 525 };
@@ -58,8 +95,10 @@ const bare = (M) => { M.items.forEach((it) => { delete it.saw; delete it.sawDay;
 // Each returns the very object it was handed when there is nothing to write, so `!==` says whether it did anything.
 const FND = ['mika', 'misha', 'vanya'], NAMES = { mika: ['mika', 'мика'], misha: ['misha', 'миша'], vanya: ['vanya', 'ваня'] };
 const nameOf = (name) => { const s = String(name == null ? '' : name).trim().toLowerCase(); return FND.find((k) => NAMES[k].includes(s)) || ''; };
+// (A repeat renamed from a month on - rec.since - is given its owner only when every name it goes by is that founder's:
+// one that is his in some months only is his by its name in those months, which no owner by hand can say.)
 const named = (P) => { let n = 0; const Q = clone(P);
-  (Q.div || []).forEach((r) => { if (!r || r.ptax || FND.includes(r.whose) || r.whose === '') return; const k = nameOf(r.name); if (k) { r.whose = k; n++; } });
+  (Q.div || []).forEach((r) => { if (!r || r.ptax || FND.includes(r.whose) || r.whose === '') return; const k = nameOf(r.name); if (k && sinceOf(r).every(([, e]) => e.name === undefined || nameOf(e.name) === k)) { r.whose = k; n++; } });
   return n ? Q : P; };
 const isDaily = (r) => {
   if (!r || typeof r.d !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(r.d) || r.d < '2026-10-01') return false;
@@ -272,4 +311,4 @@ const wCheck = (M, L, T, FX, up, P, memory) => {
   }
   return bad;
 };
-module.exports = { ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, bare, bareFee, mk, engines, C0, AT1, FX, named, toOwn, isDaily, nameOf, wCheck, FND, feeOf, figOf, worth, nat, hasFee, unfee, gCheck };
+module.exports = { unsince, ms, round2, filed, inbox, reach, ledger, bal, row, wd, plan3, clone, item, bare, bareFee, mk, engines, C0, AT1, FX, named, toOwn, isDaily, nameOf, wCheck, FND, feeOf, figOf, worth, nat, hasFee, unfee, gCheck };
