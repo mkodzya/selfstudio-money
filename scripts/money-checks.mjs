@@ -5163,7 +5163,7 @@ await run('rv-drop', 'an account is taken out of the plan in «Вписать о
   same(await banks(), ['b-Wise-GBP', 'b-Barclays-GBP'], '«Отменить» brings it back');
   // «Касса»: a row is added where its list is, and nowhere else
   await goCash(pg);
-  same([await pg.$$eval('#view-cash .page-head button', (l) => l.length), await pg.$$eval('#cs-plan [data-ed-add]', (l) => l.map((b) => b.textContent.trim()))], [0, ['+ новая строка', '+ новая строка', '+ новая строка', '+ новая подписка', '+ новая строка', '+ новая строка']], '«Касса»: no button in the head; «+ новая строка» under each list, and «+ новая подписка» under «Подписки»');
+  same([await texts(pg, '#view-cash .page-head button'), await pg.$$eval('#cs-plan [data-ed-add]', (l) => l.map((b) => b.textContent.trim()))], [['‹', '›', 'По месяцам', 'По дням'], ['+ новая строка', '+ новая строка', '+ новая строка', '+ новая подписка', '+ новая строка', '+ новая строка']], '«Касса»: nothing in the head but the month\'s arrows and the two views; «+ новая строка» under each list, and «+ новая подписка» under «Подписки»');
   await finish(pg);
 });
 
