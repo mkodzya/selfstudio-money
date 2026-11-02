@@ -52,7 +52,10 @@ body{font-family:var(--sans);color:var(--text-primary);-webkit-font-smoothing:an
 .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap}
 .page-head h1{font-size:23px;font-weight:600;letter-spacing:-.01em;margin:0}
 .page-head h1 em{font-style:italic}
-.page-sub{color:var(--text-muted);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-top:6px}
+/* Under a page's heading: one line of words in the face of sentences (2 November 2026: mono capitals are for what is
+   pressed). It is written in small letters and shown from a capital. */
+.page-sub{color:var(--text-muted);font-size:13px;line-height:1.5;margin-top:6px}
+.page-sub::first-letter{text-transform:uppercase}
 
 /* controls: one height, pills for what you press, square boxes for what you fill in */
 button{display:inline-flex;align-items:center;justify-content:center;height:var(--control);padding:0 16px;background:transparent;border:1px solid var(--text-primary);color:var(--text-primary);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;border-radius:100px;cursor:pointer;white-space:nowrap;transition:background .12s ease,transform .08s ease}
@@ -63,7 +66,7 @@ button:focus-visible,.chip:focus-visible,input:focus-visible,select:focus-visibl
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)}
 button.primary:hover{background:var(--text-secondary);border-color:var(--text-secondary)}
 button.primary:disabled{background:var(--accent);border-color:var(--accent)}
-button.sm{height:26px;padding:0 12px;font-size:10.5px}
+button.sm{height:26px;padding:0 12px;font-size:11px}
 button.ghost{border-color:transparent;color:var(--text-muted)}
 button.ghost:hover{color:var(--text-primary);background:var(--accent-dim)}
 button.x{width:24px;height:24px;padding:0;border-color:transparent;color:var(--text-muted);font-size:15px;line-height:1}
@@ -75,7 +78,7 @@ input:focus,select:focus{outline:none;border-color:var(--text-primary)}
 select{font-family:var(--mono);font-size:12px;appearance:none;-webkit-appearance:none;padding-right:28px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1 1.5 5 5.5 9 1.5' fill='none' stroke='%236b675c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center}
 .lbl,.fld>span{display:block;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
 .fld{display:flex;flex-direction:column;gap:6px}
-.note{color:var(--text-muted);font-size:12.5px;line-height:1.55}
+.note{color:var(--text-muted);font-size:13px;line-height:1.55}
 .note a{color:var(--text-primary);text-underline-offset:2px}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -85,7 +88,7 @@ select{font-family:var(--mono);font-size:12px;appearance:none;-webkit-appearance
 .pill{display:inline-flex;align-items:center;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;padding:3px 10px;border:1px solid var(--border-strong);border-radius:100px;color:var(--text-secondary);white-space:nowrap}
 .pill.ok{border-color:var(--ok);color:var(--ok);background:var(--ok-dim)}.pill.ask{border-color:var(--warn);color:var(--warn);background:var(--warn-dim)}.pill.dup{border-color:var(--mark-crit);color:var(--mark-crit);background:var(--bad-dim)}.pill.info{border-color:var(--ice);color:var(--ice-ink);background:var(--ice)}
 .banner{padding:12px 14px;background:var(--warn-dim);border:1px solid var(--warn);font-size:13px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:18px}
-.empty{text-align:center;padding:44px 24px;color:var(--text-muted);border:1px dashed var(--border-strong);background:var(--panel);font-size:12.5px;line-height:1.6}
+.empty{text-align:center;padding:44px 24px;color:var(--text-muted);border:1px dashed var(--border-strong);background:var(--panel);font-size:13px;line-height:1.6}
 .empty b{display:block;font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;font-style:italic}
 .tbl{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
@@ -173,7 +176,7 @@ svg.chart .hit{cursor:pointer}
 .op-text{font-size:12px;color:var(--text-muted);overflow-wrap:anywhere}
 .op-warn{font-size:12.5px;background:var(--bad-dim);padding:8px 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .op-chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{height:28px;padding:0 12px;font-size:10.5px;border-color:var(--border-strong);color:var(--text-secondary)}
+.chip{height:28px;padding:0 12px;font-size:11px;border-color:var(--border-strong);color:var(--text-secondary)}
 .chip.active{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)}
 .op-foot{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .op-foot .fld{flex:1 1 160px;min-width:0}
@@ -302,16 +305,28 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 /* The six figures stay in sight while the rows below them are edited, but only where they fit in one line: on a
    narrow screen they are two or three rows tall and would cover what is being typed. */
 @media (min-width:1101px){.cs-hh{margin-left:auto}}
-.cs-undo{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--accent-dim);padding:8px 12px;font-size:13px}
+.cs-undo{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;color:var(--text-muted)}
 .cs-secnote{margin:0 0 10px}
 /* The balances: a figure, the day it is true for, the hand that typed it — and beside it what the page makes of it
    now. The rows share their columns; a browser that does not know `subgrid` keeps the columns written before it. */
-/* One month at a time. The switcher is the heading of everything under it. */
-.cs-month{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;border-bottom:1px solid var(--text-primary)}
-.cs-mname{font-size:19px;font-weight:600;letter-spacing:-.01em;min-width:8.6em;text-align:center}
+/* The head of «Касса» (2 November 2026, variant «В»): the month with its arrows is the page's heading, the two views
+   stand on its right, one line runs under both. Three faces and no more: the heading at 23, every sentence at 13,
+   and the mono capitals of what is pressed at 11 - a word that takes you somewhere inside a sentence is underlined
+   in the sentence's own face. */
+.cs-head{border-bottom:1px solid var(--text-primary);gap:12px 24px}
+.cs-head .tabs2{border-bottom:0}
+.cs-hbox{display:flex;flex-direction:column;gap:6px;padding-bottom:12px;min-width:0}
+.cs-hsub{margin:0}
+.cs-month{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.page-head h1.cs-mname{min-width:7.2em;text-align:center;line-height:1.2}
 .cs-step{width:var(--control);padding:0;font-size:16px;flex:none}
-.cs-back{margin:-6px 0 0}
-.cs-back button{height:24px;padding:0 8px;vertical-align:baseline}
+.cs-notes{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 18px}
+.cs-nl{display:flex;flex-direction:column;gap:6px;flex:1 1 320px;min-width:0}
+.cs-nl>*{margin:0;font-size:13px;line-height:1.55}
+.cs-notes>[data-cs-helper]{margin-left:auto}
+button.cs-link{display:inline;height:auto;padding:0;border:0;border-radius:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:var(--text-primary);text-decoration:underline;text-underline-offset:3px;white-space:normal;vertical-align:baseline}
+button.cs-link:hover{background:none;text-decoration-thickness:2px}
+button.cs-link:active{transform:none}
 /* The lists of a month, in two columns: what comes in on the left, what goes out on the right. A row is one quiet
    line - its day, its bank's square and its name, its sum, typed where it stands, its currency and what that is in
    pounds. A press anywhere else on it opens its card under it: every field under its name, and what can be done
@@ -462,7 +477,7 @@ table.grp{min-width:560px}table.rws{min-width:620px}
 .cs-hl{font-size:17px;font-weight:600;line-height:1.4;text-wrap:balance;max-width:76ch}
 .cs-hl.cs-neg{color:var(--mark-crit);padding-left:14px;border-left:3px solid var(--mark-crit)}
 .cs-hl.cs-low{padding-left:14px;border-left:3px solid var(--warn)}
-.cs-sub{color:var(--text-muted);font-size:12.5px;line-height:1.55;margin-top:8px}
+.cs-sub{color:var(--text-muted);font-size:13px;line-height:1.55;margin-top:8px}
 .cs-sub.cs-warn{color:var(--warn)}
 .cs-h3{margin:18px 0 8px;font-family:var(--mono);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
 .cs-sugg{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
@@ -970,6 +985,9 @@ const MONG=["янв","фев","мар","апр","мая","июн","июл","ав
 const dUTC=d=>Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10)),dAdd=(d,n)=>new Date(dUTC(d)+n*864e5).toISOString().slice(0,10);
 // The day and its month are held together by a space that does not break: «28» at the end of one line and «октября»
 // at the start of the next reads as two things.
+const DOWF=["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"],dRuWF=d=>DOWF[new Date(dUTC(d)).getUTCDay()]+", "+dRuF(d);
+// What the balances of a plan model are true for, as the line under the heading of «Сегодня» and «Касса» says it.
+const nowSay=M=>{const ref=M.accounts.find(a=>a.key===M.nowAcct);return M.v0?"остатки вписаны не все":M.nowDate?`выписки и остатки по ${dRuF(M.nowDate)}${ref?` (${ref.name})`:""}`:"остатки не вписаны";};
 const dRu=d=>(+d.slice(8))+"\u00a0"+MONG[+d.slice(5,7)-1],dRuW=d=>DOWS[new Date(dUTC(d)).getUTCDay()]+" "+dRu(d),dRuF=d=>(+d.slice(8))+"\u00a0"+MONGF[+d.slice(5,7)-1];
 const plural=(n,one,few,many)=>{const a=Math.abs(n)%100,k=a%10;return a>10&&a<20?many:k===1?one:k>=2&&k<=4?few:many;};
 // A statement row is turned into pounds at the rate of its own day, once: from then on the sum is the row's. Where
@@ -3095,30 +3113,33 @@ const Cash=(()=>{
  }
 
  // ---- «План»: one month ----
- // The switcher walks the months the engine has: the running one, the two after it, and any other that holds a row.
+ // The month's switcher is the heading of the tab (head(), below). Under it, before the lists, one column of short
+ // sentences - what can be taken back, what earlier months still hold, what this month is - and on its right the
+ // helper's button.
  function planView(adding){
-  const m=cu.month,L=M.months.list,i=L.indexOf(m),ymT=M.T.slice(0,7),mn=MONF[+m.slice(5)-1].toLowerCase();
-  const sw=`<div class="cs-month" id="cs-month"><button class="cs-step" data-cs-mon="-1"${i>0?"":" disabled"} aria-label="Предыдущий месяц">‹</button><b class="cs-mname" id="cs-mname">${ymFull(m)}</b><button class="cs-step" data-cs-mon="1"${i<L.length-1?"":" disabled"} aria-label="Следующий месяц">›</button>
-   <span class="cs-note">${m<ymT?"месяц прошёл":m===ymT?`идёт · сегодня ${dRuF(M.T)}`:m>M.months.to60?"впереди · дальше 60 дней: в «хватит ли денег» и «Можно вывести» не входит":"впереди"}</span>${m!==ymT?'<button class="sm ghost" data-cs-mon="now">К текущему месяцу</button>':""}</div>`;
+  const m=cu.month,ymT=M.T.slice(0,7),mn=MONF[+m.slice(5)-1].toLowerCase();
   // A typed row that was not closed stays in the month of its date. From the running month a founder is told that
   // earlier months still hold some, and is taken there.
   const left=m===ymT?M.items.filter(it=>it.src!=="tax"&&it.open&&it.ym<ymT):[],last=left.reduce((a,it)=>it.ym>a?it.ym:a,"");
-  const back=left.length?`<p class="note cs-back" id="cs-back">В прошлых месяцах не закрыто: ${count(left.length,"строка","строки","строк")} на ${fmt(left.reduce((a,it)=>a+Math.abs(it.full),0))}. <button class="sm ghost" data-cs-mon="${last}">${ymFull(last)}</button></p>`:"";
+  const back=left.length?`<p class="note" id="cs-back">В прошлых месяцах не закрыто: ${count(left.length,"строка","строки","строк")} на ${fmt(left.reduce((a,it)=>a+Math.abs(it.full),0))}. <button class="cs-link" data-cs-mon="${last}">Открыть ${monL(last)}${last.slice(0,4)===ymT.slice(0,4)?"":" "+last.slice(0,4)}</button></p>`:"";
+  const far=m>M.months.to60?'<p class="note" id="cs-far">Месяц дальше 60 дней: в «хватит ли денег» и «Можно вывести» он не входит.</p>':"";
   // A month gone by is the plan's page of it, not the month's accounts: what moved outside the plan is not here.
   // The page says so, and where the whole month is, rather than let its totals be read as the month's.
   // Since 13 October 2026 a month the plan was kept in says that too, row by row («вне плана»), and in one sentence
   // at its head; an earlier month still holds the plan's rows alone, and says so.
   const mo=M.months.by[m]||{},of=mo.off,pay=n=>count(n,"платёж","платежа","платежей");
-  const past=m<ymT&&!of?'<p class="note cs-back" id="cs-past">Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».</p>':"";
-  const outs=of&&of.nIn+of.nOut?`<p class="note cs-back" id="cs-off">Оплачено вне плана в ${monP(m)}: ${[of.nOut?`ушло ${lv("mon.off.out",of.out,fmt(of.out))} (${pay(of.nOut)})`:"",of.nIn?`пришло ${lv("mon.off.in",of.in,fmt(of.in))} (${pay(of.nIn)})`:""].filter(Boolean).join(", ")}. Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.</p>`:"";
-  const wait=mo.wait&&mo.wait.n?`<p class="note cs-back" id="cs-wait">Ещё ${pay(mo.wait.n)} на ${fmt(mo.wait.gbp)} за ${monL(m)} ${plural(mo.wait.n,"ждёт","ждут","ждут")} в «Разборе»: статьи пока нет, поэтому в списках ${mo.wait.n===1?"его":"их"} нет. <button class="sm ghost" data-tab="inbox">Открыть «Разбор»</button></p>`:"";
+  const past=m<ymT&&!of?'<p class="note" id="cs-past">Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».</p>':"";
+  const outs=of&&of.nIn+of.nOut?`<p class="note" id="cs-off">Оплачено вне плана в ${monP(m)}: ${[of.nOut?`ушло ${lv("mon.off.out",of.out,fmt(of.out))} (${pay(of.nOut)})`:"",of.nIn?`пришло ${lv("mon.off.in",of.in,fmt(of.in))} (${pay(of.nIn)})`:""].filter(Boolean).join(", ")}. Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.</p>`:"";
+  const wait=mo.wait&&mo.wait.n?`<p class="note" id="cs-wait">Ещё ${pay(mo.wait.n)} на ${fmt(mo.wait.gbp)} за ${monL(m)} ${plural(mo.wait.n,"ждёт","ждут","ждут")} в «Разборе»: статьи пока нет, поэтому в списках ${mo.wait.n===1?"его":"их"} нет. <button class="cs-link" data-tab="inbox">Открыть «Разбор»</button></p>`:"";
   // The plan holds only what a founder wrote, so a month may be empty. Thirty rows are a lot to type: the helper
   // is one press away at the head of the tab, and is offered again, in full view, by a month nobody has written.
-  const written=M.items.some(it=>it.src!=="tax"&&it.ym===m),hb='<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>';
-  const help=cu.helper?helperHTML():m>=ymT&&!written?`<div class="empty cs-nomonth" id="cs-nomonth"><b>В ${monP(m)} пока ничего не вписано</b>В плане только то, что вписали вы. Впишите строки ниже — или начните с тех, кому платят каждый месяц.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-cs-helper>Подставить по прошлым месяцам</button></div></div>`:`<div class="row cs-helpbar">${hb}<span class="note">список тех, кому платят каждый месяц, — отметьте, кого вписать</span></div>`;
+  const written=M.items.some(it=>it.src!=="tax"&&it.ym===m),bar=!cu.helper&&!(m>=ymT&&!written);
+  const help=cu.helper?helperHTML():bar?"":`<div class="empty cs-nomonth" id="cs-nomonth"><b>В ${monP(m)} пока ничего не вписано</b>В плане только то, что вписали вы. Впишите строки ниже — или начните с тех, кому платят каждый месяц.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-cs-helper>Подставить по прошлым месяцам</button></div></div>`;
+  // (The strip of «Отменить» is always there, hidden when there is nothing to take back: patch() redraws it in place.)
+  const notes=`<div class="cs-notes" id="cs-notes"><div class="cs-nl">${undoStrip()}${back}${far}${past}${outs}${wait}</div>${bar?'<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>':""}</div>`;
   // What comes in on the left, what goes out on the right.
   const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)+(k==="other"?feesHTML():"")).join("")}</div>`;
-  return `<div id="cs-plan" class="stack">${sw}${back}${past}${outs}${wait}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
+  return `<div id="cs-plan" class="stack">${notes}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
    <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: сверху — что о строке известно, снизу — что с ней можно сделать: «Получено» или «Оплачено», «Частично…», «Перенести…», «Не придёт…». Название, сумму, банк, дату и «каждый месяц» меняет «Изменить строку»; выбрать платёж из выписки, «Что если…» и «Удалить строку» — в «Ещё…». Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — ответ рядом: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
@@ -3340,12 +3361,20 @@ const Cash=(()=>{
  }
 
  // ---- the tab ----
+ // The heading of the tab (Mika's choice of 2 November 2026, variant «В»): the word «Касса» is the menu's, so the
+ // heading is what is in view - in «По месяцам» the month with its arrows, in «По дням» the days ahead - with the
+ // two views on its right and one line under it, in words: whether the month is gone, running or ahead, today, and
+ // the day the balances are true for. One size for every sentence of the head and the notes under it, and capitals
+ // of the mono face only on what is pressed.
+ // Nothing else is here: «30 дней / 60 дней» is in «По дням», the one view it changes, and a row is added where its
+ // list is, by «+ новая строка» (both stood in the head until 8 October 2026).
  function head(){
-  const ref=M.accounts.find(a=>a.key===M.nowAcct),sub=[dRuW(M.T),M.v0?"остатки вписаны не все":M.nowDate?`выписки и остатки по ${dRu(M.nowDate)}${ref?` (${ref.name})`:""}`:"остатки не вписаны"];
+  const plan=cu.view==="plan",m=cu.month,L=M.months.list,i=L.indexOf(m),ymT=M.T.slice(0,7),day=esc(["сегодня "+dRuWF(M.T),nowSay(M)].join(" · "));
+  const sub=plan?`<span id="cs-mstate">${m<ymT?"месяц прошёл":m===ymT?"идёт":"впереди"}</span> · ${day}`:day;
+  const title=plan?`<div class="cs-month" id="cs-month"><button class="cs-step" data-cs-mon="-1"${i>0?"":" disabled"} aria-label="Предыдущий месяц">‹</button><h1 class="cs-mname" id="cs-mname">${ymFull(m)}</h1><button class="cs-step" data-cs-mon="1"${i<L.length-1?"":" disabled"} aria-label="Следующий месяц">›</button>${m!==ymT?'<button class="sm ghost" data-cs-mon="now">К текущему месяцу</button>':""}</div>`:`<h1>Ближайшие ${M.H} дней</h1>`;
   const lost=stale?'<div class="banner cs-stale" id="cs-stale"><span><b>Касса изменилась в другом окне.</b> То, что вы меняете здесь, больше не сохраняется. Обновите страницу, чтобы увидеть свежий план.</span><a class="btnlink" href="#cash" data-cs-reload>Обновить</a></div>':"";
-  // Nothing but the heading: «30 дней / 60 дней» is in «По дням», the one view it changes, and a row is added where
-  // its list is, by «+ новая строка» (both stood here until 8 October 2026).
-  return lost+`<div class="page-head"><div><h1>Касса</h1><div class="page-sub" id="cs-sub">${esc(sub.join(" · "))}</div></div></div>`;
+  return lost+`<div class="page-head cs-head"><div class="cs-hbox">${title}<div class="page-sub cs-hsub" id="cs-sub">${sub}</div></div>`
+   +`<div class="tabs2" role="group" aria-label="Что показать"><button data-cs-view="plan" aria-pressed="${plan}">По месяцам</button><button data-cs-view="days" aria-pressed="${!plan}">По дням</button></div></div>`;
  }
  const undoStrip=()=>undoStack.length?`<div class="cs-undo" id="cs-undo"><span>Последнее изменение: ${esc(undoStack[undoStack.length-1].label)}</span><button class="sm" data-cs-undo>Отменить</button></div>`:'<div id="cs-undo" hidden></div>';
  // The whole tab, from the plan and the ledger as they stand this minute. It is drawn from scratch — its rows hold
@@ -3360,9 +3389,9 @@ const Cash=(()=>{
   if(cu.follow){const had=cu.follow,it=M.items.find(x=>x.src!=="tax"&&!had.has(x.row));cu.follow=null;if(it&&cu.view==="plan"){cu.month=it.ym;if(it.sec==="subs")cu.subs=true;}}
   if(!M.months.list.includes(cu.month))cu.month=M.T.slice(0,7);
   const ed=Ed.open(),adding=!!ed&&ed.k==="add",inList=adding&&cu.view==="plan"&&SECS.includes(cu.addAt);
+  // (In «По месяцам» the strip of «Отменить» is the first of the notes under the month; in «По дням» it stands alone.)
   root.innerHTML=head()+(adding&&!inList?Ed.sheet("add"):"")+Ed.sheet("bal")
-   +`<div class="tabs2" role="group" aria-label="Что показать"><button data-cs-view="plan" aria-pressed="${cu.view==="plan"}">По месяцам</button><button data-cs-view="days" aria-pressed="${cu.view==="days"}">По дням</button></div>`
-   +undoStrip()+(cu.view==="plan"?planView(inList):daysView());
+   +(cu.view==="plan"?planView(inList):undoStrip()+daysView());
   Ed.after(root);
   if(key){const t=[...root.querySelectorAll("tr[data-cs-id]")].find(x=>x.dataset.csId===key[0]),el=t&&t.querySelector(`[data-cs-f="${key[1]}"]`);if(el)el.focus({preventScroll:true});}
   topbar();
@@ -8484,7 +8513,7 @@ const Today=(()=>{
   const P=Plan.doc();
   if(!P){root.innerHTML=`<div class="page-head"><div><h1>Сегодня</h1></div></div>`+(Cash.status()==="bad"?`<div class="empty"><b>План кассы не загрузился</b>Без него «Сегодня» не посчитать. Остальные разделы Money работают как обычно.<div style="margin-top:14px"><button data-td-reload>Обновить страницу</button></div></div>`:`<div class="empty"><b>Загружаю план</b>Остатки, ожидаемые поступления и платежи.</div>`);return;}
   M=Plan.model();by={};M.items.forEach(it=>{by[it.id]=it;});Ed.use(M);
-  const T=M.T,H=M.H,ref=M.accounts.find(a=>a.key===M.nowAcct),sub=[dRuW(T),M.v0?"остатки вписаны не все":M.nowDate?`выписки и остатки по ${dRu(M.nowDate)}${ref?` (${ref.name})`:""}`:"остатки не вписаны"];
+  const T=M.T,H=M.H,sub=[dRuWF(T),nowSay(M)];
   // Somebody saved the plan since this page read it: nothing changed here is kept any more, and the first screen
   // is where that has to be said, because this is where a founder now makes most changes.
   const lost=Cash.status()==="stale"?`<div class="banner" style="margin:0"><span><b>План изменился в другом окне.</b> То, что вы меняете здесь, больше не сохраняется. Обновите страницу, чтобы увидеть свежий план.</span><button class="sm" data-td-reload>Обновить</button></div>`:"";

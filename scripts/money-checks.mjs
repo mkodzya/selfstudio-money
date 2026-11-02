@@ -2451,7 +2451,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
   same(await page.evaluate(() => [typeof window.__money.compute, typeof window.__money.model, typeof window.__money.upgrade, typeof window.__money.passed, window.__money.today, window.__money.by]), ['function', 'function', 'function', 'function', T, 'Mika'], 'window.__money: compute, model, upgrade, passed, today — the date in London — and who is signed in');
   const S = await holds(page, 'the fabricated studio, 60 days');
   same([S.M.v0, S.P.v, S.P.banks.every((b) => b.asOf === '2026-10-04' && !b.legacy)], [false, 3, true], '… whose plan is version 3, with every balance typed as of 4 Oct');
-  ok(/^вт 6 окт · выписки и остатки по 4 окт \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .td-at .td-tl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && (await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября: денег хватает на 60 дней') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the sentence answers the question — «денег хватает» — and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
+  ok(/^вторник, 6 октября · выписки и остатки по 4 октября \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .td-at .td-tl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && (await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября: денег хватает на 60 дней') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the sentence answers the question — «денег хватает» — and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
   await calm(page, 'the fabricated studio');
   const viaDocs = await page.evaluate(async () => {
     const led = (await (await fetch('/api/founder/money')).json()).doc;
@@ -2480,7 +2480,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
   same(await page.evaluate(() => window.__money.today), '2026-10-07', 'half an hour after London midnight «сегодня» is the next day, without a reload');
   await page.click('#view-today [data-td-h="60"]');
   const next = await holds(page, 'the tab left open past midnight, at its next redraw');
-  ok(next.M.T === '2026-10-07' && (await text(page, '#view-today .page-sub')).startsWith('ср 7 окт') && (await text(page, '#view-today .td-day b')) !== '', '… the screen is the 7th\'s: nothing kept the date the page was loaded on', [next.M.T, await text(page, '#view-today .page-sub')]);
+  ok(next.M.T === '2026-10-07' && (await text(page, '#view-today .page-sub')).startsWith('среда, 7 октября') && (await text(page, '#view-today .td-day b')) !== '', '… the screen is the 7th\'s: nothing kept the date the page was loaded on', [next.M.T, await text(page, '#view-today .page-sub')]);
   await page.clock.setFixedTime(new Date('2026-10-06T12:00:00+01:00'));
   await page.click('#view-today [data-td-h="60"]');
   // A phone.
@@ -2901,9 +2901,9 @@ await run('kassa figures', '«Касса» is the plan by months and by days, an
     same(A.M.verdict.id, verdict, `${name}: the sentence of «Сегодня» is ${verdict}`);
     await goCash(pg);
     let B = await holds(pg, `${name}, «Касса · По месяцам»`, 'cash');
-    same([await there(pg, GONE), await texts(pg, '#view-cash .tabs2 button'), await pg.$$eval('#view-cash .page-head button', (l) => l.length), await text(pg, '#view-cash .page-sub'), await pg.$$eval('#cs-plan section.cs-rows', (l) => l.length), !!(await pg.$('#cs-cov'))],
-      [[], ['По месяцам', 'По дням'], 0, await (async () => { await pg.click('.nav [data-tab="today"]'); const t = await text(pg, '#view-today .page-sub'); await goCash(pg); return t; })(), 6, true],
-      `${name} (${verdict}): «По месяцам» is the month, its six sections and «Покрытие по банкам» — no figures of the forecast, no balances, nothing in the head but the name and the day it speaks of`);
+    same([await there(pg, GONE), await texts(pg, '#view-cash .tabs2 button'), await texts(pg, '#view-cash .page-head button'), await text(pg, '#view-cash .page-sub'), await pg.$$eval('#cs-plan section.cs-rows', (l) => l.length), !!(await pg.$('#cs-cov'))],
+      [[], ['По месяцам', 'По дням'], ['‹', '›', 'По месяцам', 'По дням'], await (async () => { await pg.click('.nav [data-tab="today"]'); const t = await text(pg, '#view-today .page-sub'); await goCash(pg); return 'идёт · сегодня ' + t; })(), 6, true],
+      `${name} (${verdict}): «По месяцам» is the month, its six sections and «Покрытие по банкам» — no figures of the forecast, no balances, nothing in the head but the month with its arrows, the two views and the line of «Сегодня» (variant «В», 2 November 2026)`);
     await goCash(pg, 'days');
     B = await holds(pg, `${name}, «Касса · По дням»`, 'cash');
     same([await there(pg, GONE), await texts(pg, '#cs-scope [data-cs-h]'), await pg.$eval('#cs-scope [data-cs-h][aria-pressed="true"]', (b) => b.textContent), !!(await pg.$('#cs-cal')), !!(await pg.$('#cs-stmt')), !!(await pg.$('#cs-covd'))],
@@ -2950,7 +2950,7 @@ await run('kassa figures', '«Касса» is the plan by months and by days, an
   await sane.clock.setFixedTime(new Date('2026-10-06T23:30:00Z'));
   await sane.click('#view-cash [data-cs-view="days"]');
   const late = await holds(sane, 'half an hour after London midnight', 'cash');
-  same([late.M.T, await sane.$eval('#cs-cal .cs-today', (e) => e.dataset.csCal), (await text(sane, '#view-cash .page-sub')).slice(0, 8), late.at.month], ['2026-10-07', '2026-10-07', 'ср 7 окт', '2026-10'], '… nor a date kept from when the page was loaded: past London midnight its today, its calendar and its heading are the 7th');
+  same([late.M.T, await sane.$eval('#cs-cal .cs-today', (e) => e.dataset.csCal), (await text(sane, '#view-cash .page-sub')).split(' · ')[0], late.at.month], ['2026-10-07', '2026-10-07', 'сегодня среда, 7 октября', '2026-10'], '… nor a date kept from when the page was loaded: past London midnight its today, its calendar and its heading are the 7th');
   await sane.context().close();
 });
 
@@ -4517,7 +4517,7 @@ await run('typing', 'a row\'s sum is typed where it stands — the box stays und
 await run('earlier months', 'a row nobody closed stays in the month of its date; a month of a row that repeats is typed into for that month alone', async () => {
   const pm = await scene('monthly rows', ledA(), planW({ inflows: [row('late', 'Client E', 4000, '2026-09-22', { vat: false })], other: [every('rent', 'Studio rent', 900, 15, '2026-10')] }), { H: 60 });
   await goCash(pm);
-  same([plain(await text(pm, '#cs-back')), await listed(pm, 'inflows')], ['В прошлых месяцах не закрыто: 1 строка на £4,000. Сентябрь 2026', ['rA@2026-10']], 'an invoice typed for 22 Sep and never paid is September\'s row; October says that an earlier month still holds one, and how much');
+  same([plain(await text(pm, '#cs-back')), await listed(pm, 'inflows')], ['В прошлых месяцах не закрыто: 1 строка на £4,000. Открыть сентябрь', ['rA@2026-10']], 'an invoice typed for 22 Sep and never paid is September\'s row; October says that an earlier month still holds one, and how much');
   await pm.click('#cs-back [data-cs-mon]');
   same([await monthAt(pm), await csRow(pm, 'inflows', 'late'), await pm.$('#cs-back'), plain(await text(pm, '#cs-past'))], ['2026-09', 'typed | none | on | Client E | 4000 | GBP | 2026-09-22 | Wise | просрочено 13 дн.', null, 'Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».'], '… and its button opens September, where the row says how late it is — and the page says a month gone by is the plan\'s page of it, not the month\'s accounts');
   await toMonth(pm, '2026-11');
@@ -6817,12 +6817,12 @@ await run('rv-months6', '«Касса» by months is drawn six months ahead, and
   // On the page: the switcher goes to April and no further, and a month beyond the sixty days says so.
   const pg = await scene('six months', led, P, { H: 60 });
   await goCash(pg);
-  const at = async () => [await text(pg, '#cs-mname'), await text(pg, '#cs-month .cs-note'), await pg.$eval('#cs-month [data-cs-mon="1"]', (e) => e.disabled), (await pg.$$('#cs-plan [data-ed-open]')).length > 5];
+  const at = async () => [await text(pg, '#cs-mname'), await text(pg, '#cs-mstate'), await pg.$eval('#cs-month [data-cs-mon="1"]', (e) => e.disabled), (await pg.$$('#cs-plan [data-ed-open]')).length > 5, (await pg.$$eval('#cs-far', (l) => l.map((e) => e.textContent)))[0] || ''];
   const seen = [await at()];
   for (let i = 0; i < 6; i++) { await pg.click('#cs-month [data-cs-mon="1"]'); seen.push(await at()); }
-  const farNote = 'впереди · дальше 60 дней: в «хватит ли денег» и «Можно вывести» не входит';
-  same(seen.map((x) => [x[0], x[1].replace(/сегодня.*/, 'сегодня'), x[2]]), [['Октябрь 2026', 'идёт · сегодня', false], ['Ноябрь 2026', 'впереди', false], ['Декабрь 2026', 'впереди', false],
-    ['Январь 2027', farNote, false], ['Февраль 2027', farNote, false], ['Март 2027', farNote, false], ['Апрель 2027', farNote, true]],
+  const far = 'Месяц дальше 60 дней: в «хватит ли денег» и «Можно вывести» он не входит.';
+  same(seen.map((x) => [x[0], x[1], x[2], x[4]]), [['Октябрь 2026', 'идёт', false, ''], ['Ноябрь 2026', 'впереди', false, ''], ['Декабрь 2026', 'впереди', false, ''],
+    ['Январь 2027', 'впереди', false, far], ['Февраль 2027', 'впереди', false, far], ['Март 2027', 'впереди', false, far], ['Апрель 2027', 'впереди', true, far]],
     'October to April, one press a month; from January on the page says the month is beyond the sixty days the verdict looks at; April is the last');
   ok(seen.every((x) => x[3]), 'every one of the seven months has its rows drawn', seen.map((x) => x[3]));
   await shot(pg, 'rv-months6');
