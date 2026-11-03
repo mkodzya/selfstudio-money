@@ -15,6 +15,9 @@
 //      among the items, the accounts a line names before a balance is typed). Every figure, every card and every
 //      line's state is asked.
 //   Z. Live.join leaves no chain it could make one; one it leaves is counted (`left`), never changed.
+//   V. «Вернуть» (the repeat goes on again) on a line whose last part was ended does on the plan made one what it
+//      does on develop's chain: what the part said of months after its end comes back with it (the review of
+//      3 November 2026: join had dropped it, and February's own sum and March switched off came back as the line's).
 // The lives of R are written by the page's writers now; those of O and J by develop's (99d7a46 - which splits).
 // usage: ENGINES=<folder with new.cjs, dev.cjs, pre.cjs and devnow.cjs (develop at 99d7a46)> node checks/withdrawals/join.cjs <lives> [steps]
 const fs = require('fs'), path = require('path');
@@ -115,6 +118,12 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     if (canon(asLine(C(NEW, L, Q), Q)) !== canon(asLine(D, P))) { fail('J: the plan made one is not counted as develop counts the chain', seed, 'step ' + i); break; }
     // Z: what is left is left as it was - and a second join makes nothing more
     if (NEW.join(clone(Q)) !== 0) fail('Z: a second join made more', seed, 'step ' + i);
+    // V: every line made one whose last part has an end - «Вернуть» on develop's chain and on the one row
+    ['inflows', 'team', 'taxes', 'other', 'div'].forEach((k) => (Q[k] || []).forEach((h) => { if (!h || !h.rec || !h.rec.since || !Object.values(h.rec.since).some((e) => e && e.iid)) return;
+      const c = String(h.id), parts = P[k].filter((r) => r && r.rec && (String(r.id) === c || String(r.rec.chain) === c)).sort((a, b) => (a.rec.from < b.rec.from ? -1 : 1)), last = parts[parts.length - 1];
+      if (!last.rec.to) return; up('V lines ended');
+      const Pd = clone(P), Qd = clone(Q); delete Pd[k].find((r) => String(r.id) === String(last.id)).rec.to; delete Qd[k].find((r) => String(r.id) === c).rec.to;
+      if (canon(asLine(C(NEW, L, Qd), Qd)) !== canon(asLine(C(DN, L, Pd), Pd))) fail('V: «Вернуть» on the line made one is not «Вернуть» on develop\'s chain', seed, 'step ' + i + ' ' + c); }));
   }
 }
 console.log(JSON.stringify(stat));

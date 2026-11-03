@@ -5617,7 +5617,10 @@ await run('rv-onward', 'a sum or a day «… и дальше» from a later mont
   await fill(pg, 'row', { amt: 6500 });
   await saveRow(pg, 'onward');
   await saved(pg);
-  const r1 = await rows(pg), m1 = await months(pg), t1 = await toastText(pg);
+  const r1 = await rows(pg), m1 = await months(pg), t1 = await toastText(pg), log1 = (store.cash.doc.log || []).slice(-1).map((e) => [e.w, e.r]);
+  // («Журнал правок»: the sum dated from December is a line of its own, «Person B · с декабря 2026» - the review of
+  // 3 November 2026: a month that already held the new sum as its own would say nothing of the months after it)
+  same(log1, [['Сохранено: Person B — с декабря', [{ n: 'Person B · с декабря 2026', a: [6000, 6500] }]]], '… and the journal says «Person B · с декабря 2026», £6,000 → £6,500');
   await rename(pg, '2026-11');
   const m2 = await months(pg);
   await card(pg, '2026-11');
@@ -5657,6 +5660,31 @@ await run('rv-onward', 'a sum or a day «… и дальше» from a later mont
       [at('2026-10', 'Person B', 6000), at('2026-11', 'Person B', 6000), at('2026-12', 'Person B', 6500, 'rB2@2026-12'), at('2027-01', 'Person B', 6500, 'rB2@2027-01'), at('2027-02', 'Person B', 6500, 'rB2@2027-02')], 0],
       [at('2026-10', 'Person B', 6000), at('2026-11', 'Person BB', 6000), at('2026-12', 'Person BB', 6500, 'rB2@2026-12'), at('2027-01', 'Person BB', 6500, 'rB2@2027-01'), at('2027-02', 'Person BB', 6500, 'rB2@2027-02')], 1, ['rB']],
   'a chain develop split at December is one row as the page opens it - £6,500 dated from December, the months of the later part keeping their names - and opening saves nothing; renamed on November, the new name reaches December on (on develop it stopped there), and what is saved is the one row');
+  await finish(pg);
+
+  // (the review of 3 November 2026) An owner dated with a sum - £1,200 and Mika «Декабрь и дальше» on a withdrawal
+  // nobody owned - and then only the bank changed on January's card: the card read the row's own owner, so January
+  // looked chosen as Mika's against its stored «общий», and «Сохранить» wrote Mika over every month of the line -
+  // September to November became Mika's withdrawals with nothing said.
+  const PW = planW({ div: [every('wD', 'Вывод', 1000, 20, '2026-09', { blk: 'div' })] });
+  pg = await scene('an owner dated with a sum, then the bank of a later month', ledA(), PW, { H: 60 });
+  await goCash(pg);
+  const owners = () => pg.evaluate(() => window.__money.model({ H: 60 }).items.filter((x) => x.occ && x.occ.chain === 'wD' && x.occ.ym <= '2027-01').map((x) => [x.occ.ym.slice(5), x.whose, x.amt, x.bank]));
+  await toMonth(pg, '2026-12');
+  await rowCard(pg, 'div', 'wD@2026-12');
+  await fill(pg, 'row', { whose: 'mika', amt: 1200 });
+  await saveRow(pg, 'onward');
+  await saved(pg);
+  const o1 = await owners();
+  await shutRow(pg);
+  await toMonth(pg, '2027-01');
+  await rowCard(pg, 'div', 'wD@2027-01');
+  await fill(pg, 'row', { bank: 'Barclays' });
+  await pg.click(K('row') + '[data-ed-save]');
+  await saved(pg);
+  same([o1, await owners(), await toastText(pg)], [[['09', '', 1000, 'Wise'], ['10', '', 1000, 'Wise'], ['11', '', 1000, 'Wise'], ['12', 'mika', 1200, 'Wise'], ['01', 'mika', 1200, 'Wise']],
+    [['09', '', 1000, 'Wise'], ['10', '', 1000, 'Wise'], ['11', '', 1000, 'Wise'], ['12', 'mika', 1200, 'Wise'], ['01', 'mika', 1200, 'Barclays']], 'Сохранено: Вывод · банк — с января'],
+  'an owner and a sum dated from December; January\'s bank changed: January on Barclays, and every month keeps its owner - September to November everybody\'s, December on Mika\'s - and the result names the bank alone');
   await finish(pg);
 });
 

@@ -2571,17 +2571,22 @@ const Journal=(()=>{
  }
  // A row at its own level - for a «каждый месяц» row that is what every month without a word of its own follows.
  const rowF=(r,k)=>({a:r2(r.amt),c:String(r.cur||"GBP"),d:String(r.date||""),b:String(r.bank||""),k:mark(r,k),n:String(r.name==null?"":r.name)});
- // The months of a «каждый месяц» row, by what each says of itself: a sum, a day, a mark of its own - and a name, a
- // bank, and since 3 November 2026 a sum or a day it holds from that month on (rec.since). A month goes by what it
- // is in that month (Live.line).
+ // The months of a «каждый месяц» row, by what each says of itself: a sum, a day, a mark of its own - and a name or
+ // a bank it holds from that month on (rec.since). A month goes by what it is in that month (Live.line). Since
+ // 3 November 2026 a sum or a day «… и дальше» dated from a month (rec.since amt, day) is a line of its own, «{name}
+ // · с {месяца}»: the line's sum and day from there, apart from that one month's own (a month that already held the
+ // new sum as its own would say nothing, and the months after it did change).
  function months(n,p,q,k,out){
   const ex=r=>obj(r.rec)&&obj(r.rec.x)?r.rec.x:{},xa=ex(p),xb=ex(q),day=(r,ym)=>obj(r.rec)?dIn(ym,r.rec.day):"";
   const sn=r=>obj(r.rec)&&obj(r.rec.since)?Object.keys(r.rec.since):[],sa=sn(p),sb=sn(q),nm=r=>String(r.name==null?"":r.name);
   [...new Set(Object.keys(xa).concat(Object.keys(xb),sa,sb))].sort().forEach(ym=>{
-   const u=obj(xa[ym])?xa[ym]:{},v=obj(xb[ym])?xb[ym]:{},a=Live.line(p,ym),b=Live.line(q,ym),e={n:cut((b===q?n:nm(b))+" · "+monOf(ym),80)},at=sa.includes(ym)||sb.includes(ym);
-   if(at){if(nm(a)!==nm(b))e.nm=[cut(nm(a),80),cut(nm(b),80)];if(String(a.bank||"")!==String(b.bank||""))e.b=[String(a.bank||""),String(b.bank||"")];}
-   if(u.amt!==v.amt||at){const s=[r2(u.amt!=null?u.amt:a.amt),r2(v.amt!=null?v.amt:b.amt)];if(s[0]!==s[1]){e.a=s;if(a.cur!=="GBP"||b.cur!=="GBP")e.c=[String(a.cur||"GBP"),String(b.cur||"GBP")];}}
-   if(u.date!==v.date||at){const d=[String(u.date||day(a,ym)),String(v.date||day(b,ym))];if(d[0]!==d[1])e.d=d;}
+   const u=obj(xa[ym])?xa[ym]:{},v=obj(xb[ym])?xb[ym]:{},a=Live.line(p,ym),b=Live.line(q,ym),who=cut(b===q?n:nm(b),60),e={n:cut(who+" · "+monOf(ym),80)},at=sa.includes(ym)||sb.includes(ym);
+   if(at){if(nm(a)!==nm(b))e.nm=[cut(nm(a),80),cut(nm(b),80)];if(String(a.bank||"")!==String(b.bank||""))e.b=[String(a.bank||""),String(b.bank||"")];
+    const g={n:cut(who+" · с "+MONGF[+ym.slice(5)-1].toLowerCase()+" "+ym.slice(0,4),80)},s=[r2(a.amt),r2(b.amt)],d=[day(a,ym),day(b,ym)];
+    if(s[0]!==s[1]){g.a=s;if(a.cur!=="GBP"||b.cur!=="GBP")g.c=[String(a.cur||"GBP"),String(b.cur||"GBP")];}if(d[0]!==d[1])g.d=d;
+    if(Object.keys(g).length>1)out.push(g);}
+   if(u.amt!==v.amt){const s=[r2(u.amt!=null?u.amt:a.amt),r2(v.amt!=null?v.amt:b.amt)];if(s[0]!==s[1]){e.a=s;if(a.cur!=="GBP"||b.cur!=="GBP")e.c=[String(a.cur||"GBP"),String(b.cur||"GBP")];}}
+   if(u.date!==v.date){const d=[String(u.date||day(a,ym)),String(v.date||day(b,ym))];if(d[0]!==d[1])e.d=d;}
    const m=[mark(u,k),mark(v,k)];if(m[0]!==m[1])e.k=m;
    if(Object.keys(e).length>1)out.push(e);});
  }
@@ -6104,7 +6109,7 @@ const Live=(()=>{
  // its name - and «к чему относится».)
  const SV={name:r=>String(r.name==null?"":r.name),bank:r=>String(r.bank||""),cur:r=>CURS.includes(r.cur)?r.cur:"GBP",vat:r=>r.vat===true,sub:r=>r.sub===true,
   sk:r=>typeof r.sk==="string"?r.sk:"",skBy:r=>typeof r.skBy==="string"?r.skBy:"",blk:r=>typeof r.blk==="string"?r.blk:"",
-  amt:r=>+r.amt||0,day:r=>obj(r.rec)?Math.round(+r.rec.day):0,whose:r=>FOUNDERS.includes(r.whose)?r.whose:r.whose===""?"":null,of:r=>r.of===undefined?null:r.of,iid:r=>String(r.id)};
+  amt:r=>+r.amt||0,day:r=>obj(r.rec)?Math.round(+r.rec.day):0,whose:r=>FOUNDERS.includes(r.whose)?r.whose:r.whose===""?"":null,of:r=>r.of===undefined?null:obj(r.of)?r.of:false,iid:r=>String(r.id)};
  const put1=(r,f,v)=>{if(f==="iid")return;if((f==="sk"||f==="skBy"||f==="blk")&&v==="")delete r[f];else if(f==="sub"&&!v)delete r.sub;else if(f==="day"){if(obj(r.rec))r.rec.day=v;}
   else if(f==="whose"&&v===null)delete r.whose;else r[f]=f==="of"&&obj(v)?Object.assign({},v):v;};
  // (two values of a field alike: «к чему относится» is a small object)
@@ -6244,19 +6249,22 @@ const Live=(()=>{
     if(LISTS.some(j=>j!==k&&(P[j]||[]).some(q=>q&&(String(q.id)===c||(obj(q.rec)&&String(q.rec.chain)===c)))))return;
     const segs=[head].concat(byC[c]).sort((a,b)=>String(a.rec.from)<String(b.rec.from)?-1:String(a.rec.from)>String(b.rec.from)?1:0);
     const fs=JOINF.filter(f=>sinceFor(f,k)),rest=s=>{const o=Object.assign({},s);delete o.id;delete o.m;delete o.rec;fs.forEach(f=>{delete o[f];});return stab(o);};
-    const good=segs.every((s,i)=>isM(s.rec.from)&&Number.isInteger(+s.rec.day)&&+s.rec.day>=1&&+s.rec.day<=31&&Object.keys(s.rec).every(q=>RECK.includes(q))&&(s.rec.x===undefined||obj(s.rec.x))
+    const good=segs[0]===head&&segs.every((s,i)=>isM(s.rec.from)&&Number.isInteger(+s.rec.day)&&+s.rec.day>=1&&+s.rec.day<=31&&Object.keys(s.rec).every(q=>RECK.includes(q))&&(s.rec.x===undefined||obj(s.rec.x))
      &&(i===segs.length-1||(isM(s.rec.to)&&ymAdd(s.rec.to,1)===segs[i+1].rec.from))&&(i===0||rest(s)===rest(head)))&&new Set(segs.map(s=>String(s.id))).size===segs.length;
     if(!good)return;
     const val=(s,f)=>f==="amt"?Math.max(0,+s.amt||0):f==="day"?Math.round(+s.rec.day):SV[f](s);
-    const live=(s,m)=>m>=s.rec.from&&(!isM(s.rec.to)||m<=s.rec.to);
+    // (a month a part answers for: from its first to its last - and for the last part every month from its first,
+    // what it says of months after its end too: «Вернуть» on it brings them back, as on develop)
+    const last=segs[segs.length-1],live=(s,m)=>m>=s.rec.from&&(s===last||!isM(s.rec.to)||m<=s.rec.to);
     const S={},X={};let bad=false;
     sinceOf(head).forEach(([m,e])=>{if(live(head,m))S[m]=Object.assign({},e);});
     segs.forEach(s=>{if(obj(s.rec.x))Object.keys(s.rec.x).forEach(m=>{if(isM(m)&&live(s,m))X[m]=s.rec.x[m];});});
-    segs.slice(1).forEach(s=>{const F=s.rec.from,h={};fs.forEach(f=>{h[f]=val(head,f);});Object.keys(S).filter(m=>m<F).sort().forEach(m=>{Object.assign(h,S[m]);});
-     const e={iid:String(s.id)};fs.forEach(f=>{const v=val(s,f);if(sameV(f,v,h[f]))return;if(!sinceOk(f,v))bad=true;e[f]=v;});S[F]=e;
+    segs.slice(1).forEach(s=>{const F=s.rec.from,h={},sF=lineAt(s,F);fs.forEach(f=>{h[f]=val(head,f);});Object.keys(S).filter(m=>m<F).sort().forEach(m=>{Object.assign(h,S[m]);});
+     // (the part as it reads in its first month: an entry of its own of that month, which develop never leaves, is it too)
+     const e={iid:String(s.id)};fs.forEach(f=>{const v=val(sF,f);if(sameV(f,v,h[f]))return;if(!sinceOk(f,v))bad=true;e[f]=v;});S[F]=e;
      sinceOf(s).forEach(([m,e2])=>{if(m>F&&live(s,m))S[m]=Object.assign({},e2);});});
     if(bad)return;
-    const last=segs[segs.length-1],mt=segs.reduce((a,s)=>obj(s.m)&&(+s.m.t||0)>((a&&+a.t)||0)?s.m:a,head.m);
+    const mt=segs.reduce((a,s)=>obj(s.m)&&(+s.m.t||0)>((a&&+a.t)||0)?s.m:a,head.m);
     if(Object.keys(X).length)head.rec.x=X;else delete head.rec.x;
     if(Object.keys(S).length)head.rec.since=S;else delete head.rec.since;
     if(isM(last.rec.to))head.rec.to=last.rec.to;else delete head.rec.to;
@@ -6367,7 +6375,8 @@ const Live=(()=>{
      if(whole&&obj(r.rec.since))Object.keys(r.rec.since).forEach(m=>{const e=r.rec.since[m];if(obj(e))delete e.name;});sinceTidy(r,h.k);}
     // (whose a withdrawal is, said of one month, is the line's in every month - what «… и дальше» dated of it goes;
     // «к чему относится» is what holds in this month: the row's, or that of an entry «… и дальше» dated of it)
-    if(v.whose!==undefined&&obj(r.rec.since)){Object.keys(r.rec.since).forEach(m=>{const e=r.rec.since[m];if(obj(e))delete e.whose;});sinceTidy(r,h.k);}
+    if(v.whose!==undefined){const c=String(r.rec.chain||r.id);P[h.k].forEach(q=>{if(!q||!obj(q.rec)||String(q.rec.chain||q.id)!==c||!obj(q.rec.since))return;
+     Object.keys(q.rec.since).forEach(m=>{const e=q.rec.since[m];if(obj(e))delete e.whose;});sinceTidy(q,h.k);});}
     whoseAll(P,h,v);if(v.of!==undefined&&h.k==="taxes")ofAt(r,it.occ.ym,v.of);tidy(P,it);r.m={t:now,by};personal(P,h);return r;}
    fields(r,v,h.k==="inflows");subOf(r,v,h.k);whoseOf(r,v,h.k);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;
    if(v.date!==undefined){r.date=v.date||"";if(r.date)delete r.mon;else if(v.mon)r.mon=v.mon;}
@@ -7165,7 +7174,11 @@ const Ed=(()=>{
  // «общий» chosen (whose:""), stands whatever the name; otherwise the name speaks (N) - «Vanya» is Vanya's, «Вывод»
  // everybody's. The card's select follows the name as it is typed until the founder chooses in it himself, and only
  // that choice is written: a rename alone writes no owner, in the card as anywhere else (17 October 2026).
- const storedWhose=it=>{const P=Plan.doc(),r=P&&Array.isArray(P.div)?P.div.find(x=>x&&String(x.id)===String(it.row||it.id)):null;return r?r.whose:undefined;};
+ // (A month of a repeat: as the line is in that month - since 3 November 2026 «… и дальше» may have dated an owner
+ // on the row, rec.since[ym].whose, and null there is nobody's by hand. Read off the row itself, every such month
+ // looked chosen in the card, and «Сохранить» wrote that owner over every month of the line.)
+ const storedWhose=it=>{const P=Plan.doc(),r=P&&Array.isArray(P.div)?P.div.find(x=>x&&String(x.id)===String(it.row||it.id)):null;if(!r)return undefined;
+  return (it.src==="occ"&&it.occ?Live.line(r,it.occ.ym):r).whose;};
  const whoseUnder=(it,name)=>{const w=storedWhose(it);return FOUNDERS.includes(w)?w:w===""?"":Live.byName(name);};
  function ofSelect(v){
   const ps=perOpen(),known=x=>x==="own"||x===""||ps.some(p=>x.slice(2)===p.key),val=v==null?"own":v;
