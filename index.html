@@ -3764,10 +3764,16 @@ const Cash=(()=>{
 //                   The row is then the template of its months, from..to (endless without `to`), on day
 //                   min(day, days in the month); it has no line of its own. x[ym] is what a founder did to ONE
 //                   month: {amt?, date?, off?:true, paid?, tx?, notx?, closed?}. chain names the row a
-//                   split continues: the rows of one chain are one payment through time. since[ym] is what the
+//                   split continues: the rows of one chain are one payment through time - written by «… и дальше»
+//                   until 3 November 2026, and made one row as the plan is opened where it can be (Live.join);
+//                   nothing writes one now. since[ym] is what the
 //                   line IS from the month ym on (the owner's decision of 1 November 2026: «платят 6 месяцев на
 //                   Barclays и со следующего месяца начинается на Revolut — зачем менять предыдущие?»):
-//                   {name?, bank?, cur?, vat?, sub?, sk?, skBy?, blk?} - each field holds from its month until the
+//                   {name?, bank?, cur?, vat?, sub?, sk?, skBy?, blk?} - and since 3 November 2026 (question 18,
+//                   «А») what «… и дальше» says of it: amt? (its sum), day? (1..31, in place of `day` above), whose?
+//                   (div: a founder, "" «общий», null nobody's by hand - then by the name), of? (taxes, as `of`
+//                   below) - and iid?, which only Live.join writes: the name the months of a part it made one had
+//                   (that part's id). Each field holds from its month until the
 //                   next entry that sets it; the row's own field is what holds before the first. sk, skBy and blk
 //                   are the link of the name (relink): "" is none. What is written into an entry is left out where
 //                   it is what holds just before its month; a later change of the months before leaves an entry as
@@ -3786,7 +3792,8 @@ const Cash=(()=>{
 //                   a row, and keeps it everybody's; it is written only by that choice. Never read by `f` - the
 //                   upgrade from v2 left `f` on every draw it moved here; a NEW row carries what the form proposed from
 //                   its name unless the founder chose otherwise. It is the line's: every stored row of a chain that
-//                   «… и дальше» split
+//                   «… и дальше» split, and every month of a row but those «{Месяц} и дальше» dated another owner
+//                   for (rec.since[ym].whose); said of one month, it is every month's again
 //  tax                             the studio's taxes, by rules
 //    since:"YYYY-MM-DD"            the day this plan became v3 — the day the page began to answer for the built-in
 //                                  rules. The page stamps it once (Cash); read as T while absent
@@ -3883,13 +3890,12 @@ const Cash=(()=>{
 //                                  «{ноябрь} и дальше» of a delete in its second — is an ordinary row again: rec
 //                                  goes, and what x[from] held is the row's own, and so is what rec.since says of that
 //                                  month (Live.single does the same for a plan saved before this rule)
-//  onward(P, it, v, id, now, by)   «{Октябрь} и дальше»: on the row's first month the row itself changes; later the
-//                                  row is split — the old one gets to = the month before, a copy with id `id`, the
-//                                  new values, the same c0, rec.from = this month, rec.chain and the x of this month
-//                                  and later takes over; of rec.since the old one keeps the entries before this month,
-//                                  the copy is what holds in this month and keeps the later entries. v: {name, amt,
-//                                  cur, bank, vat, date, whose}; whose goes to every part of the chain from this month
-//                                  on; a date is the new day
+//  onward(P, it, v, id, now, by)   «{Октябрь} и дальше»: on the row's first month the row itself changes; later
+//                                  the change is dated on the row, rec.since[this month] (question 18, «А», 3 November
+//                                  2026 - until then the row was split into a chain there), and this month's own sum
+//                                  and day (x) go. v: {name, amt, cur, bank, vat, date, whose, of}; a date is the new
+//                                  day; whose goes to the parts of an old chain from this month on too. `id` is not
+//                                  used any more. Returns the row
 //  same(P, it, id, now, by)        «И дальше так же» on a month paid at another sum: onward from the NEXT month at
 //                                  what came (it.done.got without the tax on top)
 //  end(P, it) / stop(P, it)        «…и дальше» of a delete or of «Не придёт»: rec.to = the month before (the row goes
@@ -6575,9 +6581,12 @@ const Trial=(()=>{
  const segs=(P,k,chain)=>(P&&Array.isArray(P[k])?P[k]:[]).filter(r=>r&&ck(r)===chain).sort((a,b)=>{const x=String(a.rec&&a.rec.from||""),y=String(b.rec&&b.rec.from||"");return x<y?-1:x>y?1:0;});
  // What a change's `row` names - the id of any part, or the chain: its list, its chain, and the part that goes on -
  // read as the line stands in its latest month: a name, a bank or a currency changed from a month on (rec.since,
- // Live.line) is what the line is now. (`r` is for reading; a trial writes through Live.write and segs.)
+ // Live.line) is what the line is now. (`r` is for reading; a trial writes through Live.write and segs.) Since
+ // 3 November 2026 also the id a part had before the page made its chain one row - Live.join keeps it as
+ // rec.since[month].iid: a change asked of that part is asked of the line.
+ const wasPart=(x,id)=>!!(x&&x.rec&&x.rec.since&&typeof x.rec.since==="object"&&Object.values(x.rec.since).some(e=>e&&typeof e==="object"&&e.iid===String(id)));
  const hold=id=>{const P=Plan.doc();if(!P||id==null||id==="")return null;
-  for(const k of Live.LISTS){const l=Array.isArray(P[k])?P[k]:[],r=l.find(x=>x&&String(x.id)===String(id))||l.find(x=>x&&ck(x)===String(id));
+  for(const k of Live.LISTS){const l=Array.isArray(P[k])?P[k]:[],r=l.find(x=>x&&String(x.id)===String(id))||l.find(x=>x&&ck(x)===String(id))||l.find(x=>wasPart(x,id));
    if(r){const s=segs(P,k,ck(r));return{k,chain:ck(r),r:Live.line(s[s.length-1])};}}
   return null;};
  const key=id=>{const h=hold(id);return h?h.chain:String(id==null?"":id);};

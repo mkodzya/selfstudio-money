@@ -543,10 +543,12 @@ a deploy:
   (a founder's change of his own); `Live.compute` reads each month by what
   holds there (`lineAt`, and `Live.line` for the card, the journal and «Что
   если»). Everything else - the tick taken off and put back, «Не придёт… →
-  и дальше», «Больше не повторять», «… и дальше», «И дальше так же», a mark,
-  «Частично», a delete, «Отменить» - acts on that one row exactly as on
-  `develop`, and a plan without `rec.since` is written and counted to the
-  byte as `develop` writes and counts it (`checks/withdrawals/README.md`).
+  и дальше», «Больше не повторять», «… и дальше» of a sum or a day from the
+  row's first month, a mark, «Частично», a delete, «Отменить» - acts on that
+  one row exactly as on `develop`, and a plan without `rec.since` is
+  counted to the byte as `develop` counts it (`checks/withdrawals/README.md`);
+  «… и дальше» and «И дальше так же» from a later month write `rec.since`
+  too since 3 November 2026 (below).
   `rec.since` is a stored field of the plan like any other: it rides in
   `rec`, which `V2ROW` names and `docOf` and `sig` carry with its row, and
   `rv-save` holds it through a reload and through the next save. **A change
@@ -558,20 +560,39 @@ a deploy:
   a line ended from an earlier month going on under its new name, a month
   and its mark gone once the line was ended twice and the tick put back),
   and each fix (later parts reached by `partsAfter`, parts kept aside by
-  `rec.cut`) brought more. A chain that «{Октябрь} и дальше» of a sum or a
-  day makes is `develop`'s, as before: the new part takes as its own what
-  holds in its month and keeps the later entries, the old part keeps those
-  before; a name changed from an earlier month stops where the next part
-  begins, and the card's message says so («с ноября по декабрь»). «С какого
-  месяца?» is asked about the sum and the day alone. «Чей вывод» goes to
-  every part of the row's chain and «К чему относится» to the stored row -
-  unless «{Октябрь} и дальше» is the answer, offered only when the sum or
-  the day changed too: then both go from that month on with the rest. A row
-  of «Налоги» renamed after a founder moves to «Дивиденды» whole, under that
-  name in every month. This reverses the rule until that day, under which
-  these fields changed every month of the row even with «Только {месяц}».
-  The checks `row-card`, `rv-chain`, `rv-band` and `rv-save` hold it;
-  `docs/handoff.md`, the entry of 1 November 2026.
+  `rec.cut`) brought more. **Nor does a sum or a day «{Декабрь} и дальше»,
+  since 3 November 2026** (the owner's answer «А» to question 18): it is
+  dated on the row the same way - `rec.since[ym].amt` and `.day`, and with
+  them whose a withdrawal is (`.whose`: a founder, `""` «общий», `null`
+  nobody's by hand) and «К чему относится» (`.of`) - by
+  `Live.write.onward`, and that month's own sum and day go. Until that day
+  such a change cut the row into a chain (`rec.chain`), and what was said of
+  the line from an earlier month stopped where the next part began. **A chain
+  a plan still holds is made one row as the plan is opened** (`Live.join`,
+  beside `Live.single`, and like it no save): each part's sum, day, name,
+  bank, currency, VAT, «это подписка», link, owner and «К чему относится»
+  dated on the head from the part's first month, the months' own words and
+  the parts' own later entries taken over, and the months of each part
+  keeping their names - `rec.since[ym].iid`, the part's id, which only join
+  writes: a month's name breaks a tie between two withdrawals of one day,
+  and reading a plan must not move a figure. Only a chain whose parts follow
+  one another month after month, in one list, alike in all else, is made
+  one; any other is read as before, and a change of its earlier part still
+  stops where the later part begins. `checks/withdrawals/join.cjs` holds
+  both halves: a plan the page writes now is counted as `develop` counts it
+  stored as a chain, and a chain `develop` wrote, made one, is counted as
+  `develop` counts the chain - every figure, card and line's state, by
+  random lives. «С какого месяца?» is asked about the sum and the day alone.
+  «Чей вывод» said of one month is the line's in every month (what «… и
+  дальше» dated of it goes), and «К чему относится» is what holds in that
+  month - unless «{Октябрь} и дальше» is the answer, offered only when the
+  sum or the day changed too: then both go from that month on with the
+  rest. A row of «Налоги» renamed after a founder moves to «Дивиденды»
+  whole, under that name in every month. This reverses the rule until 1
+  November, under which these fields changed every month of the row even
+  with «Только {месяц}». The checks `row-card`, `rv-chain`, `rv-onward`,
+  `rv-band` and `rv-save` hold it; `docs/handoff.md`, the entries of 1 and
+  3 November 2026.
 - **A window whose table is older than the stand's does not change the
   plan** (13 October 2026). The seeing and the keeping above go by the table
   the window holds, and the ledger and the plan are two documents with two
