@@ -600,10 +600,14 @@ function inv(M, P, L) {
   // 18
   const rows = {};
   LISTS.forEach((k) => (P[k] || []).forEach((r) => { rows[String(r.id)] = { r, k }; }));
+  // (what rec.since says of a field in the month `ym` - its latest entry of that month or before; since 3 November
+  // 2026 the sum, and the name join keeps for the months of a part it made one, iid - written apart from the page)
+  const held = (r, ym, f) => { const s = r.rec && r.rec.since && typeof r.rec.since === 'object' ? r.rec.since : {}; let v;
+    Object.keys(s).filter((m) => /^\d{4}-\d\d$/.test(m) && m <= ym).sort().forEach((m) => { if (s[m] && s[m][f] !== undefined) v = s[m][f]; }); return v; };
   const ruleOn = Object.fromEntries(M.taxes.rules.map((r) => [r.id, r]));
   M.items.forEach((it) => {
     if (it.src === 'row') say(!!rows[it.id] && !rows[it.id].r.rec && rows[it.id].k === it.list, `18: ${it.id} is not a stored row`);
-    else if (it.src === 'occ') say(!!rows[it.row] && !!rows[it.row].r.rec && it.id === `${it.row}@${it.occ.ym}`, `18: ${it.id} is not a month of a stored row`);
+    else if (it.src === 'occ') say(!!rows[it.row] && !!rows[it.row].r.rec && it.id === `${(rows[it.row] && held(rows[it.row].r, it.occ.ym, 'iid')) || it.row}@${it.occ.ym}`, `18: ${it.id} is not a month of a stored row`);
     else say(it.src === 'tax' && it.id === 't|' + it.tax.key && ruleOn[it.tax.rule] && ruleOn[it.tax.rule].on && !ruleOn[it.tax.rule].away && !ruleOn[it.tax.rule].ask, `18: ${it.id} comes from no rule that counts`);
     say(it.kind === (it.src === 'tax' ? 'tax' : 'typed'), `18: ${it.id} is of a kind that no longer exists`);
   });
@@ -619,7 +623,7 @@ function inv(M, P, L) {
     const want = [];
     for (let ym = r.rec.from > g0 ? r.rec.from : g0; ym <= (r.rec.to && r.rec.to < g1 ? r.rec.to : g1); ym = addM(ym, 1)) want.push(ym);
     say(JSON.stringify(mine.map((it) => it.occ.ym).sort()) === JSON.stringify(want), `19: the months of ${id} are not one per month of its repeat`);
-    mine.forEach((it) => { const e = (r.rec.x || {})[it.occ.ym] || {}; say(it.amt === Math.max(0, +(e.amt != null ? e.amt : r.amt) || 0), `19: ${it.id} is not worth its month's amount`); });
+    mine.forEach((it) => { const e = (r.rec.x || {})[it.occ.ym] || {}, a = held(r, it.occ.ym, 'amt'); say(it.amt === Math.max(0, +(e.amt != null ? e.amt : a != null ? a : r.amt) || 0), `19: ${it.id} is not worth its month's amount`); });
   });
   // 3
   const hand = new Set();
@@ -659,8 +663,11 @@ function inv(M, P, L) {
   // row says it by its name too: nobody chosen (no `whose`, and not whose:"" - «общий» chosen by hand), and the whole
   // name one founder's own, in Latin or in Russian, case and spaces aside.
   const FND = ['mika', 'misha', 'vanya'], NM = new Map([['mika', 'mika'], ['мика', 'mika'], ['misha', 'misha'], ['миша', 'misha'], ['vanya', 'vanya'], ['ваня', 'vanya']]), byName = (n) => NM.get(String(n == null ? '' : n).trim().toLowerCase()) || '';
-  M.items.forEach((it) => { const r = (rows[it.src === 'occ' ? it.row : it.id] || {}).r || {};
-    say((it.whose || '') === (it.wd ? (FND.includes(r.whose) ? r.whose : r.whose === '' ? '' : byName(r.name)) : ''), `23: ${it.id} is not whose its row says`); });
+  // (a month of a repeat: by what rec.since says of that month - a name from 1 November 2026, and since 3 November an
+  // owner «… и дальше» dated, null for none by hand)
+  M.items.forEach((it) => { const r = (rows[it.src === 'occ' ? it.row : it.id] || {}).r || {}, ym = it.src === 'occ' && it.occ ? it.occ.ym : '';
+    const w0 = ym ? held(r, ym, 'whose') : undefined, n0 = ym ? held(r, ym, 'name') : undefined, wh = w0 !== undefined ? (w0 === null ? undefined : w0) : r.whose, nm = n0 !== undefined ? n0 : r.name;
+    say((it.whose || '') === (it.wd ? (FND.includes(wh) ? wh : wh === '' ? '' : byName(nm)) : ''), `23: ${it.id} is not whose its row says`); });
   if (L) { const blk = Object.fromEntries((L.tx || []).concat(L.inbox || []).map((r) => [String(r.id), r.c]));
     M.items.forEach((it) => { if (it.wd && it.whose) say(it.rows.every((id) => blk[id] === it.whose || hand.has(String(id))), `23: ${it.id} is ${it.whose}'s and holds a row of another block`); });
     // … and a row of the table is counted once (13 October 2026): a withdrawal holds no more than its rows are
@@ -1313,12 +1320,12 @@ await run('p5', '«каждый месяц»: this month, this month and onward,
   Q = await wr(P, 'onward', oct, { amt: 6500 }, 'rB2', TAP, BY);
   same([Q.team.length, Q.team[0].amt, Q.team[0].rec], [1, 6500, { day: 20, from: '2026-10' }], '«Октябрь и дальше» on the row\'s first month changes the row itself');
   figs(await C(L, Q, T, H60), { OUT: 19400 }, '…');
-  // «Ноябрь и дальше»: a split
+  // «Ноябрь и дальше»: no split since 3 November 2026 (question 18, «А») - the sum is dated on the row
   Q = await wr(P, 'onward', nov, { amt: 7000 }, 'rB2', TAP, BY);
-  same(Q.team.map((r) => [r.id, r.amt, r.c0, r.rec]), [['rB', 6000, C0, { day: 20, from: '2026-10', to: '2026-10' }], ['rB2', 7000, C0, { day: 20, from: '2026-11', chain: 'rB' }]], '«Ноябрь и дальше»: the old row ends in October, a copy with the same c0 takes over from November and remembers its chain');
+  same(Q.team.map((r) => [r.id, r.amt, r.c0, r.rec]), [['rB', 6000, C0, { day: 20, from: '2026-10', since: { '2026-11': { amt: 7000 } } }]], '«Ноябрь и дальше»: one row still - the same id and c0, £6,000 its own, and £7,000 dated on it from November');
   M = await C(L, Q, T, H60);
-  same([M.OUT, item(M, 'rB@2026-10').amt, item(M, 'rB@2026-11'), item(M, 'rB2@2026-11').occ.chain, M.helper.have.slice().sort(), M.helper.lines.some((l) => l.label === 'Person B')], [19400, 6000, null, 'rB', ['Client A', 'Client R', 'Tool S', 'Person B', 'HMRC Mika'].sort(), false],
-    '… OUT 19,400, October\'s item is unchanged, every month has one occurrence, and the helper shows Person B under «Уже в плане»');
+  same([M.OUT, item(M, 'rB@2026-10').amt, item(M, 'rB@2026-11').amt, item(M, 'rB@2026-12').amt, item(M, 'rB@2026-11').occ.chain, item(M, 'rB@2026-11').occ.exc, M.helper.have.slice().sort(), M.helper.lines.some((l) => l.label === 'Person B')], [19400, 6000, 7000, 7000, 'rB', false, ['Client A', 'Client R', 'Tool S', 'Person B', 'HMRC Mika'].sort(), false],
+    '… OUT 19,400, October\'s item is unchanged, November and December £7,000 - the line\'s sum there, no exception -, and the helper shows Person B under «Уже в плане»');
   // the tick taken off October, the row's first month: one month is all that is left of the repeat, and a repeat of
   // one month is an ordinary row (Mika, 8 October 2026: such a row kept its name locked and said «повтор закончится»)
   Q = await wr(P, 'untick', oct);
@@ -1402,7 +1409,7 @@ await run('p6', 'a month of a repeating row is paid by its label, whatever the s
     [1333.33, true, 'undated', '', 1600, 0, ['owed'], 'partial'], '«Частично» on it: the 1,600 still owed (1,333.33 + VAT) is a row of November without a date — in no figure until the founder dates it, and in the «без даты» card');
   // [И дальше так же]
   Q = await wr(P, 'same', it, 'rB2', TAP, BY);
-  same(Q.team.map((r) => [r.id, r.amt, r.rec.from, r.rec.to || '', r.rec.chain || '']), [['rB', 6000, '2026-10', '2026-10', ''], ['rB2', 5400, '2026-11', '', 'rB']], '[И дальше так же]: a split from November at 5,400');
+  same(Q.team.map((r) => [r.id, r.amt, r.rec.from, r.rec.to || '', r.rec.chain || '', JSON.stringify(r.rec.since)]), [['rB', 6000, '2026-10', '', '', '{"2026-11":{"amt":5400}}']], '[И дальше так же]: from November at 5,400 - dated on the one row, no split (question 18)');
   M = await C(ledP({ tx: [pay('b1', '2026-10-20', -9500)] }), P, D22);
   same([item(M, 'rB@2026-10').state, item(M, 'rB@2026-10').done.got, M0.OUT - M.OUT], ['done', 9500, 6000], '−9,500: done at 9,500, and OUT falls by the 6,000 that was written');
   M = await C(ledP({ tx: [pay('b1', '2026-10-20', -3000)] }), P, D22);
@@ -1430,15 +1437,22 @@ await run('p6', 'a month of a repeating row is paid by its label, whatever the s
   M = await C(ledP({ tx: [octPaid, reach('Wise', '2026-12-18', 'GBP', AT), pay('b3', '2026-12-20', -6000, ms('2026-12-22T08:00:00Z'))] }), Q, '2026-12-22');
   same(states(M, ['owe', 'rB@2026-12']), ['carry', 'done'], 'a row −6,000 of 20 Dec closes December\'s month, not the debt of November');
   same((await wr(P, 'stop', it)).team[0].rec, { day: 20, from: '2026-10', to: '2026-11', x: { '2026-11': { off: true } } }, '[Больше не повторять] on card 10: that month is the last, and is off');
-  // a split, and October unpaid
+  // the day moved from November on, and October unpaid - dated on the one row since 3 November 2026 (question 18);
+  // and the same line as develop stored it, a chain split at November, read alike as it is and as the page makes
+  // it one when the plan is opened (Live.join: November keeps its name, rB2@2026-11)
   Q = await wr(P, 'onward', item(M0, 'rB@2026-11'), { date: '2026-11-25' }, 'rB2', TAP, BY);
-  same(Q.team.map((r) => [r.id, r.rec.day, r.rec.to || '']), [['rB', 20, '2026-10'], ['rB2', 25, '']], 'Person B\'s day moved to the 25th from November on');
-  M = await C(ledP({ tx: [reach('Wise', '2026-11-14', 'GBP', AT)] }), Q, '2026-11-15');
-  same(item(M, 'rB@2026-10').state, 'late', '… October unpaid, Wise up to 14 Nov: late');
-  M = await C(ledP({ tx: [reach('Wise', '2026-11-15', 'GBP', AT)] }), Q, '2026-11-16');
-  same(item(M, 'rB@2026-10').state, 'missed', '… it is given up once Wise reaches 15 Nov — the window of the next month of its chain, across the split');
-  M = await C(ledP({ tx: [pay('b2', '2026-11-25', -6000, ms('2026-11-26T08:00:00Z'))] }), Q, '2026-11-26');
-  same(states(M, ['rB@2026-10', 'rB2@2026-11']), ['missed', 'done'], '… and −6,000 on 25 Nov pays November');
+  same(Q.team.map((r) => [r.id, r.rec.day, r.rec.to || '', JSON.stringify(r.rec.since)]), [['rB', 20, '', '{"2026-11":{"day":25}}']], 'Person B\'s day moved to the 25th from November on: one row, the day dated on it');
+  const chainQ = JSON.parse(JSON.stringify(P)); chainQ.team[0].rec.to = '2026-10'; chainQ.team.splice(1, 0, { ...JSON.parse(JSON.stringify(P.team[0])), id: 'rB2', rec: { day: 25, from: '2026-11', chain: 'rB' } });
+  const joinedQ = await page.evaluate((p) => { const q = JSON.parse(JSON.stringify(p)); return [window.__money.join(q), q]; }, chainQ);
+  same([joinedQ[0], joinedQ[1].team.map((r) => [r.id, r.rec.day, r.rec.to || '', JSON.stringify(r.rec.since)])], [1, [['rB', 20, '', '{"2026-11":{"iid":"rB2","day":25}}']]], '… a chain develop wrote of it is made one row as the page opens it: the day dated from November, and November\'s name kept (iid)');
+  for (const [plan, n] of [[Q, 'rB@2026-11'], [chainQ, 'rB2@2026-11'], [joinedQ[1], 'rB2@2026-11']]) {
+    M = await C(ledP({ tx: [reach('Wise', '2026-11-14', 'GBP', AT)] }), plan, '2026-11-15');
+    same(item(M, 'rB@2026-10').state, 'late', '… October unpaid, Wise up to 14 Nov: late');
+    M = await C(ledP({ tx: [reach('Wise', '2026-11-15', 'GBP', AT)] }), plan, '2026-11-16');
+    same(item(M, 'rB@2026-10').state, 'missed', '… it is given up once Wise reaches 15 Nov — the window of the line\'s next month');
+    M = await C(ledP({ tx: [pay('b2', '2026-11-25', -6000, ms('2026-11-26T08:00:00Z'))] }), plan, '2026-11-26');
+    same(states(M, ['rB@2026-10', n]), ['missed', 'done'], '… and −6,000 on 25 Nov pays November');
+  }
 });
 
 // ---- the founder's second decision of 7 October: the rest of a line paid in part stands on the day he names ----
@@ -1681,9 +1695,13 @@ await run('p7', 'a client stops, and one who only skipped a month (R6)', async (
   const oct = item(M, 'rA@2026-10');
   same([oct.state, oct.lateDays, oct.g, oct.step, oct.day, M.LATE, states(M, ['rA@2026-11', 'rA@2026-12']), card(M, 7).filter((c) => c.item === oct.id).map((c) => [c.stops, c.days, c.step]), per(M, 'vat|2026Q4').accP],
     ['late', 22, 5, 2, '', 9600, ['doubt', 'doubt'], [[true, 22, 2]], 0], '20 Nov, Barclays up to 19 Nov, no Client A: October is 22 days late — out of the line, in «Ждём и не пришло» — and November and December are not counted on: «следующие месяцы пока не считаю»');
-  // … also across a split
+  // … also with his amount changed «с ноября» - dated on the one row since 3 November 2026 (question 18), a chain
+  // split at November before (and such a chain made one as the page opens it, November keeping its name)
   let Q = await wr(P, 'onward', item(M, 'rA@2026-11'), { amt: 9000 }, 'rA2', TAP, BY);
-  same(states(await C(L, Q, D, { H: 60 }), ['rA@2026-10', 'rA2@2026-11', 'rA2@2026-12']), ['late', 'doubt', 'doubt'], '… also when his amount was changed «с ноября»');
+  same(states(await C(L, Q, D, { H: 60 }), ['rA@2026-10', 'rA@2026-11', 'rA@2026-12']), ['late', 'doubt', 'doubt'], '… also when his amount was changed «с ноября»');
+  const chainA = JSON.parse(JSON.stringify(P)); chainA.inflows[0].rec.to = '2026-10'; chainA.inflows.splice(1, 0, { ...JSON.parse(JSON.stringify(P.inflows[0])), id: 'rA2', amt: 9000, rec: { ...P.inflows[0].rec, from: '2026-11', chain: 'rA' } });
+  const joinedA = await page.evaluate((p) => { const q = JSON.parse(JSON.stringify(p)); window.__money.join(q); return q; }, chainA);
+  for (const plan of [chainA, joinedA]) same(states(await C(L, plan, D, { H: 60 }), ['rA@2026-10', 'rA2@2026-11', 'rA2@2026-12']), ['late', 'doubt', 'doubt'], '… and so when develop had split the line there, as it is and made one row');
   // [Перенести на…] 30 Nov
   Q = await wr(P, 'set', oct, { date: '2026-11-30' }, TAP, BY);
   same(Q.inflows[0].rec.x, { '2026-10': { date: '2026-11-30' } }, '[Перенести на…] writes the new date for that month alone');
@@ -3340,9 +3358,9 @@ await run('p5 on screen', '«каждый месяц» through the real controls
   same([none, one, await text(pg, K('row') + '[data-ed-saves] > span'), await texts(pg, K('row') + '[data-ed-save]')], [0, ['Сохранить'], 'С какого месяца?', ['Только ноябрь', 'Ноябрь и дальше']], 'the card of November\'s month, its sum changed, saves two ways: «Только ноябрь» and «Ноябрь и дальше»');
   await save('onward');
   S = await holds(pg, '«Ноябрь и дальше»');
-  const [a, b] = S.P.team;
-  same([S.P.team.length, a.id, a.amt, a.rec.to, b.amt, b.rec.from, b.rec.chain, S.fig('out'), item(S.M, 'rB@2026-10').amt, S.M.helper.have.includes('Person B'), S.M.helper.lines.length], [2, 'rB', 6000, '2026-10', 7000, '2026-11', 'rB', 19400, 6000, true, 0],
-    '«Ноябрь и дальше», 7,000: two rows of one chain — the old one ends with October, the new one takes over from November — OUT 19,400, October\'s line untouched, and the helper still knows Person B is in the plan');
+  const [a] = S.P.team;
+  same([S.P.team.length, a.id, a.amt, a.rec.to || '', JSON.stringify(a.rec.since), S.fig('out'), item(S.M, 'rB@2026-10').amt, item(S.M, 'rB@2026-11').amt, S.M.helper.have.includes('Person B'), S.M.helper.lines.length, await toastText(pg)], [1, 'rB', 6000, '', '{"2026-11":{"amt":7000}}', 19400, 6000, 7000, true, 0, 'Сохранено: Person B — с ноября'],
+    '«Ноябрь и дальше», 7,000: one row still, the sum dated on it from November (question 18, 3 November 2026: no split) — OUT 19,400, October\'s line untouched, and the helper still knows Person B is in the plan');
   await undo(pg);
   // The tick taken off October, the row's first month: the card says the row will not repeat, and it becomes an
   // ordinary row.
@@ -5444,7 +5462,7 @@ await run('rv-chain', 'a line changed from a later month - its name, bank, curre
   const look = (pg) => pg.evaluate(() => {
     const S = window.__cash.state(), M = window.__money.model({ H: 60 }), IS = ['name', 'bank', 'cur', 'vat', 'sub', 'sk', 'skBy', 'blk'];
     const rows = S.team.filter((r) => r.id === 'rB' || (r.rec && r.rec.chain === 'rB')).map((r) => JSON.parse(JSON.stringify(r, (k, v) => (k === 'm' || k === 'at' ? undefined : v))));
-    const since = rows.map((r) => Object.entries((r.rec && r.rec.since) || {}).map(([ym, e]) => [ym, e.name || '', e.bank || ''].filter(Boolean).join(' ')).join(', ') || '-');
+    const since = rows.map((r) => Object.entries((r.rec && r.rec.since) || {}).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([ym, e]) => [ym, e.name || '', e.bank || '', e.amt != null ? '£' + e.amt : '', e.day != null ? 'the ' + e.day + 'th' : ''].filter(Boolean).join(' ')).join(', ') || '-');
     rows.forEach((r) => { if (r.id !== 'rB') r.id = 'a later part'; IS.forEach((f) => delete r[f]); if (r.rec) delete r.rec.since; });
     const its = M.items.filter((x) => x.row === 'rB' || (x.src === 'occ' && x.occ.chain === 'rB')).map((x) => [x.occ ? x.occ.ym : String(x.date).slice(0, 7), x])
       .filter(([ym]) => ym <= '2027-02').sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -5514,10 +5532,11 @@ await run('rv-chain', 'a line changed from a later month - its name, bank, curre
     [D, D, D, D, D, D, D, '-', D, '-', '-', '-']);
   same([canon(two[5]) === canon(two[2]), two[7].rows.map((r) => [r.date, !!r.paid, !!r.rec]), two[8].since, two[10].months.filter((m) => m[4]).map((m) => m[0])], [true, [['2026-10-20', true, false]], [D], ['2026-10']],
     '… the tick put back on November brings the line back to the letter - the rename, both marks; ended from November it is October alone, an ordinary row with its mark, and nothing of the new name is left of it; «Отменить» brings the rename back; and the tick put back on October repeats it from October, its mark kept');
-  // 3. «… и дальше» of a sum from a later month splits the line, as on develop - the rename goes with the months it
-  // was said of - and «Отменить» undoes it; then from the first month.
+  // 3. «… и дальше» of a sum from a later month is dated on the one row too since 3 November 2026 (question 18,
+  // «А») - until then it split the line there - and «Отменить» undoes it; then from the first month, which is the
+  // row's own sum: what was dated of December stays (a founder's change of his own, as develop's later part kept it).
   await both('£6,500 «Ноябрь и дальше», «Отменить», £6,700 «Декабрь и дальше», £6,100 «Октябрь и дальше»', [sum('2026-11', 6500), undo, sum('2026-12', 6700), sum('2026-10', 6100)],
-    [B, B, B, B, B, B], [D, '- | ' + D, D, '- | -', '- | -', '- | -']);
+    [B, B, B, B, B, B], [D, '2026-11 £6500, ' + D, D, D + ' £6700', D + ' £6700', D + ' £6700']);
   // 4. One month taken out and put back.
   await both('«Не платим… → Только декабрь», then «Вернуть в план»', [offOn('2026-12'), back('2026-12')], [B, B, B, B], [D, D, D, D]);
 
@@ -5574,6 +5593,98 @@ await run('rv-chain', 'a line changed from a later month - its name, bank, curre
   same([S.taxes.map((r) => r.name), S.div.filter((r) => r.ptax).map((r) => [r.id, r.name, r.bank, r.f, JSON.stringify(r.rec.since || null)]), tax],
     [[], [['x1', 'HMRC Mika', 'Barclays', 'mika', '{"2026-12":{"bank":"Wise"}}']], [['2026-10', 'div', 'HMRC Mika', 'Barclays'], ['2026-11', 'div', 'HMRC Mika', 'Barclays'], ['2026-12', 'div', 'HMRC Mika', 'Wise'], ['2027-01', 'div', 'HMRC Mika', 'Wise']]],
     'PAYE on Barclays, moved to Wise from December, renamed «HMRC Mika» on November: one row, Mika\'s personal tax in «Дивиденды» under the new name every month - on Barclays to November and on Wise from December - and nothing is left in «Налоги»');
+  await finish(pg);
+});
+
+await run('rv-onward', 'a sum or a day «… и дальше» from a later month is dated on the one stored row (question 18, «А»): a rename said of an earlier month, ending the line from an earlier month and «Отменить» reach every month after it; and a line develop split into a chain is one row as the page opens it - each month counted and named as before, and nothing saved until a change', async () => {
+  // The owner's answer «А» to question 18 (3 November 2026). Until then «{Декабрь} и дальше» of a sum or a day split
+  // the row at December into a chain (rec.chain), and what was said of the line from an earlier month stopped where
+  // the later part began: a new name from November was November's alone («только ноябрь»), and the line ended from
+  // November went on from December. Now the sum and the day are dated on the row (rec.since[month].amt, .day) as its
+  // name and bank already were, and a chain a plan holds is made one row as it is opened (Live.join), the months of
+  // the later part keeping their names (iid). On the page of develop (99d7a46): the rows came out two, December under
+  // the old name after the rename, and December on after the line was ended. Fixture A: Person B £6,000 on the 20th
+  // of every month from October, read to February 2027.
+  const months = (pg) => pg.evaluate(() => window.__money.model({ H: 60 }).items.filter((x) => x.row === 'rB' || (x.occ && x.occ.chain === 'rB'))
+    .map((x) => [x.occ ? x.occ.ym : String(x.date).slice(0, 7), x.name, x.amt, x.date, x.id]).filter((m) => m[0] <= '2027-02').sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  const rows = (pg) => pg.evaluate(() => window.__cash.state().team.map((r) => [r.id, r.amt, r.rec ? JSON.stringify(r.rec) : 'a row']));
+  const card = async (pg, ym) => { await shutRow(pg); await toMonth(pg, ym); await rowCard(pg, 'team', (await months(pg)).find((m) => m[0] === ym)[4]); };
+  const rename = async (pg, ym) => { await card(pg, ym); await fill(pg, 'row', { name: 'Person BB' }); await pg.click(K('row') + '[data-ed-save]'); await saved(pg); };
+  const at = (ym, name, amt, id) => [ym, name, amt, ym + '-20', id || 'rB@' + ym];
+  let pg = await scene('a sum «Декабрь и дальше», then a rename on November', ledA(), planW(), { H: 60 });
+  await goCash(pg);
+  await card(pg, '2026-12');
+  await fill(pg, 'row', { amt: 6500 });
+  await saveRow(pg, 'onward');
+  await saved(pg);
+  const r1 = await rows(pg), m1 = await months(pg), t1 = await toastText(pg), log1 = (store.cash.doc.log || []).slice(-1).map((e) => [e.w, e.r]);
+  // («Журнал правок»: the sum dated from December is a line of its own, «Person B · с декабря 2026» - the review of
+  // 3 November 2026: a month that already held the new sum as its own would say nothing of the months after it)
+  same(log1, [['Сохранено: Person B — с декабря', [{ n: 'Person B · с декабря 2026', a: [6000, 6500] }]]], '… and the journal says «Person B · с декабря 2026», £6,000 → £6,500');
+  await rename(pg, '2026-11');
+  const m2 = await months(pg);
+  await card(pg, '2026-11');
+  await rowPress(pg, 'skip');
+  await pg.click(K('row') + '[data-ed-go="skip-onward"]');
+  await saved(pg);
+  const r3 = await rows(pg), m3 = await months(pg);
+  await pg.click('#toastUndo');
+  await saved(pg);
+  const m4 = await months(pg);
+  same([r1, t1, m1], [[['rB', 6000, '{"day":20,"from":"2026-10","since":{"2026-12":{"amt":6500}}}']], 'Сохранено: Person B — с декабря',
+    [at('2026-10', 'Person B', 6000), at('2026-11', 'Person B', 6000), at('2026-12', 'Person B', 6500), at('2027-01', 'Person B', 6500), at('2027-02', 'Person B', 6500)]],
+  '£6,500 «Декабрь и дальше»: one stored row, £6,500 dated on it from December - October and November £6,000, December on £6,500');
+  same([m2, r3, m3, m4], [[at('2026-10', 'Person B', 6000), at('2026-11', 'Person BB', 6000), at('2026-12', 'Person BB', 6500), at('2027-01', 'Person BB', 6500), at('2027-02', 'Person BB', 6500)],
+    [['rB', 6000, 'a row']], [['2026-10', 'Person B', 6000, '2026-10-20', 'rB']],
+    [at('2026-10', 'Person B', 6000), at('2026-11', 'Person BB', 6000), at('2026-12', 'Person BB', 6500), at('2027-01', 'Person BB', 6500), at('2027-02', 'Person BB', 6500)]],
+  '… renamed «Person BB» on November: the new name holds from November through the months of the new sum; «Не платим… → и дальше» on November ends the whole line - October alone, an ordinary row; and «Отменить» puts it back to the letter');
+  const q = store.cash.puts;
+  await pg.reload();
+  await pg.waitForFunction(() => window.__cash && window.__cash.state() && window.__money.by === 'Mika');
+  await sleep(700);
+  same([await months(pg), store.cash.puts - q], [m4, 0], '… and the page opened again counts the same, and saves nothing');
+  await finish(pg);
+
+  // The same line as develop stored it after £6,500 «Декабрь и дальше»: Person B to November, and a later part from
+  // December that names its chain.
+  const P = planW();
+  P.team[0].rec.to = '2026-11';
+  P.team.splice(1, 0, { ...JSON.parse(JSON.stringify(P.team[0])), id: 'rB2', amt: 6500, rec: { day: 20, from: '2026-12', chain: 'rB' } });
+  pg = await scene('a chain develop wrote, opened', ledA(), P, { H: 60 });
+  const q0 = store.cash.puts;
+  await goCash(pg);
+  const j1 = [await rows(pg), await months(pg), store.cash.puts - q0];
+  await rename(pg, '2026-11');
+  same([j1, await months(pg), store.cash.puts - q0, store.cash.doc.team.map((r) => r.id)],
+    [[[['rB', 6000, '{"day":20,"from":"2026-10","since":{"2026-12":{"iid":"rB2","amt":6500}}}']],
+      [at('2026-10', 'Person B', 6000), at('2026-11', 'Person B', 6000), at('2026-12', 'Person B', 6500, 'rB2@2026-12'), at('2027-01', 'Person B', 6500, 'rB2@2027-01'), at('2027-02', 'Person B', 6500, 'rB2@2027-02')], 0],
+      [at('2026-10', 'Person B', 6000), at('2026-11', 'Person BB', 6000), at('2026-12', 'Person BB', 6500, 'rB2@2026-12'), at('2027-01', 'Person BB', 6500, 'rB2@2027-01'), at('2027-02', 'Person BB', 6500, 'rB2@2027-02')], 1, ['rB']],
+  'a chain develop split at December is one row as the page opens it - £6,500 dated from December, the months of the later part keeping their names - and opening saves nothing; renamed on November, the new name reaches December on (on develop it stopped there), and what is saved is the one row');
+  await finish(pg);
+
+  // (the review of 3 November 2026) An owner dated with a sum - £1,200 and Mika «Декабрь и дальше» on a withdrawal
+  // nobody owned - and then only the bank changed on January's card: the card read the row's own owner, so January
+  // looked chosen as Mika's against its stored «общий», and «Сохранить» wrote Mika over every month of the line -
+  // September to November became Mika's withdrawals with nothing said.
+  const PW = planW({ div: [every('wD', 'Вывод', 1000, 20, '2026-09', { blk: 'div' })] });
+  pg = await scene('an owner dated with a sum, then the bank of a later month', ledA(), PW, { H: 60 });
+  await goCash(pg);
+  const owners = () => pg.evaluate(() => window.__money.model({ H: 60 }).items.filter((x) => x.occ && x.occ.chain === 'wD' && x.occ.ym <= '2027-01').map((x) => [x.occ.ym.slice(5), x.whose, x.amt, x.bank]));
+  await toMonth(pg, '2026-12');
+  await rowCard(pg, 'div', 'wD@2026-12');
+  await fill(pg, 'row', { whose: 'mika', amt: 1200 });
+  await saveRow(pg, 'onward');
+  await saved(pg);
+  const o1 = await owners();
+  await shutRow(pg);
+  await toMonth(pg, '2027-01');
+  await rowCard(pg, 'div', 'wD@2027-01');
+  await fill(pg, 'row', { bank: 'Barclays' });
+  await pg.click(K('row') + '[data-ed-save]');
+  await saved(pg);
+  same([o1, await owners(), await toastText(pg)], [[['09', '', 1000, 'Wise'], ['10', '', 1000, 'Wise'], ['11', '', 1000, 'Wise'], ['12', 'mika', 1200, 'Wise'], ['01', 'mika', 1200, 'Wise']],
+    [['09', '', 1000, 'Wise'], ['10', '', 1000, 'Wise'], ['11', '', 1000, 'Wise'], ['12', 'mika', 1200, 'Wise'], ['01', 'mika', 1200, 'Barclays']], 'Сохранено: Вывод · банк — с января'],
+  'an owner and a sum dated from December; January\'s bank changed: January on Barclays, and every month keeps its owner - September to November everybody\'s, December on Mika\'s - and the result names the bank alone');
   await finish(pg);
 });
 
@@ -5792,8 +5903,8 @@ await run('rv-card3', 'the third review of the row\'s card: what the line is, ch
   await rowCard(pg, 'inflows', 'rQ@2026-11');
   await fill(pg, 'row', { name: 'Client Q Group' });
   const said6 = await save(pg);
-  same([said6, (await months(pg, 'rQ')).map((m) => m[1])], ['Сохранено: Client Q Group · название — только ноябрь', ['Client Q Ltd', 'Client Q Group', 'Client Q Ltd', 'Client Q Ltd', 'Client Q Ltd']],
-    'Client Q split from December by «Декабрь и дальше» of a sum, then renamed on November: the part from December keeps its name, and the result says «только ноябрь» - not «с ноября»');
+  same([said6, (await months(pg, 'rQ')).map((m) => m[1])], ['Сохранено: Client Q Group · название — с ноября', ['Client Q Ltd', 'Client Q Group', 'Client Q Group', 'Client Q Group', 'Client Q Group']],
+    'Client Q with a sum «Декабрь и дальше», then renamed on November: the new name holds from November on - the months of the new sum too, since 3 November 2026 the sum is dated on the one row (question 18) - and the result says «с ноября» (until then the row was split at December, December kept its name, and the result said «только ноябрь»)');
   await finish(pg);
 
   // 2. «Похоже, уже оплачено» stands in the four answers' place: its «Это оно» is the answer. «Нет, это другой
@@ -7815,7 +7926,9 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   const money = (v) => (v < 0 ? '−' : '') + '£' + Math.abs(v).toLocaleString('en-GB', { maximumFractionDigits: 0 });
   const of = (r) => [r.trial.low, r.trial.lowDay, r.trial.IN, r.trial.OUT];
   const row = (P2, k, id) => P2[k].find((r) => r.id === id);
-  // «{месяц} и дальше», as the page writes it: the row ends the month before, a copy with a new id goes on from `ym`.
+  // «{месяц} и дальше», as develop wrote it until 3 November 2026: the row ends the month before, a copy with a new id
+  // goes on from `ym`. The page now makes such a chain one row as it opens the plan (Live.join), the months of the
+  // copy keeping their names, and a change asked of either part is asked of the line.
   const split = (P2, k, id, ym, amt, nid) => { const l = P2[k], i = l.findIndex((r) => r.id === id), r = l[i], n = JSON.parse(JSON.stringify(r)); n.id = nid; n.amt = amt; n.rec = { day: r.rec.day, from: ym, chain: id }; r.rec = { ...r.rec, to: addD(ym + '-01', -1).slice(0, 7) }; l.splice(i + 1, 0, n); };
 
   // ---- 1. A client raised «с декабря», the withdrawal changed «с ноября», and a payment paid in part.
@@ -8027,9 +8140,11 @@ await run('rv-whatif-rules', '«Что если»: a split row is one payment th
   same([(await changes(wd)).length, await toastText(wd)], [0, 'Впишите сумму в месяц'], 'an emptied sum is not a sum of nothing: the page asks for it');
   await wd.fill(F + '[data-wi-f="amt"]', '5000');
   await wd.click(F + '[data-wi-go]');
-  const five = await ask(wd, await changes(wd)), usd = (await wd.evaluate(() => window.__money.trial.plan)).div.find((r) => r.id === 'd-usd');
-  same([Math.round((five.trial.OUT - five.plan.OUT) * 100), usd.rec.x || null, /по £5,000 в месяц, начиная с ноября/.test(await text(wd, F + '.wi-ch b')), /С декабря этот вывод в плане в другой валюте \(USD\): те месяцы проба не меняет/.test(await text(wd, F + '.wi-notes'))],
-    [-400000, null, true, true], '£5,000 from November: November alone changes - the months in dollars are left as they are, and the page says so');
+  // (the line is one row as the page opens it since 3 November 2026 - Live.join: the months in dollars are its months
+  // from December, under the names they had, d-usd@…)
+  const five = await ask(wd, await changes(wd)), usd = (await wd.evaluate(() => window.__money.trial.plan)).div.find((r) => r.id === 'd-draw');
+  same([Math.round((five.trial.OUT - five.plan.OUT) * 100), Object.keys((usd.rec && usd.rec.x) || {}).filter((m) => m >= '2026-12'), /по £5,000 в месяц, начиная с ноября/.test(await text(wd, F + '.wi-ch b')), /С декабря этот вывод в плане в другой валюте \(USD\): те месяцы проба не меняет/.test(await text(wd, F + '.wi-notes'))],
+    [-400000, [], true, true], '£5,000 from November: November alone changes - the months in dollars are left as they are, and the page says so');
   // (second reading: «Можно вывести» was set side by side over two different sets of withdrawals, with nothing to say so)
   await wd.click(F + '[data-wi-more]');
   await kind(wd, 'draw');
@@ -8292,16 +8407,22 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
     'the rest «Частично» leaves of Vanya\'s withdrawal is Vanya\'s; «Продублировать» keeps whose a row is; a row of «Команда» never carries the key');
 
   // (independent reading: whose a line is reached one stored row only - a monthly withdrawal that «… и дальше» had split kept its other part everybody's, under a card that said «для всех месяцев»)
-  const chain = (Q) => Q.div.filter((r) => r.id === 'wR' || (r.rec && r.rec.chain === 'wR')).map((r) => [r.rec.from, r.rec.to || '', r.whose || '', r.amt]);
+  // (3 November 2026, question 18: a sum «… и дальше» is dated on the one row, and so is an owner said with it - the
+  // line is read month by month: its stored rows, and each month's owner and sum)
+  const chain = (Q) => Q.div.filter((r) => r.id === 'wR' || (r.rec && r.rec.chain === 'wR')).length;
+  const owners = async (Q) => (await C(ledP(), Q)).items.filter((x) => x.occ && x.occ.chain === 'wR' && x.occ.ym >= '2026-09' && x.occ.ym <= '2027-01').map((x) => [x.occ.ym.slice(5), x.whose, x.amt]);
   let R = { ...P, div: P.div.concat([row('wR', 'Вывод', 1000, '2026-05-20', { blk: 'div', rec: { day: 20, from: '2026-05' } })]) };
   const month = async (Q, id) => item(await C(ledP(), Q), id);
   R = await wr(R, 'onward', await month(R, 'wR@2026-12'), { amt: 1500 }, 'wR2', TAP, BY);
   R = await wr(R, 'set', await month(R, 'wR@2026-10'), { whose: 'misha' }, TAP, BY);
-  same(chain(R), [['2026-05', '2026-11', 'misha', 1000], ['2026-12', '', 'misha', 1500]], 'said of October of a monthly withdrawal that was split in December: both stored rows of the line are Misha\'s');
+  same([chain(R), await owners(R)], [1, [['09', 'misha', 1000], ['10', 'misha', 1000], ['11', 'misha', 1000], ['12', 'misha', 1500], ['01', 'misha', 1500]]], 'said of October of a monthly withdrawal with another sum from December: one stored row, and every month of the line is Misha\'s');
   R = await wr(R, 'onward', await month(R, 'wR@2026-10'), { whose: 'vanya' }, 'wR3', TAP, BY);
-  same(chain(R), [['2026-05', '2026-09', 'misha', 1000], ['2026-10', '2026-11', 'vanya', 1000], ['2026-12', '', 'vanya', 1500]], '«Октябрь и дальше» with Vanya: every part from October on is Vanya\'s - the December part too - and the months before stay Misha\'s');
-  R = await wr(R, 'onward', await month(R, 'wR3@2026-11'), { amt: 1200 }, 'wR4', TAP, BY);
-  same(chain(R).map((x) => x[2]), ['misha', 'vanya', 'vanya', 'vanya'], 'a sum changed «и дальше» moves nobody\'s owner');
+  same([chain(R), await owners(R)], [1, [['09', 'misha', 1000], ['10', 'vanya', 1000], ['11', 'vanya', 1000], ['12', 'vanya', 1500], ['01', 'vanya', 1500]]], '«Октябрь и дальше» with Vanya: every month from October on is Vanya\'s - December\'s new sum too - and the months before stay Misha\'s');
+  R = await wr(R, 'onward', await month(R, 'wR@2026-11'), { amt: 1200 }, 'wR4', TAP, BY);
+  same(await owners(R), [['09', 'misha', 1000], ['10', 'vanya', 1000], ['11', 'vanya', 1200], ['12', 'vanya', 1500], ['01', 'vanya', 1500]], 'a sum changed «и дальше» moves nobody\'s owner - and December\'s own sum from before stays');
+  R = await wr(R, 'set', await month(R, 'wR@2026-11'), { whose: 'mika' }, TAP, BY);
+  same([await owners(R), JSON.stringify(R.div.find((r) => r.id === 'wR').rec.since)], [[['09', 'mika', 1000], ['10', 'mika', 1000], ['11', 'mika', 1200], ['12', 'mika', 1500], ['01', 'mika', 1500]], '{"2026-12":{"amt":1500},"2026-11":{"amt":1200}}'],
+    '«Чей вывод» said of one month is the line\'s in every month again: what «и дальше» dated of it goes, the sums stay');
   // (independent reading: with a withdrawal marked «Оплачено», saying whose ANOTHER row is deals an old row into the marked one, and «Денег сейчас» moves with nothing new from the bank. Since 13 October 2026 the page sees what a marked withdrawal holds before it changes the plan and keeps it after, and that no longer happens - the check rv-wdmark, and on the screen below. What is held here is the bare writer, as a page from before that day uses it: the row moves in, and a bank row is still counted once.)
   // (17 October 2026: a row whose whole name is a founder's is his by that name - N, the check «records». The row
   // the founder gives away below was called «Vanya» until then, and so everybody's; it is called «Вывод Vanya» now,
@@ -8412,7 +8533,11 @@ await run('rv-whose', 'a withdrawal that says whose it is is used up by that fou
   await fill(pg, 'row', { whose: 'misha', amt: amt0 + 100 });
   await saveRow(pg, 'onward');
   await puts('cash', before + 5);
-  same([await pg.evaluate(() => window.__cash.state().div.filter((r) => r.id === 'wdR' || (r.rec && r.rec.chain === 'wdR')).map((r) => [r.rec.from, r.whose || '', r.amt])), await toastText(pg)], [[['2026-09', 'mika', amt0], ['2026-10', 'misha', amt0 + 100]], 'Сохранено: Вывод — с октября · вывод Misha'], '«Октябрь и дальше» with «Misha» and a new sum: September stays Mika\'s, October on is Misha\'s');
+  // (one stored row since 3 November 2026, question 18: the sum and the owner are dated on it from October)
+  same([await pg.evaluate(() => window.__cash.state().div.filter((r) => r.id === 'wdR' || (r.rec && r.rec.chain === 'wdR')).map((r) => [r.rec.from, r.whose || '', r.amt, JSON.stringify(r.rec.since || null)])),
+    await pg.evaluate(() => window.__money.model({ H: 30 }).items.filter((it) => it.row === 'wdR' && it.occ && it.occ.ym <= '2026-11').map((it) => [it.occ.ym, it.whose, it.amt])), await toastText(pg)],
+  [[['2026-09', 'mika', amt0, JSON.stringify({ '2026-10': { amt: amt0 + 100, whose: 'misha' } })]], [['2026-09', 'mika', amt0], ['2026-10', 'misha', amt0 + 100], ['2026-11', 'misha', amt0 + 100]], 'Сохранено: Вывод — с октября · вывод Misha'],
+  '«Октябрь и дальше» with «Misha» and a new sum: September stays Mika\'s, October on is Misha\'s - one stored row, both dated on it');
   // «Что если»: two monthly withdrawals of one name are told apart by whose they are - in the list and in the line
   await toToday(pg);
   await pg.click('#view-today .td-wi > summary');
@@ -8725,13 +8850,13 @@ await run('rv-wdmark', 'a change to another line of the plan moves neither a mar
   const Lsx = ledP({ tx: [mika('r1', '2026-10-06', 1000.6)] }), Qsx0 = await press(Lsx, plan(w('wA', 1000.6, '2026-10-05'), w('wB', 3000, '2026-10-12')), 'wB');
   const Qsx = await tap(Lsx, Qsx0, 'wA', 'set', { amt: 1000 }, LATER, BY);
   same([moved(await C(Lsx, Qsx, D), await C(Lsx, Qsx0, D)), held(Qsx, 'wB')], [[0, 0, 0], [0]], 'the other withdrawal made sixty pence smaller than the row it holds: the sixty pence are not dealt into the marked withdrawal');
-  // the name a marked month goes by is its chain's: «Сентябрь и дальше» puts it into another stored row, and it holds to its memory
+  // the name a marked month goes by is its chain's: «Сентябрь и дальше» put it into another stored row until 3 November 2026 (it is dated on the row now), and it holds to its memory
   const Lch = ledP({ tx: [mika('r1', '2026-09-27', 2000)] }), wRx = every('wR', 2500, 5, '2026-08');
   wRx.rec.x = { '2026-10': { amt: 3000 } };
   let Qch = await press(Lch, plan(wRx, w('wE', 2500, '2026-10-01', { whose: 'vanya' })), 'wR@2026-10');
   Qch = await pick(Lch, Qch, 'wE', '');
   const Mch = await C(Lch, Qch, D), Qch1 = await tap(Lch, Qch, 'wR@2026-09', 'onward', { amt: 1000 }, 'wR2', LATER + 1, BY), Mch1 = await C(Lch, Qch1, D), oct = Mch1.items.find((it) => it.wd && it.date === '2026-10-05');
-  same([st(Mch, 'wR@2026-10'), st(Mch, 'wE'), [oct.id, oct.wd.got, oct.rows], moved(Mch1, Mch), !none(Qch1)], [['mark', 2000, ['r1']], ['blind', 0, []], ['wR2@2026-10', 2000, ['r1']], [0, 0, 0], true], 'October of a monthly withdrawal holds Mika\'s 2,000 by its memory; «Сентябрь и дальше» with another sum splits the stored row, and October is a month of the new one: the same mark, the same 2,000');
+  same([st(Mch, 'wR@2026-10'), st(Mch, 'wE'), [oct.id, oct.wd.got, oct.rows], moved(Mch1, Mch), !none(Qch1)], [['mark', 2000, ['r1']], ['blind', 0, []], ['wR@2026-10', 2000, ['r1']], [0, 0, 0], true], 'October of a monthly withdrawal holds Mika\'s 2,000 by its memory; «Сентябрь и дальше» with another sum is dated on the row (question 18 - until 3 November 2026 it split the row, and October was a month of the new one): the same mark, the same 2,000');
   // … and with another DAY: the marked month's own day moves with it, and it holds what it held
   const Ldy = ledP({ tx: [mika('r1', '2026-09-27', 1000)] }), Qdy = await press(Ldy, plan(every('wR', 3000, 5, '2026-08')), 'wR@2026-10'), Mdy = await C(Ldy, Qdy, D);
   const Qdy1 = await tap(Ldy, Qdy, 'wR@2026-09', 'onward', { date: '2026-09-20' }, 'wR2', LATER, BY), Mdy1 = await C(Ldy, Qdy1, D), oct2 = Mdy1.items.find((it) => it.wd && it.occ && it.occ.ym === '2026-10');

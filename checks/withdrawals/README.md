@@ -19,6 +19,8 @@ git show a943def:index.html > $E/before.html           # develop before the rule
 $N checks/withdrawals/engine.mjs $E/before.html $E/dev.cjs
 git show 008462e:index.html > $E/pre.html              # develop before the bank's fees (release 1.13.0)
 $N checks/withdrawals/engine.mjs $E/pre.html $E/pre.cjs
+git show 99d7a46:index.html > $E/devnow.html           # develop before question 18 (release 1.20.0): «… и дальше» splits
+$N checks/withdrawals/engine.mjs $E/devnow.html $E/devnow.cjs
 
 ENGINES=$E $N checks/withdrawals/cases.cjs             # the faults the review of 17 October 2026 found, and the fees, by hand
 ENGINES=$E $N checks/withdrawals/same.mjs              # a plan without a memory: the old model, byte for byte
@@ -28,6 +30,7 @@ ENGINES=$E BIAS=1 STEPS=14 $N checks/withdrawals/lives.cjs 1200 rich
 ENGINES=$E $N checks/withdrawals/dense.cjs 600 14      # lives lived mostly with a memory in force
 ENGINES=$E ON=dev BIAS=1 STEPS=14 $N checks/withdrawals/lives.cjs 300 rich   # the page before the rule: B fails
 ENGINES=$E STEPS=12 $N checks/withdrawals/sameday.cjs 4000        # lives around a balance's own day
+ENGINES=$E $N checks/withdrawals/join.cjs 1500 16      # a sum or a day dated on the row, and develop's chains made one
 ENGINES=$E ON=dev STEPS=12 $N checks/withdrawals/sameday.cjs 300  # the page before the rules: S fails
 ```
 
@@ -44,6 +47,17 @@ other set, counted without the fees inside it, comes to under the withdrawal's s
 from a third row by those fees, where a record takes its set and no more. In none of them does «Денег сейчас» move.
 Whether to take K's exception as it is or to rework W1 and the memory for it is put to the owner (`docs/handoff.md`,
 «Решения, которые ждут Мику», 14).
+Since 3 November 2026 (question 18, «А») `rec.since` holds the sum and the day «… и дальше» too (`amt`, `day`), and
+whose a withdrawal is (`whose`) and «к чему относится» (`of`) when they change with them; `unsince` writes them out on
+each part as it writes the rest, so the pages of before are handed a chain with each part's sum and day - which is how
+develop stored such a change. `join.cjs` holds the change itself against develop as it was that day (`devnow.cjs`,
+99d7a46, whose «… и дальше» still splits): R - the plan the page writes now is counted as develop counts it stored as
+a chain; O - a plan develop wrote is counted by the page now as develop counts it; J - such a plan made one row as the
+page opens it (`Live.join`) is counted as develop counts the chain, every figure, card and state, but for what a
+month names as its stored row and its card's first and last month, and the order of what goes by those names; Z - a
+second join makes nothing more. Its lives hold a repeat in every list, and changes of every kind, «… и дальше» of
+several fields at once among them. A chain whose parts leave a month out between them (a part ended before the next
+begins) is not made one: no one row stands for it, and it is read as before.
 A plan may hold, since 1 November 2026, what a repeating row IS from a month on (`rec.since`: a name, bank, currency,
 VAT or «это подписка» said of a month after the row's first - the owner's decision 3 of that day; `lineAt` in the page).
 `lives.cjs` and `sameday.cjs` write it: their change 11, a new name on a withdrawal, is one when it falls on a month of

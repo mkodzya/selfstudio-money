@@ -16,13 +16,18 @@ const engines = () => { const dir = process.env.ENGINES; if (!dir || !['new', 'd
 // writes it (the page of 13 October 2026 reads no owner from a name). The model they give back is read as the row's:
 // the parts' ids are the row's, and its months name the row's first and last month. Written apart from the page, as
 // N and D are. A plan without rec.since is handed over as it is.
-const SINCE = ['name', 'bank', 'cur', 'vat', 'sub', 'sk', 'skBy', 'blk'], CURS = ['GBP', 'USD', 'EUR', 'RUB', 'AMD'];
+// Since 3 November 2026 (question 18, «А») the sum and the day «… и дальше» are dated the same way, and so are whose a
+// withdrawal is (null: nobody's by hand) and «к чему относится» (`of`); each part of the chain then carries its own.
+const SINCE = ['name', 'bank', 'cur', 'vat', 'sub', 'sk', 'skBy', 'blk', 'amt', 'day', 'whose', 'of'], CURS = ['GBP', 'USD', 'EUR', 'RUB', 'AMD'], FOUNDERS = ['mika', 'misha', 'vanya'];
+const okSince = (f, v) => (f === 'cur' ? CURS.includes(v) : f === 'vat' || f === 'sub' ? typeof v === 'boolean' : f === 'amt' ? typeof v === 'number' && isFinite(v) && v >= 0
+  : f === 'day' ? Number.isInteger(v) && v >= 1 && v <= 31 : f === 'whose' ? v === null || v === '' || FOUNDERS.includes(v) : f === 'of' ? v === false || (!!v && typeof v === 'object' && v.r != null && v.p != null) : typeof v === 'string');
 const isYm = (s) => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 const ymNext = (ym, k) => { const n = +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1) + k; return Math.floor(n / 12) + '-' + String((n % 12) + 1).padStart(2, '0'); };
 const sinceOf = (r) => { const s = r && r.rec && typeof r.rec === 'object' && r.rec.since && typeof r.rec.since === 'object' && !Array.isArray(r.rec.since) ? r.rec.since : null; if (!s) return [];
   return Object.keys(s).filter((m) => isYm(m) && s[m] && typeof s[m] === 'object' && !Array.isArray(s[m])).sort().map((m) => { const e = {};
-    SINCE.forEach((f) => { const v = s[m][f]; if (f === 'cur' ? CURS.includes(v) : f === 'vat' || f === 'sub' ? typeof v === 'boolean' : typeof v === 'string') e[f] = v; }); return [m, e]; }).filter((x) => Object.keys(x[1]).length); };
-const put1 = (r, f, v) => { if ((f === 'sk' || f === 'skBy' || f === 'blk') && v === '') delete r[f]; else if (f === 'sub' && !v) delete r.sub; else r[f] = v; };
+    SINCE.forEach((f) => { const v = s[m][f]; if (okSince(f, v)) e[f] = v; }); return [m, e]; }).filter((x) => Object.keys(x[1]).length); };
+const put1 = (r, f, v) => { if ((f === 'sk' || f === 'skBy' || f === 'blk') && v === '') delete r[f]; else if (f === 'sub' && !v) delete r.sub;
+  else if (f === 'day') r.rec.day = v; else if (f === 'whose' && v === null) delete r.whose; else r[f] = f === 'of' && v ? clone(v) : v; };
 const unsince = (P) => {
   if (!P || typeof P !== 'object') return null; let any = false; const Q = clone(P), rows = {};
   ['inflows', 'team', 'taxes', 'other', 'div'].forEach((k) => { if (!Array.isArray(Q[k])) return; const out = [];
