@@ -2571,16 +2571,17 @@ const Journal=(()=>{
  }
  // A row at its own level - for a «каждый месяц» row that is what every month without a word of its own follows.
  const rowF=(r,k)=>({a:r2(r.amt),c:String(r.cur||"GBP"),d:String(r.date||""),b:String(r.bank||""),k:mark(r,k),n:String(r.name==null?"":r.name)});
- // The months of a «каждый месяц» row, by what each says of itself: a sum, a day, a mark of its own - and a name or
- // a bank it holds from that month on (rec.since). A month goes by the name it has in that month (Live.line).
+ // The months of a «каждый месяц» row, by what each says of itself: a sum, a day, a mark of its own - and a name, a
+ // bank, and since 3 November 2026 a sum or a day it holds from that month on (rec.since). A month goes by what it
+ // is in that month (Live.line).
  function months(n,p,q,k,out){
   const ex=r=>obj(r.rec)&&obj(r.rec.x)?r.rec.x:{},xa=ex(p),xb=ex(q),day=(r,ym)=>obj(r.rec)?dIn(ym,r.rec.day):"";
   const sn=r=>obj(r.rec)&&obj(r.rec.since)?Object.keys(r.rec.since):[],sa=sn(p),sb=sn(q),nm=r=>String(r.name==null?"":r.name);
   [...new Set(Object.keys(xa).concat(Object.keys(xb),sa,sb))].sort().forEach(ym=>{
-   const u=obj(xa[ym])?xa[ym]:{},v=obj(xb[ym])?xb[ym]:{},a=Live.line(p,ym),b=Live.line(q,ym),e={n:cut((b===q?n:nm(b))+" · "+monOf(ym),80)};
-   if(sa.includes(ym)||sb.includes(ym)){if(nm(a)!==nm(b))e.nm=[cut(nm(a),80),cut(nm(b),80)];if(String(a.bank||"")!==String(b.bank||""))e.b=[String(a.bank||""),String(b.bank||"")];}
-   if(u.amt!==v.amt){const a=[r2(u.amt!=null?u.amt:p.amt),r2(v.amt!=null?v.amt:q.amt)];if(a[0]!==a[1]){e.a=a;if(p.cur!=="GBP"||q.cur!=="GBP")e.c=[String(p.cur||"GBP"),String(q.cur||"GBP")];}}
-   if(u.date!==v.date){const d=[String(u.date||day(p,ym)),String(v.date||day(q,ym))];if(d[0]!==d[1])e.d=d;}
+   const u=obj(xa[ym])?xa[ym]:{},v=obj(xb[ym])?xb[ym]:{},a=Live.line(p,ym),b=Live.line(q,ym),e={n:cut((b===q?n:nm(b))+" · "+monOf(ym),80)},at=sa.includes(ym)||sb.includes(ym);
+   if(at){if(nm(a)!==nm(b))e.nm=[cut(nm(a),80),cut(nm(b),80)];if(String(a.bank||"")!==String(b.bank||""))e.b=[String(a.bank||""),String(b.bank||"")];}
+   if(u.amt!==v.amt||at){const s=[r2(u.amt!=null?u.amt:a.amt),r2(v.amt!=null?v.amt:b.amt)];if(s[0]!==s[1]){e.a=s;if(a.cur!=="GBP"||b.cur!=="GBP")e.c=[String(a.cur||"GBP"),String(b.cur||"GBP")];}}
+   if(u.date!==v.date||at){const d=[String(u.date||day(a,ym)),String(v.date||day(b,ym))];if(d[0]!==d[1])e.d=d;}
    const m=[mark(u,k),mark(v,k)];if(m[0]!==m[1])e.k=m;
    if(Object.keys(e).length>1)out.push(e);});
  }
@@ -2748,6 +2749,9 @@ const Cash=(()=>{
   // as the ordinary row it is. Like the stamp above it is not a save: it goes to the server with the founder's
   // next change.
   Live.single(P,Live.today().slice(0,7));
+  // A row that «… и дальше» split before 3 November 2026 is read as the one row it is now written as (Live.join):
+  // not a save either - it goes with the next change, and the page counts the same until then and after.
+  Live.join(P);
   // The upgrade gives every row of an old plan an id. A row of a new plan without one cannot be told from its
   // neighbour, so it gets one here.
   LISTS.forEach(k=>P[k].forEach(r=>{if(r.id==null||r.id==="")r.id=uid();}));
@@ -3658,10 +3662,14 @@ const Cash=(()=>{
 //  Live.blank(ids) → plan                           a new v3 plan: five accounts (ids[0..4]) and the two tax rules
 //  Live.single(plan, "YYYY-MM") → n                  every repeat of one month, that month or a later one, made the
 //                                                   ordinary row it is; changes the plan it is handed, returns how many
+//  Live.join(plan) → n                              every chain «… и дальше» split a row into before 3 November 2026
+//                                                   made one row with what each part held dated from its month, where
+//                                                   that moves no figure; changes the plan it is handed, returns how many
 //  Live.line(row, "YYYY-MM"?) → row                 a stored row as the line reads in that month - its name, bank,
-//                                                   currency, VAT, «это подписка» and link with what rec.since says of
-//                                                   that month and before; without a month, of its latest. The row
-//                                                   itself where nothing differs, a copy otherwise: for reading
+//                                                   currency, VAT, «это подписка», link and, since 3 November 2026, its
+//                                                   sum, day (in rec), owner and «к чему относится», with what rec.since
+//                                                   says of that month and before; without a month, of its latest. The
+//                                                   row itself where nothing differs, a copy otherwise: for reading
 //  Live.today() → "YYYY-MM-DD"                      the date in London, read from the clock on every call
 //  Live.day(ms) → "YYYY-MM-DD"                      the date in London of a stored moment (a row's c0, a balance's at)
 //  Live.passed(model, accountKey, asOf) → [{id, tick:false, on}]   the list for «Что из этого уже прошло?» (below)
@@ -3681,7 +3689,7 @@ const Cash=(()=>{
 //  Live.home(accounts, bank, cur, digits) → account  whose a statement row is: the account of that bank and currency
 //                                                   marked with that number, else the first - the engine's own rule,
 //                                                   which «Загрузка» asks of a statement it has read
-//  window.__money = {compute, upgrade, passed, vatFor, write, model(opts), today, by}   the same, for the checks;
+//  window.__money = {compute, upgrade, passed, vatFor, write, join, model(opts), today, by}   the same, for the checks;
 //                                                   model() is compute on what the page holds now, today a getter
 //
 // ARGUMENTS
@@ -4517,14 +4525,26 @@ const Live=(()=>{
  // name is then looked up afresh. A field of the wrong type, or a key that is no month, is read as nothing. Until
  // 1 November 2026 such a change split the row into a chain of rows, and every later operation on the chain had to be
  // taught about it.
- const SINCE=["name","bank","cur","vat","sub","sk","skBy","blk"];
- const sinceOk=(f,v)=>f==="cur"?CURS.includes(v):f==="vat"||f==="sub"?typeof v==="boolean":typeof v==="string";
+ // Since 3 November 2026 (the owner's answer «А» to question 18) the sum and the day «{Декабрь} и дальше» are dated
+ // on the row the same way, and so are the two things a founder may change with them: whose a withdrawal is and
+ // «к чему относится». amt is the line's sum (x[ym].amt still says one month's), day its day of the month (1..31,
+ // in place of rec.day), whose a founder, "" for «общий» chosen by hand, or null for none - the owner then by the
+ // name, as on a row without the field -, of what a row of «Налоги» is ({r, p, part?} or false). A sum or a day
+ // never split the row again: what «… и дальше» split before is a chain a plan may still hold (rec.chain), read as
+ // before, and made one row as the plan is opened where it can be (join). iid is join's alone: the name the months
+ // of a part had (its row's id), which the engine still gives them - a month's name breaks a tie between two lines
+ // of one day, and reading a plan must not move a figure. Nothing else writes it, and it is never the row's own.
+ const SINCE=["name","bank","cur","vat","sub","sk","skBy","blk","amt","day","whose","of","iid"];
+ const sinceOk=(f,v)=>f==="cur"?CURS.includes(v):f==="vat"||f==="sub"?typeof v==="boolean":f==="amt"?typeof v==="number"&&isFinite(v)&&v>=0
+  :f==="day"?Number.isInteger(v)&&v>=1&&v<=31:f==="whose"?v===null||v===""||FOUNDERS.includes(v):f==="of"?v===false||(obj(v)&&v.r!=null&&v.p!=null):f==="iid"?typeof v==="string"&&v!=="":typeof v==="string";
  // (the entries of a row that can be read, oldest first: [[ym, {field: value}]])
  const sinceOf=r=>{const s=obj(r)&&obj(r.rec)&&obj(r.rec.since)?r.rec.since:null;if(!s)return[];
   return Object.keys(s).filter(k=>isM(k)&&obj(s[k])).sort().map(k=>{const e={};SINCE.forEach(f=>{if(sinceOk(f,s[k][f]))e[f]=s[k][f];});return[k,e];}).filter(x=>Object.keys(x[1]).length);};
  // The row as the line reads in the month `ym` (with none, in its latest): the row itself where no entry of that
- // month or before says anything, else a copy with what they say. For reading only.
- const lineAt=(r,ym)=>{const l=sinceOf(r).filter(x=>!ym||x[0]<=ym);if(!l.length)return r;const o=Object.assign({},r);l.forEach(x=>{Object.assign(o,x[1]);});return o;};
+ // month or before says anything, else a copy with what they say - the day in a copy of `rec`, and an owner of null
+ // as no owner at all. For reading only.
+ const lineAt=(r,ym)=>{const l=sinceOf(r).filter(x=>!ym||x[0]<=ym);if(!l.length)return r;const o=Object.assign({},r);
+  l.forEach(x=>{Object.keys(x[1]).forEach(f=>{const v=x[1][f];if(f==="day"){if(obj(o.rec))o.rec=Object.assign({},o.rec,{day:v});}else if(f==="whose"&&v===null)delete o.whose;else o[f]=v;});});return o;};
  // D. A move to a founder's Daily or Monthly account (the owner's decision of 17 October 2026, «А», «только с
  // октября»): from 1 October 2026 it is a transfer between own accounts - the founders keep those accounts to hold
  // down what the company card spends - and so in no figure but the balance it left. Before October such a row stays
@@ -4993,10 +5013,11 @@ const Live=(()=>{
   LISTS.forEach(k=>P[k].forEach(r=>{
    const id=String(r.id);if(rowIds[id])return;rowIds[id]=1;
    const amt0=Math.max(0,+r.amt||0);
-   // (`q`: the row, or the row as it reads in a month rec.since speaks of. What is not the line's - the sum, «к чему
-   // относится», whose a withdrawal is by hand, the moment it was written - is the row's alone.)
+   // (`q`: the row, or the row as it reads in a month rec.since speaks of - since 3 November 2026 «к чему относится»
+   // and whose a withdrawal is by hand among it. What is not the line's - the moment it was written - is the row's
+   // alone.)
    const baseOf=q=>{const lnk=linkOf(k,q),cur=CURS.includes(q.cur)?q.cur:"GBP",vat=k==="inflows"&&q.vat===true;
-    const of=k!=="taxes"||lnk.ptax?false:obj(r.of)&&r.of.r!=null&&r.of.p!=null?{r:String(r.of.r),p:String(r.of.p),part:!!r.of.part}:r.of===undefined?null:false;
+    const of=k!=="taxes"||lnk.ptax?false:obj(q.of)&&q.of.r!=null&&q.of.p!=null?{r:String(q.of.r),p:String(q.of.p),part:!!q.of.part}:q.of===undefined?null:false;
     return{kind:"typed",list:k,blk:lnk.blk,grp:lnk.ptax?"div":GRP[k],name:String(q.name==null?"":q.name),key:norm(alias(q.name)),cur,vat,vk:vat?TOP:1,dir:k==="inflows"?1:-1,bank:String(q.bank||""),mon:isM(r.mon)?r.mon:"",
      sk:lnk.sk,lk:lnk.lk,how:lnk.how,label:lnk.label,c0:+r.c0||0,fixed:!!r.fixed,row:id,sub:k==="other"&&q.sub===true,wd:k==="div"&&!lnk.ptax,whose:k==="div"&&!lnk.ptax?ownerOf(q):"",ptax:!!lnk.ptax,of,guess:"",who:String((obj(r.m)&&r.m.by)||""),chain:"",ym0:"",carry:null,moved:false,exc:false,rec:null,tax:null};};
    const base=baseOf(r);
@@ -5005,10 +5026,13 @@ const Live=(()=>{
    if(!rec)return void one({id,src:"row",amt:amt0,date:isD(r.date)?r.date:"",carry:obj(r.carry)&&isM(r.carry.ym)?{ym:r.carry.ym}:null},r,r.on!==false);
    const day=Math.round(+rec.day),x=obj(rec.x)?rec.x:{},to=isM(rec.to)?rec.to:"",chain=String(rec.chain||id),end=to&&to<genTo?to:genTo;
    // (S: the entries of rec.since, oldest first; bs[i]: the line as it reads once the first i of them hold)
-   const S=sinceOf(r),bs=[base];let si=0;
-   for(let ym=rec.from>genFrom?rec.from:genFrom;ym<=end;ym=ymAdd(ym,1)){const e=obj(x[ym])?x[ym]:{},d=dayIn(ym,day),amt=e.amt!=null&&isFinite(+e.amt)?Math.max(0,+e.amt):amt0,date=isD(e.date)?e.date:d;
-    while(si<S.length&&S[si][0]<=ym)si++;const b=bs[si]||(bs[si]=baseOf(lineAt(r,S[si-1][0])));
-    one({id:id+"@"+ym,src:"occ",chain,ym0:ym,amt,date,moved:date!==d,exc:amt!==amt0||date!==d,rec:{day,from:rec.from,to}},e,r.on!==false&&!e.off,b);}
+   // (ls[i]: the row as it reads then - its sum and its day too, since 3 November 2026)
+   const S=sinceOf(r),bs=[base],ls=[r];let si=0;
+   for(let ym=rec.from>genFrom?rec.from:genFrom;ym<=end;ym=ymAdd(ym,1)){
+    while(si<S.length&&S[si][0]<=ym)si++;const L=ls[si]||(ls[si]=lineAt(r,S[si-1][0])),b=bs[si]||(bs[si]=baseOf(L));
+    const a0=L===r?amt0:Math.max(0,+L.amt||0),dy=L===r?day:Math.round(+L.rec.day);
+    const e=obj(x[ym])?x[ym]:{},d=dayIn(ym,dy),amt=e.amt!=null&&isFinite(+e.amt)?Math.max(0,+e.amt):a0,date=isD(e.date)?e.date:d;
+    one({id:(L!==r&&typeof L.iid==="string"?L.iid:id)+"@"+ym,src:"occ",chain,ym0:ym,amt,date,moved:date!==d,exc:amt!==a0||date!==d,rec:{day:dy,from:rec.from,to}},e,r.on!==false&&!e.off,b);}
   }));
   // Clients, now that the written inflows are known: each row is some client's, and says itself whether its
   // invoice carries the tax — stored when it was saved, so a proposal that changes later touches no written row.
@@ -6070,11 +6094,18 @@ const Live=(()=>{
  // ---- rec.since, written (above, by `lineAt`, how it is read) ----
  // What holds of each field of the line as the page reads it, on the row itself (put1 writes one back the way the
  // row keeps it: no link is no key, «это подписка» is true or no key).
+ // (Since 3 November 2026 also the sum, the day - kept in rec - whose a withdrawal is - null: nobody's by hand, so by
+ // its name - and «к чему относится».)
  const SV={name:r=>String(r.name==null?"":r.name),bank:r=>String(r.bank||""),cur:r=>CURS.includes(r.cur)?r.cur:"GBP",vat:r=>r.vat===true,sub:r=>r.sub===true,
-  sk:r=>typeof r.sk==="string"?r.sk:"",skBy:r=>typeof r.skBy==="string"?r.skBy:"",blk:r=>typeof r.blk==="string"?r.blk:""};
- const put1=(r,f,v)=>{if((f==="sk"||f==="skBy"||f==="blk")&&v==="")delete r[f];else if(f==="sub"&&!v)delete r.sub;else r[f]=v;};
- // (a field an entry of the list `k` may hold: VAT is an inflow's, «это подписка» a row of «Прочие расходы»)
- const sinceFor=(f,k)=>SINCE.includes(f)&&(f!=="vat"||k==="inflows")&&(f!=="sub"||k==="other");
+  sk:r=>typeof r.sk==="string"?r.sk:"",skBy:r=>typeof r.skBy==="string"?r.skBy:"",blk:r=>typeof r.blk==="string"?r.blk:"",
+  amt:r=>+r.amt||0,day:r=>obj(r.rec)?Math.round(+r.rec.day):0,whose:r=>FOUNDERS.includes(r.whose)?r.whose:r.whose===""?"":null,of:r=>r.of===undefined?null:r.of,iid:r=>String(r.id)};
+ const put1=(r,f,v)=>{if(f==="iid")return;if((f==="sk"||f==="skBy"||f==="blk")&&v==="")delete r[f];else if(f==="sub"&&!v)delete r.sub;else if(f==="day"){if(obj(r.rec))r.rec.day=v;}
+  else if(f==="whose"&&v===null)delete r.whose;else r[f]=f==="of"&&obj(v)?Object.assign({},v):v;};
+ // (two values of a field alike: «к чему относится» is a small object)
+ const sameV=(f,a,b)=>f==="of"?JSON.stringify(a)===JSON.stringify(b):a===b;
+ // (a field an entry of the list `k` may hold: VAT is an inflow's, «это подписка» a row of «Прочие расходы», whose a
+ // withdrawal is a row of «Дивиденды», «к чему относится» a row of «Налоги»)
+ const sinceFor=(f,k)=>SINCE.includes(f)&&(f!=="vat"||k==="inflows")&&(f!=="sub"||k==="other")&&(f!=="whose"||k==="div")&&(f!=="of"||k==="taxes");
  // What the entries of the month `ym` and before say becomes the row's own, and they go: the row is the line as it
  // reads in `ym` (a repeat flattened to its first month, the part of a split that begins in `ym`).
  const sinceFold=(r,ym,k)=>{const s=obj(r.rec)&&obj(r.rec.since)?r.rec.since:null;if(!s)return;
@@ -6095,16 +6126,24 @@ const Live=(()=>{
  // what that month's entry says already. A field that is what holds just before `ym` says nothing new, and goes from
  // the entry («Barclays» said of December, where November is on Barclays: December is again as the months before
  // it). A new name takes no link of its own here - the link in force goes on with it, as a renamed row's did (Ed's
- // relink, which the card calls after it, writes the new name's).
+ // relink, which the card calls after it, writes the new name's). Since 3 November 2026 «{Декабрь} и дальше» writes
+ // here too (Live.write.onward): a sum (amt), a day (day), whose a withdrawal is (whose, as the entry keeps it) and
+ // «к чему относится» (of).
  const sinceSet=(r,k,ym,v)=>{const rec=r.rec,s=obj(rec.since)?rec.since:(rec.since={}),e=obj(s[ym])?s[ym]:(s[ym]={}),w=[];
   ["name","cur","bank"].forEach(f=>{if(v[f]!==undefined){e[f]=v[f];w.push(f);}});
   if(v.vat!==undefined){e.vat=!!v.vat;w.push("vat");}if(v.sub!==undefined){e.sub=!!v.sub;w.push("sub");}
+  if(v.amt!==undefined){e.amt=Math.max(0,+v.amt||0);w.push("amt");}if(v.day!==undefined){e.day=v.day;w.push("day");}
+  if(v.whose!==undefined){e.whose=v.whose;w.push("whose");}if(v.of!==undefined){e.of=obj(v.of)?Object.assign({},v.of):v.of;w.push("of");}
   if(v.name!==undefined){delete e.sk;delete e.skBy;delete e.blk;}
   const was={};SINCE.forEach(f=>{was[f]=SV[f](r);});sinceOf(r).forEach(x=>{if(x[0]<ym)Object.assign(was,x[1]);});
-  w.forEach(f=>{if(e[f]===was[f])delete e[f];});
+  w.forEach(f=>{if(sameV(f,e[f],was[f]))delete e[f];});
   sinceTidy(r,k);};
  // (any of the fields of what the line is, in `v`)
  const lineIn=v=>["name","cur","bank","vat","sub"].some(f=>v[f]!==undefined);
+ // «К чему относится» said of the month `ym` of a repeat: where «… и дальше» dated one on the row for a month up to
+ // `ym`, the latest such entry takes it - the months it holds for are the ones this month is among; else the row.
+ const ofAt=(r,ym,of)=>{const l=sinceOf(r).filter(x=>x[0]<=ym&&x[1].of!==undefined),m=l.length?l[l.length-1][0]:"";
+  if(m&&obj(r.rec.since[m]))r.rec.since[m].of=obj(of)?Object.assign({},of):of;else r.of=of;};
  // A memory of a mark on a withdrawal (paid.saw), as the model writes one out (item.saw); the name a marked
  // withdrawal goes by through a change to the plan - its row, or the chain its row is a part of, and its mark's
  // own moment and day (and, of two marks of one row with one moment and one day - a script can write such, the
@@ -6166,16 +6205,58 @@ const Live=(()=>{
  // into x[from], moved back) - and what the line was in that month (rec.since), its own. A row another row continues
  // (rec.chain names it) stays as it is: the two are one payment through time. Returns whether the row was changed.
  const flat=(P,r)=>{const rec=r&&r.rec;if(!obj(rec)||!isM(rec.from)||rec.to!==rec.from||rec.chain!=null||LISTS.some(k=>(P[k]||[]).some(q=>q&&obj(q.rec)&&q.rec.chain!=null&&String(q.rec.chain)===String(r.id))))return false;
+  // (what rec.since says of that month first - since 3 November 2026 it may say the sum and the day)
+  if(rec.since!==undefined)sinceFold(r,rec.from,LISTS.find(k=>(P[k]||[]).includes(r)));
   const x=obj(rec.x)&&obj(rec.x[rec.from])?rec.x[rec.from]:{};
   r.date=isD(x.date)?x.date:dayIn(rec.from,Math.max(1,+rec.day||1));if(x.amt!=null&&isFinite(+x.amt))r.amt=+x.amt;
   ["paid","tx","closed"].forEach(f=>{if(x[f]!==undefined)r[f]=x[f];});if(x.notx!==undefined)r.notx=arr(r.notx).concat(arr(x.notx));if(x.off)r.on=false;
-  if(rec.since!==undefined)sinceFold(r,rec.from,LISTS.find(k=>(P[k]||[]).includes(r)));
   delete r.rec;return true;};
  // Every such row of the month `ym` or later: what a plan saved before 8 October 2026 may still hold. A month that
  // has gone by is left as it was written — a payout of a repeat that never came is `missed` and in no figure, the
  // same payout as a row of its own would be late and counted, and reading a plan must not move a figure. Changes
  // the plan it is handed.
  const single=(P,ym)=>{let n=0;LISTS.forEach(k=>(P[k]||[]).forEach(r=>{if(r&&obj(r.rec)&&isM(ym)&&r.rec.from>=ym&&flat(P,r))n++;}));return n;};
+ // A chain that «… и дальше» of a later month split a row into before 3 November 2026 (rec.chain: the head is the
+ // row whose id its parts name, each part from the month that was said of) is made one row again (question 18,
+ // «А»): what each part holds of its sum, day, name, bank, currency, VAT, «это подписка», link, owner and «к чему
+ // относится» is dated on the head from the part's first month - where it differs from what holds before that
+ // month -, as Live.write.onward dates such a change now, with the name its months had (iid: the part's id); each
+ // month's own words (rec.x) and what a part said of
+ // its own later months (rec.since) are taken over as they were, and the head ends where the last part ends. Its
+ // id stays, and so does every name the engine gives the line's months (`chain`, the memories of marks). Only a
+ // chain whose parts follow one another month after month, in one list, alike in everything else, is made one;
+ // any other is left as it is and read as before - and a change of its earlier part still stops where the later
+ // one begins. Reading a plan must not move a figure: checks/withdrawals/join.cjs holds the model of a plan made
+ // one to the model develop gives of the chain. Changes the plan it is handed; returns how many lines were made one.
+ const JOINF=["amt","day","name","bank","cur","vat","sub","sk","skBy","blk","whose","of"],RECK=["day","from","to","x","chain","since"];
+ const stab=x=>JSON.stringify(x,(k,v)=>v&&typeof v==="object"&&!Array.isArray(v)?Object.keys(v).sort().reduce((o,q)=>(o[q]=v[q],o),{}):v);
+ const join=P=>{let n=0;
+  LISTS.forEach(k=>{const L=P[k];if(!Array.isArray(L))return;const byC={};
+   L.forEach(r=>{if(r&&obj(r.rec)&&r.rec.chain!=null)(byC[String(r.rec.chain)]||(byC[String(r.rec.chain)]=[])).push(r);});
+   Object.keys(byC).forEach(c=>{
+    const heads=L.filter(r=>r&&String(r.id)===c);const head=heads.length===1&&obj(heads[0].rec)&&heads[0].rec.chain==null?heads[0]:null;if(!head)return;
+    if(LISTS.some(j=>j!==k&&(P[j]||[]).some(q=>q&&(String(q.id)===c||(obj(q.rec)&&String(q.rec.chain)===c)))))return;
+    const segs=[head].concat(byC[c]).sort((a,b)=>String(a.rec.from)<String(b.rec.from)?-1:String(a.rec.from)>String(b.rec.from)?1:0);
+    const fs=JOINF.filter(f=>sinceFor(f,k)),rest=s=>{const o=Object.assign({},s);delete o.id;delete o.m;delete o.rec;fs.forEach(f=>{delete o[f];});return stab(o);};
+    const good=segs.every((s,i)=>isM(s.rec.from)&&Number.isInteger(+s.rec.day)&&+s.rec.day>=1&&+s.rec.day<=31&&Object.keys(s.rec).every(q=>RECK.includes(q))&&(s.rec.x===undefined||obj(s.rec.x))
+     &&(i===segs.length-1||(isM(s.rec.to)&&ymAdd(s.rec.to,1)===segs[i+1].rec.from))&&(i===0||rest(s)===rest(head)))&&new Set(segs.map(s=>String(s.id))).size===segs.length;
+    if(!good)return;
+    const val=(s,f)=>f==="amt"?Math.max(0,+s.amt||0):f==="day"?Math.round(+s.rec.day):SV[f](s);
+    const live=(s,m)=>m>=s.rec.from&&(!isM(s.rec.to)||m<=s.rec.to);
+    const S={},X={};let bad=false;
+    sinceOf(head).forEach(([m,e])=>{if(live(head,m))S[m]=Object.assign({},e);});
+    segs.forEach(s=>{if(obj(s.rec.x))Object.keys(s.rec.x).forEach(m=>{if(isM(m)&&live(s,m))X[m]=s.rec.x[m];});});
+    segs.slice(1).forEach(s=>{const F=s.rec.from,h={};fs.forEach(f=>{h[f]=val(head,f);});Object.keys(S).filter(m=>m<F).sort().forEach(m=>{Object.assign(h,S[m]);});
+     const e={iid:String(s.id)};fs.forEach(f=>{const v=val(s,f);if(sameV(f,v,h[f]))return;if(!sinceOk(f,v))bad=true;e[f]=v;});S[F]=e;
+     sinceOf(s).forEach(([m,e2])=>{if(m>F&&live(s,m))S[m]=Object.assign({},e2);});});
+    if(bad)return;
+    const last=segs[segs.length-1],mt=segs.reduce((a,s)=>obj(s.m)&&(+s.m.t||0)>((a&&+a.t)||0)?s.m:a,head.m);
+    if(Object.keys(X).length)head.rec.x=X;else delete head.rec.x;
+    if(Object.keys(S).length)head.rec.since=S;else delete head.rec.since;
+    if(isM(last.rec.to))head.rec.to=last.rec.to;else delete head.rec.to;
+    if(mt!==undefined)head.m=mt;sinceTidy(head,k);
+    segs.slice(1).forEach(s=>{L.splice(L.indexOf(s),1);});n++;});});
+  return n;};
  const write={
   // A new row. A tax with a founder in its name is a personal tax and is stored in «Дивиденды»; every inflow says
   // whether its invoice carries VAT; a tax row says what it is (`of`) — an extra bill unless told otherwise.
@@ -6269,14 +6350,19 @@ const Live=(()=>{
   set(P,it,v,now,by){
    if(it.src==="tax"){const s=slot(P,it,true);if(v.amt!==undefined)s.amt=+v.amt||0;if(v.date!==undefined){if(v.date)s.date=v.date;else delete s.date;}s.m={t:now,by};return s;}
    const h=rowIn(P,it.row||it.id);if(!h)return null;const r=h.r;
-   if(it.src==="occ"){const s=slot(P,it,true);
-    if(v.amt!==undefined){if((+v.amt||0)===(+r.amt||0))delete s.amt;else s.amt=+v.amt||0;}
-    if(v.date!==undefined){if(!v.date||v.date===dayIn(it.occ.ym,r.rec.day))delete s.date;else s.date=v.date;}
+   if(it.src==="occ"){const s=slot(P,it,true),L=lineAt(r,it.occ.ym);
+    // (this month's own sum and day: an exception where they are not what the line holds in this month - since
+    // 3 November 2026 a sum or a day «… и дальше» from an earlier month among it)
+    if(v.amt!==undefined){if((+v.amt||0)===(+L.amt||0))delete s.amt;else s.amt=+v.amt||0;}
+    if(v.date!==undefined){if(!v.date||v.date===dayIn(it.occ.ym,L.rec.day))delete s.date;else s.date=v.date;}
     const whole=h.k==="taxes"&&v.name!==undefined&&!!owner({c:"tax",l:v.name});
     if(lineIn(v)&&!whole&&isM(r.rec.from)&&it.occ.ym>r.rec.from)sinceSet(r,h.k,it.occ.ym,{name:v.name,cur:v.cur,bank:v.bank,vat:h.k==="inflows"?v.vat:undefined,sub:h.k==="other"?v.sub:undefined});
     else{fields(r,{name:v.name,cur:v.cur,bank:v.bank,vat:v.vat},h.k==="inflows");subOf(r,v,h.k);
      if(whole&&obj(r.rec.since))Object.keys(r.rec.since).forEach(m=>{const e=r.rec.since[m];if(obj(e))delete e.name;});sinceTidy(r,h.k);}
-    whoseAll(P,h,v);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;tidy(P,it);r.m={t:now,by};personal(P,h);return r;}
+    // (whose a withdrawal is, said of one month, is the line's in every month - what «… и дальше» dated of it goes;
+    // «к чему относится» is what holds in this month: the row's, or that of an entry «… и дальше» dated of it)
+    if(v.whose!==undefined&&obj(r.rec.since)){Object.keys(r.rec.since).forEach(m=>{const e=r.rec.since[m];if(obj(e))delete e.whose;});sinceTidy(r,h.k);}
+    whoseAll(P,h,v);if(v.of!==undefined&&h.k==="taxes")ofAt(r,it.occ.ym,v.of);tidy(P,it);r.m={t:now,by};personal(P,h);return r;}
    fields(r,v,h.k==="inflows");subOf(r,v,h.k);whoseOf(r,v,h.k);if(v.of!==undefined&&h.k==="taxes")r.of=v.of;
    if(v.date!==undefined){r.date=v.date||"";if(r.date)delete r.mon;else if(v.mon)r.mon=v.mon;}
    r.m={t:now,by};personal(P,h);return r;},
@@ -6295,23 +6381,26 @@ const Live=(()=>{
   // is then the tick itself.
   untick(P,it){const h=rowIn(P,it.row);if(h&&obj(h.r.rec)){h.r.rec.to=it.occ.ym;flat(P,h.r);}},
   resume(P,it){const h=rowIn(P,it.row);if(h&&obj(h.r.rec))delete h.r.rec.to;},
-  // R4. «{Октябрь} и дальше»: from the row's first month the row itself is changed. From any later month the row
-  // is SPLIT — the old one ends the month before, and a copy with a new id, the new values, the same c0 and the
-  // exceptions of that month and later takes over, remembering the chain it continues. The past is never
-  // rewritten. v: {name, amt, cur, bank, vat, date} — a date here is the month's new day, for every month on. What the
-  // line is from some month on (rec.since) is cut at this month with the rest: the old row keeps what it says of the
-  // months before, the copy begins as the line is in this month - those entries its own fields - and keeps the
-  // later ones, which a founder made of their own months and which stay his.
-  onward(P,it,v,id,now,by){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return null;const r=h.r,ym=it.occ.ym;
-   const put=x=>{fields(x,v,h.k==="inflows");whoseOf(x,v,h.k);if(isD(v.date))x.rec.day=+v.date.slice(8);const e=obj(x.rec.x)?x.rec.x[ym]:null;
-    if(obj(e)){if(v.amt!==undefined)delete e.amt;if(isD(v.date))delete e.date;if(!Object.keys(e).length)delete x.rec.x[ym];if(!Object.keys(x.rec.x).length)delete x.rec.x;}x.m={t:now,by};sinceTidy(x,h.k);return x;};
-   if(ym<=r.rec.from){put(r);whoseAll(P,h,v,ym);return r;}
-   const n=JSON.parse(JSON.stringify(r)),xo=obj(r.rec.x)?r.rec.x:{},xa={},xb={};Object.keys(xo).forEach(k=>{(k<ym?xa:xb)[k]=xo[k];});
-   n.id=String(id);n.rec.from=ym;n.rec.chain=String(r.rec.chain||r.id);
-   r.rec.to=ymAdd(ym,-1);if(Object.keys(xa).length)r.rec.x=xa;else delete r.rec.x;
-   if(Object.keys(xb).length)n.rec.x=JSON.parse(JSON.stringify(xb));else delete n.rec.x;
-   if(r.rec.since!==undefined){if(obj(r.rec.since))Object.keys(r.rec.since).forEach(m=>{if(!(m<ym))delete r.rec.since[m];});sinceTidy(r,h.k);sinceFold(n,ym,h.k);}
-   P[h.k].splice(h.i+1,0,n);put(n);whoseAll(P,h,v,ym);return n;},
+  // R4. «{Октябрь} и дальше»: from the row's first month the row itself is changed. From any later month the change
+  // is dated on the row, rec.since[that month] (the owner's answer «А» to question 18, 3 November 2026): the sum, the
+  // day, the name, the bank, the currency, the VAT, whose a withdrawal is and «к чему относится» hold from that month
+  // until a later entry says otherwise, and the months before keep theirs. The row stays one row - nothing is split,
+  // so ending it, the tick, a rename, a mark act on the whole line. That month's own sum and day go (x[ym]); what a
+  // founder said of a later month alone stays. The past is never rewritten. v: {name, amt, cur, bank, vat, date,
+  // whose, of} — a date here is the month's new day, for every month on. Until that day a later month SPLIT the
+  // row - the old one ended the month before, a copy with a new id took over (rec.chain) - and what was said of the
+  // line after stopped at the split; a plan may still hold such a chain, and a change of its earlier part stops
+  // there still (`id` is not used any more). Returns the row.
+  onward(P,it,v,id,now,by){const h=rowIn(P,it.row);if(!h||!obj(h.r.rec))return null;const r=h.r,ym=it.occ.ym,k=h.k;
+   const xe=()=>{const x=r.rec.x,e=obj(x)?x[ym]:null;if(obj(e)){if(v.amt!==undefined)delete e.amt;if(isD(v.date))delete e.date;if(!Object.keys(e).length)delete x[ym];if(!Object.keys(x).length)delete r.rec.x;}};
+   if(ym<=r.rec.from){fields(r,v,k==="inflows");whoseOf(r,v,k);if(isD(v.date))r.rec.day=+v.date.slice(8);if(v.of!==undefined&&k==="taxes")r.of=v.of;
+    xe();r.m={t:now,by};sinceTidy(r,k);whoseAll(P,h,v,ym);return r;}
+   // (whose, as an entry keeps it: a founder; «общий» where a name the line goes by from this month on is a
+   // founder's - else nobody's by hand, null, as whoseOf leaves a row)
+   const nms=[v.name!==undefined?v.name:lineAt(r,ym).name].concat(sinceOf(r).filter(x=>x[0]>ym&&x[1].name!==undefined).map(x=>x[1].name));
+   const w=v.whose===undefined||k!=="div"||r.ptax?undefined:FOUNDERS.includes(v.whose)?v.whose:nms.some(n=>byName(n))?"":null;
+   sinceSet(r,k,ym,{name:v.name,cur:v.cur,bank:v.bank,vat:k==="inflows"?v.vat:undefined,amt:v.amt,day:isD(v.date)?+v.date.slice(8):undefined,whose:w,of:k==="taxes"?v.of:undefined});
+   xe();r.m={t:now,by};whoseAll(P,h,v,ym);return r;},
   // [И дальше так же] on a month that was paid at another sum: from the next month on the row is what came.
   same(P,it,id,now,by){return write.onward(P,{row:it.row,occ:{ym:ymAdd(it.occ.ym,1)}},{amt:r2(it.done.got/(it.factor||1))},id,now,by);},
   // «…и дальше» of a delete, of «Не придёт» and of «Не платим»: the repeat ends before this month (the row itself
@@ -6369,12 +6458,12 @@ const Live=(()=>{
  // one the rule answers for — which is what rule.from has to become. `rule` is model.taxes.rules[i].
  const perAt=(per,key)=>perOf(per,key.length===4?key+"-12":key[4]==="Q"?key.slice(0,4)+"-"+pad(+key[5]*3):key);
  const fromOf=(rule,k)=>rule&&rule.first?dueOf(rule,perStep(rule.per,perAt(rule.per,String(rule.first)),k)):"";
- return{compute,upgrade,today,passed,vatFor,taxOn,fromOf,write,blank,single,line:lineAt,day:dayOf,LISTS,SECS,perName,byName,daily,fee,feeNum,home};
+ return{compute,upgrade,today,passed,vatFor,taxOn,fromOf,write,blank,single,join,line:lineAt,day:dayOf,LISTS,SECS,perName,byName,daily,fee,feeNum,home};
 })();
 // For the checks, and for a founder's console. compute is the engine itself and is pure; model() is the same run on
 // what this page holds now; today is the date in London this minute; by is who the platform says is signed in.
 // Nothing here writes anything to the page: `write` changes only the document it is handed.
-window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,daily:Live.daily,fee:Live.fee,feeNum:Live.feeNum,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
+window.__money={compute:Live.compute,upgrade:Live.upgrade,passed:Live.passed,vatFor:Live.vatFor,write:Live.write,join:Live.join,daily:Live.daily,fee:Live.fee,feeNum:Live.feeNum,byName:Live.byName,get today(){return Live.today();},get by(){return Plan.by();},get me(){return ME;},get readOnly(){return RO;},get acts(){return ACT;},get rates(){return RATES;},fxOn,
  // (whatIf: what a list of trial changes does to the plan's figures - nothing on the screen moves; trial: the one on it.)
  whatIf(list){return Trial.ask(list);},get trial(){return Trial.peek();},
  model(opts){return Live.compute(ledIn(),Cash.test.state()||{},Live.today(),opts);}};
@@ -7601,8 +7690,8 @@ const Ed=(()=>{
    :`Сохранено: ${nm}${occ?(onward?` — с ${monG(ym)}`:md&&!L.length?` — только ${mon(ym)}`:""):""}${lt}${L.length&&md&&!onward?` · ${md} — только ${mon(ym)}`:""}${tw.length?" · "+twinWords(tw):""}${moved?" · личный налог — перенесён в «Дивиденды»":""}${st}${wt}${awayT}`;
   const n0=R.whose1?nowOf():null;
   return did(say,(P,now,by)=>{
-   // The card goes with the line: to the new row of the chain «… и дальше» made, to the first month of the repeat
-   // the tick made, to the row a repeat of one month is again.
+   // The card goes with the line: to the first month of the repeat the tick made, to the row a repeat of one month
+   // is again. («… и дальше» splits no row since 3 November 2026: the card stays where it is.)
    const r=onward?from(P,it,v,ch,now,by):apply(P,it,v,ch,now,by);
    if(ch.mon&&v.mon&&it.src==="row")return `${it.id}@${(v.date||it.date).slice(0,7)}`;
    if(ch.mon&&!v.mon&&lone(it))return String(it.row);
@@ -7627,15 +7716,16 @@ const Ed=(()=>{
   return it.src==="tax"?null:r;
  }
  // «{Октябрь} и дальше»: the same change for this month and every month after it — the row itself where this is
- // its first month, a new row that takes over from this month otherwise (Live.write.onward). The past stays as it was;
- // so does what a founder said the line is from a later month on (rec.since): a change of his own.
+ // its first month, dated on it from this month otherwise (Live.write.onward, rec.since: since 3 November 2026 the
+ // row is never split). The past stays as it was; so does what a founder said the line is from a later month on: a
+ // change of his own.
  function from(P,it,v,ch,now,by){
   const o={};["name","amt","cur","bank","date","vat","whose"].forEach(k=>{if(ch[k])o[k]=v[k];});
-  const r=W.onward(P,it,o,uid(),now,by),it2=r?(String(r.id)===String(it.row)?it:Object.assign({},it,{row:String(r.id)})):null;
-  // («это подписка» through Live.write.set, on the first month of the row that holds this one now: the row itself)
+  if(ch.of)o.of=ofStore(v.of);
+  const r=W.onward(P,it,o,uid(),now,by),it2=r?it:null;
+  // («это подписка» through Live.write.set, from this month on, as a name is)
   if(r&&ch.sub)W.set(P,it2,{sub:v.sub},now,by);
-  if(r&&ch.of)r.of=ofStore(v.of);
-  if(r&&ch.name)relink(r,it.list);
+  if(r&&ch.name)relink(r,it.list,it.occ.ym);
   // A date is the day of every month on - and this month's own date, which may be in another month («Перенести…»
   // of 31 October to 7 November): Live.write.onward keeps only the day, and would have put October on the 7th. The
   // date itself is written to this month of the row that holds it now (and is no exception where it is that day).
