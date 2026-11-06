@@ -10238,6 +10238,101 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
 });
 
 // =====================================================================================================================
+// 6 NOVEMBER 2026, THE OWNER'S CHOICE «А»: a part of a line of the plan is said in «Разбор», as the payment is filed.
+// Until then «Частично…» on the line was the only way, and a part already in the statements was not the line's: the
+// row of the part is taken by the line it was said of only when it was uploaded after the mark and is no more than ten
+// days before the line's day. Such a part - a payout paid early, in two halves - stood «вне плана», and the mark was
+// counted in «Денег сейчас» on top of the money the statement had already taken: the balance read £1,000 short.
+// =====================================================================================================================
+await run('inbox-part', '«Часть строки плана…» in «Разбор»: a payment less than a line of its name is filed as that line\'s part, whatever its day - the line closed at it, the rest a row of its own on the founder\'s day - and «Денег сейчас» counts it once', async () => {
+  const UP = ms('2026-10-06T10:00:00Z');
+  const led = ledger(HALF.map((m, i) => sheet('lh' + i, m + '-24', 2700, 'cogs', 'Lena')), [inbox('in1', '2026-10-06', -1000, 'cogs', 'Lena', { at: UP, auto: false })]);
+  const P = planP({ team: [
+    every('lena', 'Lena', 2700, 24, '2026-10', { blk: 'cogs' }),
+    row('greta', 'Greta', 1350, '2026-10-13', { blk: 'cogs' }),
+    row('mila', 'Mila', 850, '2026-10-24', { blk: 'cogs' }),
+  ] });
+  const pg = await scene('inbox part', led, P, { h: 1400 });
+  const now0 = await pg.evaluate(() => window.__money.model().now);
+  // The fault, as the page had it: «Частично…» said of the line once the payment is in the table - eighteen days
+  // before the line's day - leaves the payment «вне плана», and the mark takes £1,000 off «Денег сейчас» again.
+  const before = await pg.evaluate(({ l, T }) => {
+    const L = window.__money, led = JSON.parse(JSON.stringify(l)), P = JSON.parse(JSON.stringify(window.__cash.state()));
+    const r = led.inbox.shift(); led.tx.push({ id: r.id, d: r.d, a: 1000, c: 'cogs', b: 'Wise', l: 'Lena', v: 0, s: 'file', o: { a: -1000, cur: 'GBP', t: 'Lena' }, key: r.key, at: r.at });
+    const M0 = L.compute(led, P, T), it = M0.items.find((x) => x.id === 'lena@2026-10');
+    L.write.partial(P, it, 1000, 'rest0', Date.parse('2026-10-06T11:00:00Z'), 'Mika', T, '2026-10-31');
+    const M = L.compute(led, P, T);
+    return { off: M.months.by['2026-10'].off.by.team.rows.map((x) => x.id), drop: Math.round(M0.now - M.now) };
+  }, { l: store.led.doc, T });
+  same(before, { off: ['in1'], drop: 1000 }, 'the fault: «Частично…» on the line after the part is filed leaves the part «вне плана» and «Денег сейчас» £1,000 short - what this check is about');
+
+  await pg.click('.nav [data-tab="inbox"]');
+  const card = '#view-inbox .op[data-id="in1"]';
+  const say = () => text(pg, `${card} [data-ipsay]`);
+  same(await say(), 'В плане: Lena, £2,700 на 24 окт. Этот платёж меньше.Часть строки плана…', 'the card of the £1,000 to Lena says the plan\'s line of her name is more, with the one button');
+  await pg.fill(`${card} input.lab`, 'Mila');
+  same(await say(), '', 'named «Mila», whose line is £850 - no more than the payment - the card says nothing of a part');
+  await pg.fill(`${card} input.lab`, 'Greta');
+  same(await say(), 'В плане: Greta, £1,350 на 13 окт. Этот платёж меньше.Часть строки плана…', 'named «Greta», it says her line, as the name is typed');
+  await pg.fill(`${card} input.lab`, 'Lena');
+  const led0 = store.led.puts, cash0 = store.cash.puts;
+  await pg.click(`${card} [data-ippart]`);
+  const box = `${card} .ip-ask`;
+  await pg.waitForSelector(box);
+  same(await pg.$$eval(`${box} [data-ippk]`, (l) => l.map((e) => [e.value, e.checked, e.disabled])), [['lena@2026-10', true, false], ['greta', false, false], ['mila', false, true]], 'the step offers the open lines near the payment: Lena\'s October first and chosen, Greta\'s, and Mila\'s £850 shown but not to be chosen');
+  same(await text(pg, `${box} [data-ipnote]`), '«Lena» закроется за октябрь на £1,000 из £2,700. Остаток £1,700 встанет отдельной строкой «Lena — остаток с октября» на день, который вы выберете. Платёж уйдёт в таблицу.', 'the step says what will be done, before the day is named');
+  await pg.click(`${box} [data-ipgo]`);
+  same(await toastText(pg), 'Укажите день, когда заплатите остаток', '«Готово» without the day of the rest is refused in words');
+  await pg.click(`${card} [data-accept]`);
+  same(await toastText(pg), 'Сначала «Готово» или «Отмена» в «Часть строки плана…»', '«В таблицу» waits while the step is open');
+  await sleep(700);
+  same([store.led.puts - led0, store.cash.puts - cash0, store.led.doc.inbox.map((r) => r.id)], [0, 0, ['in1']], '… and nothing has been written: the row is still in «Разбор»');
+  await pg.fill(`${box} [data-ipdate]`, '2026-10-31');
+  ok(/на сб 31\s?окт\. Платёж уйдёт в таблицу\.$/.test(await text(pg, `${box} [data-ipnote]`)), 'the day of the rest is said in the step as it is named', await text(pg, `${box} [data-ipnote]`));
+  await shot(pg, 'inbox-part');
+  await pg.click(`${box} [data-ipgo]`);
+  await puts('led', led0 + 1);
+  await puts('cash', cash0 + 1);
+  same(await toastText(pg), 'В таблицу: 1 · Lena: оплачено £1,000 из £2,700, остаток — на сб 31 окт', 'one toast says both: the row is in the table, the line paid in part, the rest on its day');
+  const filedRow = store.led.doc.tx.find((r) => r.id === 'in1');
+  same([filedRow && [filedRow.c, filedRow.l, filedRow.a], store.led.doc.inbox.length], [['cogs', 'Lena', 1000], 0], 'the row is filed as «В таблицу» files it: COGS · Lena');
+  const doc = store.cash.doc, x = doc.team.find((r) => r.id === 'lena').rec.x['2026-10'], rest = doc.team.find((r) => r.name === 'Lena — остаток с октября');
+  same([x.tx, x.closed, x.paid && [x.paid.amt, x.paid.on, x.paid.tx]], [['in1'], true, [1000, '2026-10-06', ['in1']]], 'Lena\'s October holds the payment by hand (tx, closed) and is marked «Частично» at £1,000 - the mark names the row it was said with');
+  same(rest && [rest.amt, rest.date, rest.carry, rest.blk, !!rest.rec], [1700, '2026-10-31', { ym: '2026-10' }, 'cogs', false], 'the rest is a one-off row of its own: £1,700 on 31 October, from October\'s line');
+  await pg.click('.nav [data-tab="cash"]');
+  let S = await holds(pg, 'a part said in «Разбор»', 'cash');
+  const L = item(S.M, 'lena@2026-10'), R = S.M.items.find((it) => it.name === 'Lena — остаток с октября');
+  same([L.done && [L.done.by, L.done.note, L.done.got, L.done.rows], R && [R.state === 'done', R.amt, R.date]], [['closed', 'partial', 1000, ['in1']], [false, 1700, '2026-10-31']], '… the line is closed at the part, by that row, and the rest waits for its day');
+  same([S.M.months.by['2026-10'].off.by.team.rows.map((r) => r.id), S.M.now], [[], now0], '… and nothing stands «вне плана»: «Денег сейчас» is what it was with the row still in «Разбор» - the part is counted once');
+  same(await text(pg, '#view-cash [data-cs-id="lena@2026-10"] [data-cs-rm]'), 'оплачено £1,000 из £2,700', '«Касса» says the line as «Частично» says it');
+
+  // «Отменить» in the toast takes back both: the row is in «Разбор» again, and the line is as it was, with no rest.
+  await pg.click('.nav [data-tab="inbox"]');
+  await pg.click('#toastUndo');
+  await puts('led', led0 + 2);
+  await puts('cash', cash0 + 2);
+  const x2 = store.cash.doc.team.find((r) => r.id === 'lena').rec.x || {};
+  same([store.led.doc.inbox.map((r) => r.id), store.led.doc.tx.some((r) => r.id === 'in1'), x2['2026-10'] || null, store.cash.doc.team.some((r) => /остаток/.test(r.name))], [['in1'], false, null, false], '«Отменить» takes back the table and the plan together');
+
+  // Said again, and then «Вернуть в план» on the line: the mark goes, and the tie with it - the line waits again.
+  await pg.fill(`${card} input.lab`, 'Lena');
+  await pg.click(`${card} [data-ippart]`);
+  await pg.fill(`${box} [data-ipdate]`, '2026-10-31');
+  await pg.click(`${box} [data-ipgo]`);
+  await puts('cash', cash0 + 3);
+  await pg.click('.nav [data-tab="cash"]');
+  await pg.click('#view-cash [data-ed-open="lena@2026-10"]');
+  await pg.waitForSelector(K('row'));
+  await rowPress(pg, 'unpaid');
+  await puts('cash', cash0 + 4);
+  const x3 = (store.cash.doc.team.find((r) => r.id === 'lena').rec.x || {})['2026-10'] || {};
+  same([x3.tx, x3.closed, x3.paid, store.cash.doc.team.some((r) => r.name === 'Lena — остаток с октября')], [undefined, undefined, undefined, true], '«Вернуть в план» takes the mark and the tie it wrote; the rest stays a row of its own, as after «Частично…»');
+  S = await holds(pg, 'the part taken back to the plan', 'cash');
+  same(item(S.M, 'lena@2026-10').state === 'done', false, '… and Lena\'s October waits for its payment again');
+  await finish(pg);
+});
+
+// =====================================================================================================================
 // 30 OCTOBER 2026, FOUND WHILE THE CHECK «fees» WAS MENDED: the page saved the table as it opened. settle() files the
 // transfers between own accounts that «Разбор» is sure of - a row it filed so itself, a pair whose kind a founder
 // confirmed once («Это перевод»: S.ownSeen), two of the table's own transfers that make a pair - and it was called as

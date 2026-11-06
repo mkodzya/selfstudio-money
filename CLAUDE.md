@@ -505,6 +505,25 @@ a deploy:
   reads a payment filed as one founder's as his, split or not. Withdrawals are
   untouched: `checks/withdrawals/` reads every plan as before. The check
   `pick-pay` holds it.
+- **A part of a line is said in «Разбор», as the payment is filed** (the
+  owner's choice of 6 November 2026, «А»). A payment on a card of «Разбор»
+  that is less than an open line of the plan of its name - the same way and
+  currency, within 45 days of it - says so in plain words, with one button,
+  «Часть строки плана…». The step lists the open lines near it, the line of
+  its name first and chosen, and asks the day of the rest as «Частично…»
+  does. «Готово» files the row as «В таблицу» does and writes
+  `Live.write.part`: the line holds the row - and the rows that had already
+  paid it - by hand, `tx` and `closed`, as «Выбрать платёж…» does, and is
+  marked «Частично» at what came (`paid.amt`; `paid.tx` names those rows, so
+  «Вернуть в план» takes the tie back with the mark); the rest is a row of its
+  own on that day. The engine is untouched: a line so closed is done by its
+  rows, never by the mark, so nothing of it counts in «Денег сейчас» as a mark
+  does - «Частично…» alone, on a part already in the table, left the part
+  «вне плана» and took it off «Денег сейчас» a second time. One toast says
+  both, and its «Отменить» takes back the table and the plan. Not offered on
+  a founder's block, an own transfer, a bank's fee row, a possible repeat, a
+  withdrawal or a computed tax, nor for a payment a line already holds by
+  hand. The check `inbox-part` holds it.
 - **A row's card keeps what is known apart from what can be done** (the
   owner's choice of 1 November 2026, layout 1 «Стопкой»). At rest «Сведения»
   (`.ed-rc-info`) hold no control, for an editor or a reader; every control
