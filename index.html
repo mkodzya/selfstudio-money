@@ -189,6 +189,9 @@ svg.chart .hit{cursor:pointer}
 .op-relearn:empty{display:none}
 /* a row of «За клиентов»: why it waits for its client, and the way to the payment back - plain words, a plain button */
 .op-behalf .note:empty{display:none}
+/* «Часть строки плана…»: the open line of its name a payment is less than, in plain words, and the one button */
+.op-part{font-size:13px;color:var(--text-secondary)}
+.op-part:empty{display:none}
 /* what to put aside for a receipt: plain words, on its card and under its sum in «Распознано» */
 .op-tax:empty{display:none}
 .recog td .op-tax{font-family:var(--sans);font-size:12px}
@@ -1654,9 +1657,11 @@ const noClient=r=>r.c==="behalf"&&!String(r.l||"").trim();
 // The client a label of «За клиентов» names: up to a dash between words - the founders' sheet writes «Client Q —
 // ads» - else the whole label.
 const behalfWho=l=>String(l||"").split(/\s[—–-]\s/)[0].trim();
-function accept(ids){
- // A row whose «Разделить…» stands open waits: what was typed there is not confirmed, and would be lost.
+function accept(ids,quiet){
+ // A row whose «Разделить…» stands open waits: what was typed there is not confirmed, and would be lost. So does one
+ // whose «Часть строки плана…» is open. (`quiet`: «Часть строки плана…» files the row itself, and says it in its own toast.)
  if(ui.split&&ids.includes(ui.split.id)){ids=ids.filter(id=>id!==ui.split.id);if(!ids.length){toast("Сначала «Готово» или «Отмена» в «Разделить…»");return 0;}}
+ if(ui.ipart&&ids.includes(ui.ipart.id)){ids=ids.filter(id=>id!==ui.ipart.id);if(!ids.length){toast("Сначала «Готово» или «Отмена» в «Часть строки плана…»");return 0;}}
  snap();const yms=[];let learned=0,n=0;
  let need=null;
  ids.forEach(id=>{const r=S.inbox.find(x=>x.id===id);if(!r||!r.c)return;
@@ -1669,7 +1674,7 @@ function accept(ids){
  if(!n)return 0;
  if(learned){S.inbox.forEach(r=>{if(!r.auto&&!r.touched)classify(r);});saveRules();}
  saveMonths(yms);saveInbox();renderAll();
- toast(`В таблицу: ${n}`+(learned?` · запомнено правил: ${learned}`:""),true);return n;
+ if(!quiet)toast(`В таблицу: ${n}`+(learned?` · запомнено правил: ${learned}`:""),true);return n;
 }
 
 // ---------- aggregation ----------
@@ -2351,6 +2356,71 @@ function splitForm(r){const st=ui.split,cur=r.o.cur||"GBP",sym=(SYM[cur]||cur).t
   <span class="note" data-spnote>${esc(splitNote(r))}</span>
   <div class="row"><button class="sm primary" data-spok>Готово</button><button class="sm ghost" data-spx>Отмена</button></div></div>`;}
 const splitSaid=r=>`<div class="op-chips sp-said" role="group" aria-label="Чей налог"><span class="lbl" style="align-self:center">Чей налог</span><span>Разделён: ${esc(splitWords(splitOf(r),r.o.cur||"GBP"))}</span><button class="sm ghost" data-spedit="${esc(r.id)}">Изменить</button><button class="sm ghost" data-spnone="${esc(r.id)}">Не делить</button></div>`;
+// «Часть строки плана…» (the owner's choice of 6 November 2026, «А», on: «разбирая выписку, сразу в «Разборе»
+// сказать: это часть строки X, остаток — на такой-то день»). A payment the founder is filing that is less than an
+// open line of the plan of its name says so on its card - «В плане: Lena, £2,700 на 24 ноя. Этот платёж меньше.» -
+// with the one button. The step it opens lists the open lines the payment could be a part of: the same way and
+// currency, within 45 days of it, its own name first and chosen; a line it is not less than is shown and cannot be
+// chosen. The founder names the day of the rest, as in «Частично…». «Готово» files the row into the table as «В
+// таблицу» does, and the line holds it by hand (Live.write.part): closed for its month at what came - with whatever
+// the line had been paid already - and the rest a row of its own on that day. One toast says both, and its
+// «Отменить» takes both back. Nothing is offered on a row of a founder's block, an own transfer, a bank's fee, a row
+// that may be a repeat, a withdrawal or a computed tax; nor is a payment another line already holds by hand. `partM`:
+// the model the cards were drawn by, worked out as «Разбор» is drawn while it is in view and a card may need it.
+let partM=null;
+const partable=r=>!!r&&!!r.c&&r.c!=="skip"&&!FOUNDERS.includes(r.c)&&!ownTr(r)&&!r.maybe&&!r.twin&&!!r.o&&isFinite(+r.o.a)&&+r.o.a!==0&&/^\d{4}-\d{2}-\d{2}$/.test(r.d||"")&&!(Live.fee(r)&&Live.fee(r).whole);
+const partModel=()=>S.inbox.some(partable)&&Plan.doc()?(taxM||Plan.model()):null;
+// The rows a plan holds by hand (tx), on any line, month or tax period: such a payment is not given to a second line
+// here - tied to two, it would close both whole.
+function handHeld(P){const s=new Set(),add=x=>{if(x&&Array.isArray(x.tx))x.tx.forEach(id=>s.add(String(id)));};
+ if(!P)return s;["inflows","team","taxes","other","div"].forEach(k=>(P[k]||[]).forEach(r=>{add(r);if(r&&r.rec&&r.rec.x)Object.values(r.rec.x).forEach(add);}));
+ if(P.tax&&P.tax.per)Object.values(P.tax.per).forEach(add);return s;}
+// The lines a payment may be a part of, by the label `l` (as typed): {it, own, have, other, got, full, ok}, own name
+// first. `have` is what the line was already paid by other rows of the table (`other`), in its currency; `got` that and
+// this payment together; `ok` - less than the line, so a part.
+function partLines(r,l,M){
+ if(!M||!partable(r))return [];const dir=Math.sign(+r.o.a),cur=r.o.cur||"GBP",x=Math.abs(+r.o.a),lab=norm(alias(String(l==null?r.l:l).trim()));
+ const day=d=>Math.abs(dUTC(d)-dUTC(r.d))/864e5,out=[];
+ M.items.forEach(it=>{if(it.wd||it.src==="tax"||it.on===false||!(it.amt>0)||it.done||["off","empty","missed"].includes(it.state)||it.dir!==dir||it.cur!==cur)return;
+  const d=it.date||(it.ym?it.ym+"-15":"");if(!d||day(d)>45)return;
+  const other=(it.rows||[]).map(String).filter(id=>id!==String(r.id)),rs=other.map(id=>S.tx.find(q=>String(q.id)===id));
+  if(rs.some(q=>!q||!q.o||(q.o.cur||"GBP")!==cur))return;
+  const have=round2(rs.reduce((a,q)=>a+Math.abs(+q.o.a||0),0)),got=round2(have+x),full=round2(it.amt*(it.factor||1));
+  const own=!!lab&&(norm(it.label||"")===lab||norm(it.name)===lab);
+  out.push({it,own,have,other,got,full,ok:got<full-0.005,d});});
+ return out.sort((a,b)=>(b.own-a.own)||(day(a.d)-day(b.d))||(a.it.id<b.it.id?-1:1));}
+// The words on the card at rest: the open line of its name the payment is less than, and the button - or nothing.
+function partHint(r,l){if(RO)return "";const L=partLines(r,l,partM).find(x=>x.own&&x.ok);if(!L)return "";const it=L.it,cur=it.cur;
+ return `<span>В плане: ${esc(it.name)}, ${fmt(L.full,L.full%1?2:0,SYM[cur]||"")}${it.date?" на "+dRu(it.date):""}. Этот платёж меньше.</span><button class="sm ghost" data-ippart="${esc(r.id)}">Часть строки плана…</button>`;}
+const partRest=it=>it.carry?it.name:it.name+" — остаток с "+MONGF[+String(it.ym||it.date).slice(5,7)-1];
+function partNote(r){const st=ui.ipart,L=partLines(r,null,partM).find(x=>x.it.id===st.pick);if(!L)return "Отметьте строку плана.";
+ const it=L.it,c=SYM[it.cur]||"",n=v=>fmt(v,v%1?2:0,c),inn=it.dir>0,mo=MONF[+String(it.ym||it.date).slice(5,7)-1].toLowerCase();
+ return `«${it.name}» закроется за ${mo} на ${n(L.got)} из ${n(L.full)}${L.have>0?` (вместе с тем, что уже ${inn?"пришло":"оплачено"}: ${n(L.have)})`:""}. Остаток ${n(round2(L.full-L.got))} встанет отдельной строкой «${partRest(it)}»${st.date?" на "+dRuW(st.date):" на день, который вы выберете"}. Платёж уйдёт в таблицу.`;}
+function partBox(r){const st=ui.ipart,T=Live.today(),ls=partLines(r,null,partM),x=Math.abs(+r.o.a),cur=r.o.cur||"GBP",inn=+r.o.a>0;
+ const opt=L=>{const it=L.it,c=SYM[it.cur]||"",n=v=>fmt(v,v%1?2:0,c);
+  const why=!L.ok?"не больше платежа — это не часть":[L.own?"та же подпись":"",L.have>0?`уже ${inn?"пришло":"оплачено"} ${n(L.have)}`:""].filter(Boolean).join(" · ");
+  return `<label class="ed-pk"><input type="radio" name="ip-pick-${esc(r.id)}" data-ippk value="${esc(it.id)}"${st.pick===it.id?" checked":""}${L.ok?"":" disabled"}><span>${esc(it.name)}${it.date?" · "+dRu(it.date):""} · ${esc(it.bank||"")}</span><span class="note">${esc(why)}</span><span class="ed-pk-a mono">${n(L.full)}</span></label>`;};
+ return `<div class="ed-ask sp-ask ip-ask" data-ip-row="${esc(r.id)}"><b>Какой строки плана часть ${inn?"+":"−"}${fmt(x,x%1?2:0,SYM[cur]||"")}?</b>
+  <div class="ed-pks">${ls.length?ls.map(opt).join(""):`<span class="note">В плане нет открытых строк рядом с этой датой.</span>`}</div>
+  <label class="fld" for="ip-date-${esc(r.id)}"><span>${inn?"Когда придёт остаток":"Когда заплатите остаток"}</span><input id="ip-date-${esc(r.id)}" data-ipdate type="date" min="${T}" max="${dAdd(T,731)}" value="${esc(st.date||"")}"></label>
+  <span class="note" data-ipnote>${esc(partNote(r))}</span>
+  <div class="row"><button class="sm primary" data-ipgo>Готово</button><button class="sm ghost" data-ipx>Отмена</button></div></div>`;}
+// «Готово»: the row into the table, then the line - each refusal in words, and nothing written before all are passed.
+function partGo(r){const st=ui.ipart;if(!st||!r||st.id!==r.id||Plan.lost())return;
+ const M=Plan.model(),L=partLines(r,null,M).find(x=>x.it.id===st.pick),T=Live.today(),f=document.getElementById("ip-date-"+r.id);
+ if(!L||!L.ok)return toast(L?"Платёж не меньше строки — это не часть: строку закроет он весь":"Отметьте строку плана");
+ const d=st.date,inn=L.it.dir>0,no=!d?`Укажите день, когда ${inn?"придёт остаток":"заплатите остаток"}`:d<T?"Остаток — не раньше сегодняшнего дня":d>dAdd(T,731)?"Слишком далёкая дата: прогноз смотрит не дальше двух лет":"";
+ if(no){if(f)f.focus();return toast(no);}
+ if(handHeld(Plan.doc()).has(String(r.id)))return toast("Этот платёж уже выбран для другой строки плана — сначала уберите его там");
+ if((r.c==="rev"||r.c==="cogs"||r.c==="behalf")&&!String(r.l||"").trim()){const e=document.getElementById("l-"+r.id);if(e)e.focus();return toast(r.c==="rev"?"Впишите проект: от кого эти деньги":r.c==="behalf"?"Впишите клиента: за кого заплатили":"Впишите, кому заплатили");}
+ ui.ipart=null;if(!accept([r.id],true))return renderInbox();
+ const it=L.it,c=SYM[it.cur]||"",n=v=>fmt(v,v%1?2:0,c),when=dRuW(d)+(d.slice(0,4)===T.slice(0,4)?"":" "+d.slice(0,4));
+ const say=`${it.name}: ${inn?"получено":"оплачено"} ${n(L.got)} из ${n(L.full)}, остаток — на ${when}`;let tok=-1;
+ const did=Plan.edit(say,(P,now,by)=>{tok=Plan.top();Live.write.part(P,it,[String(r.id)].concat(L.other),L.got,uid(),now,by,r.d,d);});
+ toast("В таблицу: 1 · "+(did?say:"план не изменён"),()=>{if(did&&Plan.top()===tok)Plan.undo();undo();});}
+// … and the words on a card at rest, again, as its name is typed or the plan changes under it.
+function partDraw(){const v=$("#view-inbox");if(!S.loaded||!v||v.hidden)return;partM=partModel();
+ v.querySelectorAll("[data-ipsay]").forEach(n=>{const h=n.closest("[data-id]"),r=h&&S.inbox.find(q=>q.id===h.dataset.id),i=h&&h.querySelector("input.lab");n.innerHTML=r?partHint(r,i?i.value:null):"";});}
 // What to put aside for a receipt (30 October 2026, Mika: «давай», on: «Подсказка «отложите £N на налоги» у
 // поступления с VAT и у поступления на Точку»): one plain muted line on its card and under its sum in «Распознано» -
 // «отложите £200 на VAT», «отложите ₽9,000 на УСН (6%)». The figure is the engine's own (Live.taxOn): the receipt's
@@ -2389,6 +2459,7 @@ function opCard(r,st,usual){
    ${r.c==="rev"&&(r.o.cur==="GBP"||+r.v>0)?`<label class="fld vat" for="v-${r.id}"><span>VAT, £</span><input class="vat" id="v-${r.id}" data-f="v" type="number" step="any" value="${r.v||""}" placeholder="0"></label>`:""}
    <span class="op-actions"><button class="ghost" data-drop title="Убрать из разбора, в таблицу не попадёт">Убрать</button><button class="primary" data-accept ${r.c?"":"disabled"}>${!r.c?"Выберите блок":r.c==="skip"?"Убрать как перевод":sgn(r)<0?"В таблицу как возврат":"В таблицу"}</button></span>
   </div>
+  ${ui.ipart&&ui.ipart.id===r.id?partBox(r):`<div class="row op-part" data-ipsay>${partHint(r)}</div>`}
   <div class="note op-tax" data-taxsay>${esc(taxSay(r))}</div>
   ${r.c==="behalf"&&(r.dir<0||noClient(r))?`<div class="row op-behalf"><span class="note" data-noclient>${noClient(r)?esc(NOCLIENT):""}</span>${r.dir<0?'<button class="sm ghost" data-behalf-back>+ возмещение в «Поступления»</button>':""}</div>`:""}
   <div class="note op-relearn" data-relearn>${esc(relearnSay(r))}</div></article>`;
@@ -2401,7 +2472,8 @@ function pairCard(x,y){
 }
 function renderInbox(){
  const rows=S.inbox.slice().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0),g={ask:[],tr:[],dup:[],new:[],ok:[]},big=bigOut();
- rows.forEach(r=>g[rowState(r,big)].push(r));taxM=$("#view-inbox").hidden?null:taxModel();
+ rows.forEach(r=>g[rowState(r,big)].push(r));taxM=$("#view-inbox").hidden?null:taxModel();partM=$("#view-inbox").hidden?null:partModel();
+ if(ui.ipart&&!partable(S.inbox.find(q=>q.id===ui.ipart.id)))ui.ipart=null;
  const b=$("#inboxBadge"),todo=rows.length;b.hidden=!todo;b.textContent=todo;
  const el=$("#view-inbox");
  if(!rows.length){el.innerHTML=`<div class="page-head"><div><h1>Разбор</h1></div></div><div class="empty"><b>Разбирать нечего</b>Новые операции появятся здесь после загрузки выписок.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-demo class="ghost">Показать на примере</button></div></div>`;return;}
@@ -3869,6 +3941,10 @@ const Cash=(()=>{
 //                                  before) it writes what it always wrote: no date, mon = the NEXT month, named
 //                                  after the line it was said of. Not for a computed tax. Returns the new row
 //                                  (null if nothing is left)
+//  part(P, it, ids, got, id, now, by, on, date)   «Часть строки плана…» in «Разбор»: what partial writes, and the
+//                                  line holds the rows `ids` by hand (tx, closed) - the payment being filed first,
+//                                  then any the line was already paid by; paid.tx names them, so that unmark («Вернуть
+//                                  в план») takes the tie back with the mark. Not for a withdrawal or a computed tax
 //  off(P, it) / on(P, it)          the tick: row.on=false · x[ym].off for one month · per.none («не платим») for a tax
 //  tx(P, it, id) / notx / closed   «Это оно» / «Нет, другой» / «Это всё» — on the row or x[ym]
 //  pick(P, it, id, drop)           «Выбрать платёж…»: tx = [id] and closed; id "" — no tx, no closed, drop → notx
@@ -6295,7 +6371,11 @@ const Live=(()=>{
     if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose!==undefined)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
   mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
-  unmark(P,it){const s=slot(P,it);if(s){delete s.paid;tidy(P,it);}},
+  // (A mark «Часть строки плана…» wrote names the rows it tied the line to: they go with it, and the line waits for
+  // its payment again as it did before - the rows dealt by the page as any row is.)
+  unmark(P,it){const s=slot(P,it);if(s){const t=obj(s.paid)&&Array.isArray(s.paid.tx)?s.paid.tx.map(String):null;
+   if(t){const left=arr(s.tx).map(String).filter(x=>!t.includes(x));if(left.length)s.tx=left;else{delete s.tx;delete s.closed;}}
+   delete s.paid;tidy(P,it);}},
   // A change to the plan must not deal the rows of a marked withdrawal over (D2). The page makes every change
   // between these two. `see`, BEFORE it: what each withdrawal whose mark can count holds of every taking, as the
   // table lies - and what every other marked withdrawal holds of the takings of a balance's own day (`day`) -
@@ -6354,6 +6434,17 @@ const Live=(()=>{
    if(z.whose===undefined&&it.wd&&FOUNDERS.includes(it.whose))z.whose=it.whose;
    if(h.k==="taxes")z.of=obj(r.of)&&r.of.part?{r:r.of.r,p:r.of.p,part:true}:false;
    P[h.k].splice(h.i+1,0,z);return z;},
+  // «Часть строки плана…» (the owner's choice of 6 November 2026, «А»): a payment filed from «Разбор» is a part of
+  // the line the founder names, whatever its day or its size. «Частично» alone could not say it: the row of the part
+  // is taken by the line it was said of only when it was uploaded after the mark and is no more than ten days before
+  // the line's day, so a part already in the statements stood «вне плана», and the mark was counted in «Денег
+  // сейчас» on top of the money the statement had already taken away. Here the line holds the row (and the rows it
+  // had already been paid by) as «Выбрать платёж…» does - tx and closed, at what they brought - and is marked
+  // «Частично» at that sum, so that it reads as one and its rest is a row of its own on the founder's day. A line
+  // closed so is done by its rows, never by the mark: nothing of it counts in «Денег сейчас» as a mark does.
+  part(P,it,ids,got,id,now,by,on,date){if(it.wd||it.src==="tax")return null;const z=write.partial(P,it,got,id,now,by,on,date),s=slot(P,it,true);if(!s||!obj(s.paid))return z;
+   const t=[...new Set(arr(ids).map(String))];if(!t.length)return z;s.tx=t;s.closed=true;s.paid.tx=t.slice();
+   if(Array.isArray(s.notx)){s.notx=s.notx.filter(x=>!t.includes(String(x)));if(!s.notx.length)delete s.notx;}return z;},
   // A change to one line. A one-off row: its own fields. A month of a repeating row («Только {октябрь}», R3): the
   // amount and the date go into that month's exception. A name, a bank, a currency, the VAT tick or «это подписка»
   // cannot differ for one month: they are what the line IS, and they hold from that month on (the owner's decision of
@@ -7353,7 +7444,7 @@ const Ed=(()=>{
    // (what may be corrected is said only where it may: not of a tax that is closed, and not to a reader)
    made=p&&r?`Посчитано: ${r.rate}% ${r.base==="share"?`от поступлений на ${r.acct.replace("|"," ")}`:"сверху счетов клиентов с VAT"} за ${p.pname} — начислено ${tx10(p.accF)}${p.accP>0.5?`, по плану ещё ${tx10(p.accP)}`:""}.${!RO&&editable(it)?" Сумму по декларации и дату можно поправить.":""}`:"Посчитано по правилу: налог студии за период.";}
   else made=`В плане: ${it.c0?(it.who?`вписал ${it.who} `:"вписано ")+dRu(Live.day(it.c0)):"из старой Кассы"} · ${it.ptax?"личный налог — в «Дивидендах»":it.wd?(FN[it.whose]?`вывод ${FN[it.whose]}: закроется тем, что возьмёт ${FN[it.whose]}`:"вывод: закроется тем, что возьмут фаундеры"):it.list==="taxes"?(it.of?`${it.of.part?"часть":"весь"} расчётного налога за период`:"налог студии — закрою по сумме"):it.how&&it.label?`в таблице это ${it.label}`:"такого названия в таблице нет — закрою по сумме"}.`;
-  if(d)st.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":d.note==="hand"?"Закрыто платежом, который выбрали вы":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":"Закрыто: остаток по этой строке не жду.");
+  if(d)st.push(d.by==="row"?`${d.note==="amount"?"Закрыто по сумме":d.note==="hand"?"Закрыто платежом, который выбрали вы":"Закрыто выпиской"}${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}.`:d.by==="mark"?`Отмечено вручную ${dRu(d.on)}${it.mark&&it.mark.by?" · "+it.mark.by:""}. Когда выписка покажет платёж, он встанет на место отметки.`:d.by==="ok"?"Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.":d.by==="legacy"?"Отмечено ещё в старой Кассе.":d.note==="partial"?`Закрыто платежом, который выбрали вы${d.label||d.on?": "+[d.label,d.on?dRu(d.on):""].filter(Boolean).join(", "):""}. Остаток — отдельной строкой.`:"Закрыто: остаток по этой строке не жду.");
   // What has happened is counted at the rate of its own day, and the card says which.
   if(d&&d.fx>0)st.push(d.fxBy==="rows"?`В таблице по курсу £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`:`Курс ${dRu(d.fxDay)}: £1 = ${+(+d.fx).toFixed(4)} ${it.cur}.`);
   // (A part paid is in the month's own words - «частично £X из £Y» - and is not said twice.)
@@ -8687,7 +8778,7 @@ Plan.watch(upNeedDraw);
 // (… and so does the balance it asks for under a statement's card: upBal.)
 Plan.watch(upBalDraw);
 // (… and what «Разбор» says to put aside for a receipt goes by the plan's tax rules and periods: taxSay.)
-Plan.watch(taxDraw);
+Plan.watch(taxDraw);Plan.watch(partDraw);
 // (… and «Закрыть {месяц}» of «Месяцы» by the months the plan holds stamped, and by the plan's lines: Closes. Drawn
 // only while that tab is in view - it comes before the plan, often.)
 Plan.watch(()=>{if(S.loaded&&!$("#view-dashboard").hidden)renderDash();});
@@ -8702,7 +8793,7 @@ Plan.watch(()=>{if(S.loaded&&!$("#view-dashboard").hidden)renderDash();});
 // «Что если» (data-wi-*) is in neither list on purpose: a trial changes no document, and a reader may ask too.
 const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]","[data-ed-pick]","[data-ed-undo]","[data-ed-mvall]",'button[data-ed-at="need"]',
  "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
- "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","[data-taxsplit]","[data-spf]","[data-sprest]","[data-spok]","[data-spx]","[data-spedit]","[data-spnone]","input.lab","input.vat","[data-accept]","[data-behalf-back]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
+ "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","[data-taxsplit]","[data-spf]","[data-sprest]","[data-spok]","[data-spx]","[data-spedit]","[data-spnone]","input.lab","input.vat","[data-accept]","[data-behalf-back]","[data-ippart]","[data-ipgo]","[data-ipx]","[data-ippk]","[data-ipdate]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
  "[data-fx]","[data-fxo]","[data-fxdo]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-up-bamt]","[data-up-bsave]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
  "[data-demo]","#toastUndo","[data-td-fill]","[data-td-helper]",'[data-tabgo="upload"]',"[data-mc-open]","[data-mc-do]","[data-mc-x]","[data-mc-go]"].join(",");
 const KEEP="[data-ed-cl],[data-setc],[data-cs-fix],[data-taxowner]";
@@ -8851,7 +8942,7 @@ function setTab(t){if(t==="upload"&&RO)t="settings";if(ui.tab==="people"&&t!=="p
  TABS.forEach(v=>$("#view-"+v).hidden=v!==t);
  try{history.replaceState(null,"","#"+t);}catch(e){}
  window.scrollTo(0,0);
- if(t==="today")Today.render();if(t==="upload"){upNeedDraw();upBalDraw();}if(t==="inbox")taxDraw();if(t==="dashboard")renderDash();if(t==="reports")renderReports();if(t==="cash")Cash.show();if(t==="settings")Ed.settingsDraw();if(t==="people")People.show();}
+ if(t==="today")Today.render();if(t==="upload"){upNeedDraw();upBalDraw();}if(t==="inbox"){taxDraw();partDraw();}if(t==="dashboard")renderDash();if(t==="reports")renderReports();if(t==="cash")Cash.show();if(t==="settings")Ed.settingsDraw();if(t==="people")People.show();}
 // «Сегодня» and «Касса» are worked out from the ledger as much as from the plan, so they follow it too; each draws
 // only while it is the tab in view.
 function renderAll(){if(!S.loaded)return;$("#demoBanner").hidden=!S.tx.concat(S.inbox).some(r=>r.s==="demo");renderDash();renderReports();renderUpload();renderInbox();renderLedger();renderSettings();People.draw();Cash.draw();Today.render();}
@@ -8918,6 +9009,13 @@ document.addEventListener("click",ev=>{
   return void Ed.add("inflows",{name:behalfWho(f?f.value:r.l),amt:amt>0?String(amt):"",cur:CURS.includes(r.o.cur)?r.o.cur:"GBP",bank:BANKS.includes(r.b)?r.b:"Wise"});}
  if((x=c("[data-setc]"))){r=inboxRow(t);if(!r)return;unpair(r);r.c=x.dataset.setc;if(r.c!=="tax"){delete r.split;if(ui.split&&ui.split.id===r.id)ui.split=null;}r.auto=false;r.touched=true;r.l=r.c==="skip"?"":r.l;delete r.vSet;r.v=vatOf(r);saveInbox();renderInbox();
   const f=document.getElementById("l-"+r.id);if(f&&!f.value)f.focus();return;}
+ // «Часть строки плана…»: the step opens on the card with the line of the row's own name chosen, the day of the rest
+ // left for the founder to name; «Отмена» shuts it with nothing written; «Готово» files the row and changes the line.
+ if(c("[data-ippart]")){r=inboxRow(t);if(!r||Plan.lost())return;const f=document.getElementById("l-"+r.id),L=partLines(r,f?f.value:null,partM||partModel()).find(x=>x.own&&x.ok);
+  if(f){r.l=f.value.trim();r.auto=false;r.touched=true;saveInbox();}
+  ui.ipart={id:r.id,pick:L?L.it.id:"",date:""};renderInbox();const e=document.getElementById("ip-date-"+r.id);if(e)e.focus();return;}
+ if(c("[data-ipx]")){r=inboxRow(t);ui.ipart=null;renderInbox();const b=r&&document.querySelector(`.op[data-id="${r.id}"] [data-ippart]`);if(b)b.focus();return;}
+ if(c("[data-ipgo]")){r=inboxRow(t);return partGo(r);}
  if(c("[data-drop]")){r=inboxRow(t);if(!r)return;unpair(r);S.inbox=S.inbox.filter(q=>q!==r);saveInbox();renderInbox();$("#demoBanner").hidden=!S.tx.concat(S.inbox).some(q=>q.s==="demo");return toast("Убрано из разбора");}
  if(c("[data-nottwin]")){r=inboxRow(t);if(r){r.twin=null;saveInbox();renderInbox();}return;}
  if(c("[data-editrow]")){r=inboxRow(t);if(r){r.auto=false;r.touched=true;saveInbox();renderInbox();const e=document.querySelector(`.op[data-id="${r.id}"]`);if(e)e.scrollIntoView({block:"center",behavior:"smooth"});}return;}
@@ -8979,6 +9077,7 @@ document.addEventListener("keydown",ev=>{
  const t=ev.target;if(ev.key!=="Enter"||!t.matches)return;
  if(t.matches("[data-row],[data-repgo],[data-reprow],[data-focus]"))return t.click();
  if(t.matches("#view-inbox input.lab,#view-inbox input.vat")){const r=inboxRow(t);if(r&&r.c){if(t.dataset.f==="v"){r.v=round2(+t.value||0);r.vSet=true;}else{r.l=t.value.trim();r.auto=false;r.touched=true;if(!r.vSet)r.v=vatOf(r);}accept([r.id]);}}
+ if(t.matches("[data-ipdate]")){ev.preventDefault();const r=inboxRow(t);if(ui.ipart&&r)ui.ipart.date=t.value;return partGo(r);}
  if(t.id==="ownIn"){const b=document.querySelector("[data-ownadd]");if(b)b.click();}
  // (the field lets go of the cursor first: a box being typed into is not drawn again, and this one has its answer)
  if(t.matches("[data-up-bamt]")){const b=t.closest("[data-up-bacct]").querySelector("[data-up-bsave]");if(b){t.blur();b.click();}}
@@ -8989,9 +9088,14 @@ document.addEventListener("input",ev=>{const t=ev.target;
  // take it (the field gives it to the row as the cursor leaves; the card is not drawn again under the cursor).
  if(t.matches&&t.matches("#view-inbox input.lab")){const r=inboxRow(t),op=t.closest(".op"),n=op&&op.querySelector("[data-relearn]");if(r&&n)n.textContent=relearnSay(Object.assign({},r,{l:t.value.trim(),auto:false}));
   // … and, on a row of «За клиентов», whether it still waits for its client.
-  const w=op&&op.querySelector("[data-noclient]");if(r&&w)w.textContent=noClient(Object.assign({},r,{l:t.value}))?NOCLIENT:"";}
+  const w=op&&op.querySelector("[data-noclient]");if(r&&w)w.textContent=noClient(Object.assign({},r,{l:t.value}))?NOCLIENT:"";
+  // … and whether it is less than an open line of the plan of that name («Часть строки плана…»).
+  const ps=op&&op.querySelector("[data-ipsay]");if(r&&ps)ps.innerHTML=partHint(r,t.value);}
  // What to put aside for a receipt, said again as its VAT is typed - the VAT as «В таблицу» will take it.
  if(t.matches&&t.matches("#view-inbox input.vat")){const r=inboxRow(t);if(r)retax(t,Object.assign({},r,{v:round2(+t.value||0)}));}
+ // The day of the rest and the line chosen in «Часть строки плана…», kept as they are given and said again under them.
+ if(t.matches&&t.matches("[data-ipdate],[data-ippk]")&&ui.ipart){if(t.matches("[data-ipdate]"))ui.ipart.date=t.value;else if(t.checked)ui.ipart.pick=t.value;
+  const r=inboxRow(t),n=t.closest(".ip-ask")&&t.closest(".ip-ask").querySelector("[data-ipnote]");if(r&&n)n.textContent=partNote(r);}
  // A part typed in «Разделить…» is kept as it is typed, so a press on «Остаток» draws the form again with it.
  if(t.matches&&t.matches("[data-spf]")&&ui.split){ui.split.v[t.dataset.spf]=t.value;const r=spRow(ui.split.id),box=t.closest(".sp-ask"),n=box&&box.querySelector("[data-spnote]");if(r&&n)n.textContent=splitNote(r);}
  // The figure under a statement's card, typed over the page's own: how far apart they are, as «Вписать остаток» says it.
