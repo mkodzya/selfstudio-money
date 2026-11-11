@@ -486,7 +486,11 @@ a deploy:
   under «Ещё…» («Выбрать платёж из выписки…»), the table's payments near its
   day, of any label and any bank -
   those of the line's own label and those already named for another line
-  first, then the nearest in sum. The
+  first, then the nearest in sum, twelve in all; and after them, since
+  11 November 2026, the payments nothing holds that are big enough to pay
+  the line whole, nearest in day, up to twelve more (one transfer for
+  several lines under another name is far from each line's sum, and fell
+  off the twelve). The
   choice is the hand tie `tx` plus `closed` (`Live.write.pick`), so nothing
   else of the label is dealt on top; «Ни один» clears both and writes the
   rows that closed the line into its `notx` (it is not offered on a line a

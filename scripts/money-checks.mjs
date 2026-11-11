@@ -10235,6 +10235,39 @@ await run('pick-pay', '«Выбрать платёж…»: a line takes the paym
   S = await holds(pg2, 'a line paid by part of a payment', 'cash');
   same([item(S.M, 'w').done && item(S.M, 'w').done.note, off(S.M).find((r) => r[0] === 'q3')], ['hand', ['q3', 250, { of: 400, took: 150 }]], '… and it does: the line is closed by the payment, and the £250 it did not take stands «вне плана», as a part');
   await pg2.context().close();
+  // (11 November 2026.) One payment for three invoices, filed under the name on the transfer - not the lines' -
+  // and so near no line's sum and of no line's label: fourteen payments of other names are nearer in sum to the
+  // biggest line, and the twelve offered were all of them. A payment nothing holds, big enough to pay the line
+  // whole, is offered all the same - or the first of its lines has no way to name it.
+  const pg3 = await scene('pick pay 3', ledger([
+    filed('g1', '2026-10-04', 3400, 'rev', 'Marlow Group', { b: 'Barclays', at: UP }),
+    filed('g0', '2026-10-04', 300, 'rev', 'Marlow Group', { b: 'Barclays', at: UP }),
+    ...Array.from({ length: 14 }, (_, i) => filed('o' + i, '2026-10-0' + (1 + (i % 5)), 1800 + 10 * i, 'rev', 'Other Client ' + i, { at: UP })),
+  ]), planP({ inflows: [row('a', 'Halden Suite', 1900, '2026-10-03'), row('b', 'Halden Data', 700, '2026-10-03'), row('c', 'Halden Letters', 450, '2026-10-03')] }), { h: 1800 });
+  await pg3.click('.nav [data-tab="cash"]');
+  n = store.cash.puts;
+  const pick3 = async (id, rowId) => {
+    if (await pg3.$(`#view-cash [data-ed-card="row"][data-ed-id="${id}"]`)) await shutRow(pg3);
+    await pg3.click(`#view-cash [data-ed-open="${id}"]`);
+    await pg3.waitForSelector(K('row'));
+    await rowPress(pg3, 'pick');
+    const box = '#view-cash [data-ed-askbox="pick"]';
+    const offered = await pg3.$$eval(`${box} [data-ed-pick]`, (l) => l.map((e) => e.value));
+    await pg3.check(`${box} [data-ed-pick][value="${rowId}"]`);
+    const said = await text(pg3, `${box} [data-ed-picknote]`);
+    await pg3.click('#view-cash [data-ed-go="pick"]');
+    await puts('cash', ++n);
+    return { offered, said };
+  };
+  x = await pick3('a', 'g1');
+  same([x.offered.includes('g1'), x.offered.includes('g0'), x.offered.length > 12], [true, false, true], 'a payment nothing holds and big enough for the line is offered after the twelve nearest in sum - and one too small to pay the line is not added');
+  same(x.said, 'Этот платёж закроет: Halden Suite £1,900 из £3,400. Остаток £1,500 встанет «вне плана».', '… and named for «Halden Suite», the question says what the line takes of it');
+  await pick3('b', 'g1');
+  x = await pick3('c', 'g1');
+  same(x.said, 'Этот платёж закроет: Halden Letters £450 + Halden Suite £1,900 + Halden Data £700 = £3,050 из £3,400. Остаток £350 встанет «вне плана».', 'the same payment for the other two lines: three invoices in one transfer');
+  S = await holds(pg3, 'one payment of another name for three lines', 'cash');
+  same([['a', 'b', 'c'].map((id) => item(S.M, id).done && item(S.M, id).done.rows), off(S.M).find((r) => r[0] === 'g1')], [[['g1'], ['g1'], ['g1']], ['g1', 350, { of: 3400, took: 3050 }]], '… all three closed by it, and the £350 no line took stands «вне плана» as a part');
+  await pg3.context().close();
 });
 
 // =====================================================================================================================
