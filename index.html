@@ -1374,8 +1374,63 @@ async function pdfLines(buf){
    lines.push({p:n,y:l.y,h:l.h,cells});});}
  return lines;
 }
+// Mosta's «Account statement» (PDF, one section for each of the wallet's accounts): the same money as its list of
+// orders (parseWallet), printed as a statement - every sum with its token beside it («1,020.00 USDT»), which the
+// reader of bank statements below takes for words, so it found the table and read no row of it (11 November 2026).
+// A payment to a person is printed twice: on the dollar account as an exchange of dollars for the token it is sent
+// in, and on that token's account as a «Crypto Withdrawal • {name}», each with the one fee beside it. So, as in the
+// list of orders: a withdrawal is a payment out to the person it names, at what the dollar account gave for it - the
+// exchange of its day and its fee, the fee inside - or, where no exchange answers it, at its sum and fee; a deposit
+// from a bank is the money in and its fee out, two rows (the statement prints what was left after the fee); an
+// exchange alone moves nothing. A token pegged to the dollar is dollars. A kind this has not met is left out and
+// counted. No balance is taken from it: the wallet's accounts are one account of the plan.
+function parseMostaPdf(lines){
+ const all=lines.map(l=>l.cells.map(c=>c.s).join(" ")).join("\n");
+ if(!/mosta\.io/i.test(all)||!/\d\s*USD[A-Z]\b/.test(all)||!/money out/i.test(all))return null;
+ const pad=n=>String(n).padStart(2,"0"),MONS="jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec",DATE=new RegExp("^(\\d{1,2})\\s+("+MONS+")[a-z]*\\.?,?\\s+(20\\d{2})\\b","i"),NUM=/^(\d[\d,]*(?:\.\d+)?)(?:\s*([A-Z]{3,5})\b)?/;
+ const num=z=>+String(z).replace(/,/g,""),usd=t=>/^USD[A-Z]?$/.test(t),say=v=>String(+(+v).toFixed(6));
+ let col=null,cur=null;const ops=[];
+ for(const l of lines){const cs=l.cells;if(!cs.length)continue;
+  const o=cs.find(c=>/^money out$/i.test(c.s)),i=cs.find(c=>/^money in$/i.test(c.s));
+  if(o&&i){const d=cs.find(c=>/^description$/i.test(c.s));col={out:o.x0,in:i.x0,desc:d?d.x0:o.x0-150};cur=null;continue;}
+  if(!col)continue;
+  const f=cs[0],dm=f.x0<col.desc-8?DATE.exec(f.s):null,words=cs.filter(c=>c.x0>=col.desc-8&&c.x0<col.out-8).map(c=>c.s).join(" ").trim();
+  if(dm){const at=x=>{const c=cs.find(c=>Math.abs(c.x0-x)<=12),m=c&&NUM.exec(c.s);return m?{v:num(m[1]),tok:m[2]||""}:null;},out=at(col.out),inn=at(col.in);
+   cur={d:dm[3]+"-"+pad(MONS.split("|").indexOf(dm[2].toLowerCase())+1)+"-"+pad(dm[1]),t:words,out:out?out.v:0,in:inn?inn.v:0,tok:(out||inn||{tok:""}).tok,fee:0,rate:0,more:[],pg:l.p};ops.push(cur);continue;}
+  if(cur&&words&&f.x0>=col.desc-8&&l.p===cur.pg){let m;
+   if((m=/^fee:\s*(\d[\d,]*(?:\.\d+)?)/i.exec(words)))cur.fee=num(m[1]);
+   else if((m=/^fx rate\b.*=\s*[A-Z]{3,5}\s+(\d+(?:\.\d+)?)/i.exec(words)))cur.rate=+m[1];
+   else if(!/^from:/i.test(words))cur.more.push(words);
+   continue;}
+  cur=null;
+ }
+ if(!ops.length)return null;
+ const rows=[],left={},miss=k=>{left[k]=(left[k]||0)+1;},swaps=ops.filter(o=>/^exchange\b/i.test(o.t)&&o.out>0),took=new Set();
+ ops.forEach(o=>{let m;const kind=o.t.split(/\s*[•·]\s*/)[0].trim()||"без вида";
+  if(/^exchange\b/i.test(o.t))return;
+  if(!usd(o.tok))return miss(kind+(o.tok?" "+o.tok:""));
+  if(/^(ach|wire|swift|sepa|bank)\b.*\bdeposit$/i.test(kind)&&o.in>0){
+   const id=(o.more.join(" ").match(/\b\d{9,}\b/)||[""])[0];
+   rows.push({d:o.d,a:round2(o.in+o.fee),cur:"USD",hasCur:true,t:"Пополнение кошелька с банковского счёта · "+kind,p:"",h:"",tid:id});
+   if(o.fee>0)rows.push({d:o.d,a:-round2(o.fee),cur:"USD",hasCur:true,t:"Комиссия за пополнение кошелька · "+kind,p:"Mosta",h:"",tid:id?id+"-fee":""});
+   return;}
+  if((m=/^crypto withdrawal\s*[•·]\s*(.+)$/i.exec(o.t))&&o.out>0){
+   const e=swaps.find(e=>!took.has(e)&&e.d===o.d&&Math.abs(e.fee-o.fee)<0.005&&(!e.rate||Math.abs((e.out-e.fee)*e.rate-o.out)<=Math.max(0.05,0.002*o.out)));
+   if(e)took.add(e);
+   rows.push({d:o.d,a:-round2(e?e.out:o.out+o.fee),cur:"USD",hasCur:true,t:"Перевод "+say(o.out)+" "+o.tok+(o.fee>0?", комиссия "+say(o.fee):"")+" · "+kind,p:(m[1]+" "+o.more.join(" ")).trim(),h:"",tid:""});
+   return;}
+  miss(kind);
+ });
+ // Two payments alike in everything - a day, a person, a sum - are two payments: a row is known by these, and the
+ // second would be taken for the first read again.
+ const seen={};rows.forEach(r=>{if(r.tid)return;const k=[r.d,r.a,r.t,r.p].join("|");seen[k]=(seen[k]||0)+1;if(seen[k]>1)r.t+=" · "+seen[k]+"-й за день";});
+ const said=Object.keys(left).map(k=>k+" — "+left[k]).join(", ");
+ if(!rows.length)return{error:"В этой выписке Mosta нет операций, которые я умею читать"+(said?": "+said:"")+"."};
+ return{bank:"Mosta",defCur:"USD",rows,check:null,pdf:true,acc:"",ownAccs:[],left:said};
+}
 function parsePdfLines(lines,name){
  if(!lines.length)return{error:"В этом PDF нет текста: похоже, это скан или фото. Нужна выписка, скачанная из онлайн-банка."};
+ const mosta=parseMostaPdf(lines);if(mosta)return mosta;
  const pad=n=>String(n).padStart(2,"0"),MONS="jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec",mi=m=>MONS.split("|").indexOf(m.slice(0,3).toLowerCase())+1;
  const all=lines.map(l=>l.cells.map(c=>c.s).join(" ")).join("\n");
  let end="",m;const re=new RegExp("(\\d{1,2})\\s+("+MONS+")[a-z]*\\.?,?\\s+(20\\d{2})","gi"),re2=/(\d{1,2})[\/.](\d{1,2})[\/.](20\d{2})/g;

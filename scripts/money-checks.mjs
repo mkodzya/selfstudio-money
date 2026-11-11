@@ -4871,6 +4871,47 @@ await run('rv-tochka', 'a Tochka statement prints every sum without a sign: whic
   await pg.context().close();
 });
 
+await run('mosta-pdf', 'Mosta\'s «Account statement» in PDF is read as its list of orders is: a withdrawal is a payment to the person it names at what the dollar account gave for it, a deposit is the money in and its fee out, an exchange is no row', async () => {
+  // The statement as Mosta prints it (11 November 2026): a section for each account of the wallet, every sum with
+  // its token beside it, a name or a balance wrapped onto the next line, two sums run into one cell. The reader of
+  // bank statements found the table and read no row of it. The layout is the statement's; names and sums are made up.
+  const cell = (x0, x1, s) => ({ x0, x1, s });
+  const HEAD = [cell(50, 100, 'DATE (UTC)'), cell(113, 136, 'TYPE'), cell(143, 203, 'DESCRIPTION'), cell(293, 348, 'MONEY OUT'), cell(377, 422, 'MONEY IN'), cell(461, 503, 'BALANCE')];
+  const FOOT = (n) => [[cell(50, 255, '© 2026 BUYEASY TECHNOLOGY CO., LTD'), cell(280, 322, 'mosta.io')], [cell(50, 248, '320 Matheson Blvd W Suite 211'), cell(504, 545, `page ${n} of 3`)], [cell(50, 66, '0H2')]];
+  const TOP = (cur, open) => [[cell(416, 545, 'Account statement')], [cell(50, 151, 'Demo Studio ltd'), cell(330, 393, 'Account name'), cell(440, 460, 'Main')], [cell(330, 370, 'Currency'), cell(440, 486, cur)],
+    [cell(50, 171, 'Balance summary')], [cell(50, 121, 'Opening balance'), cell(217, 290, open)], [cell(50, 363, 'Transactions from 30 Oct 2026 to 11 Nov 2026')]];
+  const page = (p, rows) => rows.map((cells, i) => ({ p, y: 780 - 13 * i, h: 9, cells }));
+  const pdf = [
+    ...page(1, [...TOP('USDT Tron', '0.00 USDT'), HEAD,
+      [cell(50, 99, '6 Nov 2026'), cell(113, 131, 'CRY'), cell(143, 255, 'Crypto Withdrawal • Lena'), cell(293, 346, '200.00 USDT'), cell(461, 506, '0.00 USDT')],
+      [cell(143, 184, 'Hartmann')], [cell(143, 195, 'Fee: 2.00 USDM')],
+      [cell(50, 99, '6 Nov 2026'), cell(113, 131, 'CRY'), cell(143, 251, 'Exchange USDT -> USDM'), cell(377, 430, '200.00 USDT'), cell(461, 514, '200.00 USDT')],
+      [cell(143, 256, 'FX Rate USDT 1 = USDM 0.999000')], ...FOOT(1)]),
+    ...page(2, [HEAD,
+      [cell(50, 99, '5 Nov 2026'), cell(113, 131, 'CRY'), cell(143, 258, 'Crypto Withdrawal • Otto K'), cell(293, 374, '500.50 USDT'), cell(461, 506, '0.00 USDT')],
+      [cell(143, 196, 'Fee: 5.06 USDM')],
+      [cell(50, 99, '5 Nov 2026'), cell(113, 131, 'CRY'), cell(143, 258, 'Crypto Deposit • Somebody'), cell(377, 430, '10.00 USDT'), cell(461, 514, '510.50 USDT')],
+      [cell(50, 172, 'Transaction types')], [cell(50, 139, '- 700.50 USDT'), cell(176, 267, '+ 210.00 USDT')], ...FOOT(2)]),
+    ...page(3, [...TOP('Main USD', '0.80 USDM'), HEAD,
+      [cell(50, 99, '6 Nov 2026'), cell(113, 131, 'CRY'), cell(143, 251, 'Exchange USDM -> USDT'), cell(293, 371, '201.80 USDM'), cell(461, 539, '798.000001')],
+      [cell(143, 254, 'FX Rate USDM 1 = USDT 1.001000'), cell(461, 488, 'USDM')], [cell(143, 195, 'Fee: 2.00 USDM')],
+      [cell(50, 99, '5 Nov 2026'), cell(113, 132, 'ACH'), cell(143, 266, 'ACH Deposit • DEMO STUDIO'), cell(377, 542, '999.00 USDM 999.800001 USDM')],
+      [cell(143, 264, 'LIMITED | 021000024012746')], [cell(143, 226, 'From: Routing 021000021')], [cell(143, 195, 'Fee: 1.00 USDM')], ...FOOT(3)]),
+  ];
+  serve(ledger([]), null);
+  const pg = await open('a wallet statement in PDF');
+  const read = await pg.evaluate((l) => { const p = window.__tx.parsePdfLines(l, 'statement-all-accounts-made-up.pdf'); return p.error ? [p.error] : [p.bank, p.defCur, p.left, p.rows.map((r) => [r.d, r.a, r.cur, r.p, r.t.split(' · ')[0], r.tid].join(' | '))]; }, pdf);
+  same(read, ['Mosta', 'USD', 'Crypto Deposit — 1', [
+    '2026-11-06 | -201.8 | USD | Lena Hartmann | Перевод 200 USDT, комиссия 2 | ',
+    '2026-11-05 | -505.56 | USD | Otto K | Перевод 500.5 USDT, комиссия 5.06 | ',
+    '2026-11-05 | 1000 | USD |  | Пополнение кошелька с банковского счёта | 021000024012746',
+    '2026-11-05 | -1 | USD | Mosta | Комиссия за пополнение кошелька | 021000024012746-fee']],
+  'the file is Mosta\'s, in dollars: a withdrawal is a payment out to the person it names (the name\'s second line too) at what the dollar account exchanged for it, or at its sum and fee where no exchange answers it; a deposit is the money in and its fee out; an exchange is no row; a kind never met is left out and named');
+  const twice = await pg.evaluate((l) => window.__tx.parsePdfLines(l.concat(l.slice(16, 18).map((x) => ({ ...x, y: x.y - 300 }))), 'statement-made-up.pdf').rows.filter((r) => r.p === 'Otto K').map((r) => r.t.split(' · ').slice(2).join()), pdf);
+  same(twice, ['', '2-й за день'], 'two payments alike in day, person and sum are two rows, not one read twice');
+  await pg.context().close();
+});
+
 await run('rv-mosta', 'a wallet\'s list of orders is not a statement: what an order did to the money its kind says, and the page reads each kind its own way', async () => {
   // Mosta's «wallet-orders» export as it comes: twenty-seven columns, no sign anywhere, currencies as ids with a
   // symbol beside them. Read as an ordinary statement it was taken for Wise in pounds and every order for a receipt —
