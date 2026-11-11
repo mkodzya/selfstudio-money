@@ -7581,7 +7581,14 @@ const Ed=(()=>{
   const own=r=>!!it.label&&norm(alias(r.l))===norm(it.label),tied=new Set(M.items.filter(x=>x.done&&x.done.note==="hand").flatMap(x=>x.done.rows.map(String)));
   const score=r=>(want>0?Math.min(3,Math.abs(Math.abs(r.a)-want)/want):1)*20+days(r.d,day)/3-(own(r)||tied.has(String(r.id))?100:0);
   const near=S.tx.filter(r=>ok(r)&&!mine.has(String(r.id))&&days(r.d,day)<=45).sort((a,b)=>score(a)-score(b)).slice(0,12);
-  return S.tx.concat(S.inbox).filter(r=>mine.has(String(r.id))).concat(near);}
+  // … and then the payments nothing holds that are big enough to pay the line whole, nearest in day. One payment
+  // for several invoices under another name than the lines' is twice or more each line's sum and of nobody's label:
+  // nearest in sum it fell off the twelve, and the first of its lines had no way to name it (11 November 2026: a
+  // client's payment for three lines, filed under the name on the transfer). A payment that stands «вне плана» is
+  // what «деньги пришли, а строка их не нашла» is most often about, so it is offered however far its sum is.
+  const held=new Set(M.items.flatMap(x=>(x.rows||[]).concat(x.done?x.done.rows:[]).map(String))),shown=new Set(near.map(r=>String(r.id))),least=want-Math.max(2,0.02*want);
+  const big=want>0?S.tx.filter(r=>ok(r)&&!mine.has(String(r.id))&&!shown.has(String(r.id))&&days(r.d,day)<=45&&Math.abs(r.a)>=least&&!held.has(String(r.id))).sort((a,b)=>days(a.d,day)-days(b.d,day)||Math.abs(a.a)-Math.abs(b.a)).slice(0,12):[];
+  return S.tx.concat(S.inbox).filter(r=>mine.has(String(r.id))).concat(near,big);}
  function pickNote(it,id){
   if(id==null)return "Отметьте платёж. Платёж, который уже закрывает другую строку, можно выбрать и здесь: тогда он закроет обе.";
   if(id==="")return (it.rows||[]).length?"Строка снова будет ждать платёж, и тот, что её закрыл, ей больше не отдаётся.":"Строка будет ждать платёж.";
