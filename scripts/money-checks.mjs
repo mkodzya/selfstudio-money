@@ -6379,7 +6379,9 @@ await run('rv-kassa2', '«Касса · По месяцам» in two columns: a 
   // A card that opens in sight leaves the page where it stands; one that opens below the edge of the window is
   // brought up by just enough to be seen. (Until 9 October 2026 every card was thrown to the middle of the window:
   // Mika, of the page with the new rows, «при открытии страница скачет».)
-  await pg.evaluate(() => window.scrollTo(0, 0));
+  // (Since 12 November 2026 the lists stand under the month's two bars and its accounts, so the first row is no longer
+  // near the top of the page as it opens: the lists are brought up under the bar first, and the page must stay there.)
+  const y1 = await pg.evaluate(() => { const t = document.querySelector('#cs-two').getBoundingClientRect().top + window.scrollY, bar = document.querySelector('.topbar').getBoundingClientRect().bottom; window.scrollTo(0, Math.max(0, Math.round(t - bar - 12))); return window.scrollY; });
   // … nor does anything in the row that opens: its day, name, sum and currency stand where they stood. (The open row
   // was first set in by eight pixels; Mika, 9 October 2026: «дата платежа скачет при раскрытии».)
   const places = () => pg.$eval(cs('inflows', 'rA@2026-10'), (tr) => ['.cs-dd', '.cs-nt', '.cs-amt', '.cs-ct', '.cs-more'].map((q) => { const r = tr.querySelector(q).getBoundingClientRect(); return [Math.round(r.left * 2) / 2, Math.round(r.top * 2) / 2].join(); }));
@@ -6387,7 +6389,7 @@ await run('rv-kassa2', '«Касса · По месяцам» in two columns: a 
   await rowCard(pg, 'inflows', 'rA@2026-10');
   same([await places(), await pg.$eval(cs('inflows', 'rA@2026-10'), (tr) => { const g = getComputedStyle(tr, '::before'), c = document.querySelector('[data-ed-card="row"]').getBoundingClientRect(), r = tr.getBoundingClientRect(); return [g.backgroundColor !== 'rgba(0, 0, 0, 0)', Math.round(r.left - c.left), Math.round(c.right - r.right)]; })], [stood, [true, 10, 10]],
     'a row is pressed: nothing in it has moved — and the lighter ground it stands on, like its card, reaches ten pixels past it on either side');
-  same(await pg.evaluate(() => { const r = document.querySelector('[data-ed-card="row"]').getBoundingClientRect(); return [window.scrollY, r.top > 0 && r.bottom < innerHeight]; }), [0, true], 'a row near the top is pressed: its card is whole in the window, and the page has not moved');
+  same(await pg.evaluate(() => { const r = document.querySelector('[data-ed-card="row"]').getBoundingClientRect(); return [window.scrollY, r.top > 0 && r.bottom < innerHeight]; }), [y1, true], 'a row near the top of the window is pressed: its card is whole in the window, and the page has not moved');
   await pg.click(K('row') + '[data-ed-x]');
   const low = cs('div', (await listed(pg, 'div'))[0] || 'none'), lowRow = (await pg.$(low)) ? low : cs('other', 'o1');
   const y0 = await pg.evaluate((sel) => { const tr = document.querySelector(sel); window.scrollTo(0, Math.max(0, tr.getBoundingClientRect().bottom + window.scrollY - window.innerHeight + 6)); return window.scrollY; }, lowRow);
