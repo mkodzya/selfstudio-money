@@ -754,8 +754,20 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .wi-notes{display:flex;flex-direction:column;gap:6px;color:var(--text-muted);font-size:12px;line-height:1.5}
 @media (min-width:1101px){.kpis.td-k5{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .td-meta{color:var(--text-muted);font-size:12px}
-.td-two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
-@media (max-width:820px){.td-two{grid-template-columns:minmax(0,1fr)}.td-need{order:-1}}
+/* what there is to do on the left, what is looked up on the right (12 November 2026); in one column - the order the
+   page had before */
+.td-body{display:flex;flex-direction:column;gap:18px}
+.td-main,.td-rail{display:contents}
+.td-body .td-todo{order:1}.td-body .td-acc{order:2}.td-body .td-month{order:3}.td-body .td-free{order:4}.td-body .td-need{order:5}.td-body [aria-label="Ближайшие дни"]{order:6}
+@media (min-width:1180px){
+ .td-body{display:grid;grid-template-columns:minmax(0,1fr) 372px;align-items:start}
+ .td-main,.td-rail{display:flex;flex-direction:column;gap:18px;min-width:0}
+ .td-body .td-todo,.td-body .td-acc,.td-body .td-month,.td-body .td-free,.td-body .td-need,.td-body [aria-label="Ближайшие дни"]{order:0}
+ /* «Счета» in the column: an account to a line - its name and what is on it - as on a phone */
+ .td-rail .td-ar{grid-template-columns:minmax(0,1fr) auto}
+ .td-rail .td-ar>:nth-child(3),.td-rail .td-ar>:nth-child(4){grid-column:1/-1;text-align:left}
+ .td-rail .td-ah>:nth-child(3),.td-rail .td-ah>:nth-child(4),.td-rail .td-ar>.td-same,.td-rail .td-ar>:empty{display:none}
+}
 .td-need{display:flex;flex-direction:column;gap:12px}
 .td-need h2{margin:0}
 .td-need .op{box-shadow:none;gap:8px}
@@ -9122,11 +9134,14 @@ const Today=(()=>{
    <div class="row"><span role="group" aria-label="На сколько дней вперёд" class="row">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-td-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span></div></div>`;
   const nothing=!S.tx.some(real)&&!S.inbox.some(real)&&!LISTS.some(k=>P[k].length)&&!M.accounts.some(a=>a.anchor);
   root.innerHTML=nothing?head+Ed.sheet("add")+Ed.sheet("bal")+`<div class="empty"><b>Пока считать не из чего</b>Загрузите выписки и впишите остатки на счетах — здесь появится, хватит ли денег на ближайшие недели.<div class="row" style="justify-content:center;margin-top:14px"><button class="primary" data-tabgo="upload">Загрузить выписки</button><button data-ed-bal>Вписать остатки</button><button data-demo class="ghost">Показать на примере</button></div></div>`
-   // From the top: the verdict and the five figures; where the money is; the month and what may be taken out; the
-   // plan by weeks beside what has to be decided; and, folded, what is only read (Mika's choice of 8 October 2026
-   // among three lay-outs — the five figures went under the fold with the rest and came back up the same evening).
+   // From the top: the verdict and the five figures; then what there is to do - today's rows, what has to be decided,
+   // the plan by weeks - with what is only looked up beside it, in a column on the right: what may be taken out, the
+   // accounts, the month (12 November 2026, the owner's prototype; until then - Mika's choice of 8 October among three
+   // lay-outs - the accounts, the month and «Можно вывести» stood across the page above the plan). On a screen with no
+   // room for the column they stand one under another in the order they had: today's rows, the accounts, the month,
+   // «Можно вывести», what has to be decided, the plan. And, folded, what is only read.
    // Between them and «Аналитика», folded too: «Что если» (11 October 2026).
-   :head+Ed.sheet("add")+verdict()+kpis(M)+todo()+Ed.sheet("bal")+accounts()+`<div class="two td-cols"><div class="stack">${month()}</div><div class="stack">${freeCard()}</div></div><div class="td-two">${days()}${need()}</div>`+whatIf()+analytics();
+   :head+Ed.sheet("add")+verdict()+kpis(M)+Ed.sheet("bal")+`<div class="td-body"><div class="td-main">${todo()}${need()}${days()}</div><aside class="td-rail" aria-label="Справка">${freeCard()}${accounts()}${month()}</aside></div>`+whatIf()+analytics();
   chart();plot();Ed.after(root);
  }
  // Only the chart depends on the width; redrawing the whole tab on a resize would take the keyboard away on a

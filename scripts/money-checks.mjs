@@ -3202,7 +3202,8 @@ await run('todo', '«Сделать сегодня»: the rows of today with a c
   const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
   const seen = async () => ({ note: await text(pg, '#view-today .td-todo [data-td-tn]'), groups: await texts(pg, '#view-today .td-todo .td-tg'), rows: await pg.$$eval('#view-today .td-todo .td-trow', (l) => l.map((r) => [r.dataset.edOpen, r.querySelector('.td-nm').textContent, r.classList.contains('td-tdone'), !!r.querySelector('button.td-ck'), !!r.querySelector('.td-ck.on')])), bar: await pg.$eval('#view-today .td-tbar i', (e) => e.style.width) });
   same(await seen(), { note: 'сделано 0 из 2', groups: ['получить', 'заплатить'], rows: [['z1', 'Client Z', false, true, false], ['t1', 'Person T', false, true, false]], bar: '0%' }, 'what comes first, then what goes: each row with an empty circle, and nothing done yet');
-  ok((await top('.kpis')) < (await top('.td-todo')) && (await top('.td-todo')) < (await top('.td-acc')), 'the block stands under the five figures and above «Счета»');
+  ok((await top('.kpis')) < (await top('.td-todo')) && (await pg.evaluate(() => { const r = (q) => document.querySelector('#view-today ' + q).getBoundingClientRect(); return r('.td-acc').left >= r('.td-todo').right && r('.td-todo').top === r('.td-free').top; })),
+    'the block stands under the five figures, at the head of what there is to do - with «Можно вывести» and «Счета» in the column to its right (12 November 2026; it stood above «Счета» until then)');
   same(await pg.$$eval('#view-today .td-todo [data-live]', (l) => l.length), 0, 'none of its figures is a data-live: the same rows are the screen\'s under «сегодня» in the plan by weeks');
   await pg.click('#view-today .td-todo button.td-ck[data-ed-id="t1"]');
   await pg.waitForFunction(() => document.querySelector('#view-today .td-todo [data-td-tn]').textContent.includes('1 из 2'));
@@ -5453,8 +5454,15 @@ await run('rv-layout', '«Сегодня» from the top: where the money is, the
   let S = await holds(pg, 'the made-up studio, as it opens');
   const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
   const order = [];
-  for (const sel of ['.td-verdict', '.kpis', '.td-acc', '.td-month', '[aria-label="Ближайшие дни"]', '.td-anl']) order.push(await top(sel));
-  ok(order.every((t, i) => !i || t > order[i - 1]) && (await top('.td-free')) === (await top('.td-month')) && (await top('.td-need')) === (await top('[aria-label="Ближайшие дни"]')), 'from the top: the sentence, the five figures, «Счета», then the month beside «Можно вывести», then the plan beside «Нужно решить», then «Аналитика»', order);
+  // (12 November 2026, the owner's prototype: what there is to do on the left - what has to be decided, the plan by
+  // weeks - and what is looked up in a column on the right: «Можно вывести», «Счета», the month. Until then «Счета»
+  // stood across the page, the month beside «Можно вывести» under it, and the plan beside «Нужно решить».)
+  for (const sel of ['.td-verdict', '.kpis', '.td-need', '[aria-label="Ближайшие дни"]', '.td-anl']) order.push(await top(sel));
+  const rail = [];
+  for (const sel of ['.td-free', '.td-acc', '.td-month']) rail.push(await top(sel));
+  const side = await pg.evaluate(() => { const r = (q) => document.querySelector('#view-today ' + q).getBoundingClientRect(); return [r('.td-need').right <= r('.td-free').left, r('.td-free').left === r('.td-acc').left && r('.td-acc').left === r('.td-month').left, Math.round(r('.td-free').width)]; });
+  ok(order.every((t, i) => !i || t > order[i - 1]) && rail.every((t, i) => !i || t > rail[i - 1]) && rail[0] === (await top('.td-main > :first-child')) && rail[2] < order[4] && side[0] && side[1] && side[2] === 372,
+    'from the top: the sentence, the five figures; then «Нужно решить» and the plan by weeks one under another, and beside them a column of «Можно вывести», «Счета» and the month; then «Аналитика»', [order, rail, side]);
   // «Счета»: one account to a line — what is on it, in pounds, and what the figure rests on; the last line is the money now
   const rows = await pg.$$eval('#view-today .td-accs .td-ar', (l) => l.map((r) => [...r.children].map((c) => c.textContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())));
   same([rows[0], rows[1], rows[2], rows[4], rows[rows.length - 1].slice(0, 3), rows.length], [['Счёт', 'На счёте', 'В фунтах', 'На чём стоит цифра'], ['Wise GBP', '£21,480', '£21,480', 'вписан 4 окт, Mika'], ['Wise USD', '$6,620', '£4,904', 'вписан 4 окт, Mika'], ['Tochka RUB', '₽654,000', '£5,542', 'вписан 4 окт, Mika'], ['Денег на 4 окт', '', '£54,230'], 7],
