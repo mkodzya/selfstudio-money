@@ -3132,6 +3132,17 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
     same([plain(await text(pg, '#view-today .td-sdr')).replace(/^\S+ /, ''), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd), (await pg.evaluate(() => document.documentElement.scrollWidth)) <= w], ['20 окт · уйдёт −£6,000 · останется −£6,500 · открыть день', '2026-10-20', true], `${w}px: a press on the 20th says under the strip what goes on it and what is left, and the page does not scroll sideways`);
     await pg.click('#view-today .td-sd[data-td-sd="2026-10-20"]');
     same(await pg.$('#view-today .td-sdr'), null, `${w}px: … and a second press takes the line away`);
+    // «График» opens the balance by day under the strip - the chart of «Аналитика», where the question was asked - and a tap on a day of it is a press on that day's cell.
+    same([await pg.$('#td-plot'), await pg.$eval('#view-today [data-td-graph]', (b) => b.textContent + ' ' + b.getAttribute('aria-expanded'))], [null, 'График false'], `${w}px: the chart is shut until asked for`);
+    await pg.click('#view-today [data-td-graph]');
+    await pg.waitForSelector('#td-plot path');
+    const i20 = cells.findIndex((c) => c[0] === '2026-10-20');
+    same([await pg.$eval('#td-plot', (e) => e.querySelectorAll('[data-td-p]').length), await pg.$eval('#view-today [data-td-graph]', (b) => b.textContent + ' ' + b.getAttribute('aria-expanded')), (await pg.evaluate(() => document.documentElement.scrollWidth)) <= w], [S.M.days.length, 'Скрыть график true', true], `${w}px: «График» draws the balance for every day of the plan, inside the page's width, and the button now shuts it`);
+    await pg.$eval(`#td-plot [data-td-p="${i20}"]`, (e) => e.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    same([await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd), !!(await pg.$('#td-plot path'))], ['2026-10-20', true], `${w}px: a tap on the 20th in the chart chooses its cell, and the chart stays`);
+    await pg.click('#view-today [data-td-graph]');
+    same([await pg.$('#td-plot'), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd)], [null, '2026-10-20'], `${w}px: «Скрыть график» takes the chart away and leaves the day chosen`);
+    await pg.click('#view-today .td-sd.on');
     await pg.click('#view-today .td-verdict [data-td-days]');
     await pg.waitForSelector('#cs-answer');
     const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
@@ -3146,6 +3157,34 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
 });
 
 
+
+await run('todo', '«Сделать сегодня»: the rows of today with a circle that marks one in a press, and what is done stays, ticked', async () => {
+  // Today, 6 Oct: Client Z is to pay 3,000 and Person T is to be paid 1,200. Both stand in «Сделать сегодня», right
+  // under the five figures; the circle of Person T is «Оплачено» in one press, and the row stays there, ticked.
+  const P = planW({ inflows: [row('z1', 'Client Z', 3000, T)], team: [row('t1', 'Person T', 1200, T)] });
+  const pg = await scene('todo', ledA(), P);
+  let S = await holds(pg, 'two rows of today');
+  const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
+  const seen = async () => ({ note: await text(pg, '#view-today .td-todo [data-td-tn]'), groups: await texts(pg, '#view-today .td-todo .td-tg'), rows: await pg.$$eval('#view-today .td-todo .td-trow', (l) => l.map((r) => [r.dataset.edOpen, r.querySelector('.td-nm').textContent, r.classList.contains('td-tdone'), !!r.querySelector('button.td-ck'), !!r.querySelector('.td-ck.on')])), bar: await pg.$eval('#view-today .td-tbar i', (e) => e.style.width) });
+  same(await seen(), { note: 'сделано 0 из 2', groups: ['получить', 'заплатить'], rows: [['z1', 'Client Z', false, true, false], ['t1', 'Person T', false, true, false]], bar: '0%' }, 'what comes first, then what goes: each row with an empty circle, and nothing done yet');
+  ok((await top('.kpis')) < (await top('.td-todo')) && (await top('.td-todo')) < (await top('.td-acc')), 'the block stands under the five figures and above «Счета»');
+  same(await pg.$$eval('#view-today .td-todo [data-live]', (l) => l.length), 0, 'none of its figures is a data-live: the same rows are the screen\'s under «сегодня» in the plan by weeks');
+  await pg.click('#view-today .td-todo button.td-ck[data-ed-id="t1"]');
+  await pg.waitForFunction(() => document.querySelector('#view-today .td-todo [data-td-tn]').textContent.includes('1 из 2'));
+  S = await holds(pg, 'Person T marked by the circle');
+  same([await seen(), !!S.P.team.find((r) => r.id === 't1').paid, S.M.items.find((it) => it.id === 't1').state, await pg.$('#view-today .td-todo [data-ed-card="row"]')],
+    [{ note: 'сделано 1 из 2', groups: ['получить', 'сделано'], rows: [['z1', 'Client Z', false, true, false], ['t1', 'Person T', true, false, true]], bar: '50%' }, true, 'done', null],
+    'one press on the circle is «Оплачено»: the plan holds the mark, the row is done and stays in the block - muted, ticked, under «сделано» - and no card was opened for it');
+  // A press on the row itself opens its card under it, here.
+  await pg.click('#view-today .td-todo .td-trow[data-ed-open="z1"] .td-nm');
+  await pg.waitForSelector('#view-today .td-todo [data-ed-card="row"]');
+  same(await pg.$$eval('#view-today [data-ed-card="row"]', (l) => l.map((c) => !!c.closest('.td-todo'))), [true], 'a press on a row opens its card under it in the block, and nowhere else');
+  await pg.context().close();
+  // A day with no rows has no block.
+  const p2 = await scene('todo, none', ledA(), planW());
+  same(await p2.$('#view-today .td-todo'), null, 'on a day with no rows of its own the block is not drawn');
+  await p2.context().close();
+});
 await run('demo', 'the fabricated studio on three different days', async () => {
   for (const day of ['2026-10-06', '2026-11-12', '2026-12-21']) {
     // The studio's ledger carries the moment each statement row was uploaded; its plan is version 3 — every balance
