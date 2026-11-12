@@ -2653,7 +2653,7 @@ await run('13 on screen', 'a late inflow leaves in two steps, and the card that 
   shows(S, { now: 14000, in: 8000, end: before, marks: 4000 }, '«Получено» on it');
   const r = stored(S, id);
   same([r.paid.on, r.paid.by, typeof r.paid.at, S.live.now.t, S.P.banks[0].amt, S.P.banks[0].asOf], [T, 'Mika', 'number', '£14,000', 10120, '2026-09-30'], '… a mark dated today; the money now says in words what of it is marked by hand — no «≈»; the typed balance exactly as it was (§5.8)');
-  same(await drawn(pg, id), 'td-row td-done | line-through | Client E | Wise · отмечено · ждёт выписку | +£4,000 | вт 20 окт', 'the row stays under its own date, struck through and muted (brief F3)');
+  same(await drawn(pg, id), 'td-row td-done | none | Client E | Wise · отмечено · ждёт выписку | +£4,000 | вт 20 окт', 'the row stays under its own date, struck through and muted (brief F3)');
   // «Отменить» in the toast takes the tap back.
   await pg.click('#toastUndo');
   S = await holds(pg, '«Отменить»');
@@ -2690,7 +2690,7 @@ await run('9 on screen', 'a typed row closed by a statement that is uploaded and
   shows(S, { now: 12400, in: 8000, end: 14280 }, 'filed under Client C: the line is closed, NOW as it was (§5.6), END back where it stood');
   const it = item(S.M, id);
   same([it.state, it.done.by, it.done.on, it.rows.length], ['done', 'row', T, 1], '… closed by the row, on the row\'s date');
-  same(await drawn(pg, id), 'td-row td-done | line-through | Client C | Wise | +£2,400 | сегодня, вт 6 окт', '… and it stays, struck through, under the day the money came');
+  same(await drawn(pg, id), 'td-row td-done | none | Client C | Wise | +£2,400 | сегодня, вт 6 окт', '… and it stays, struck through, under the day the money came');
   await puts('led', 1);
   const row = store.led.doc.tx.find((r) => r.l === 'Client C');
   ok(!!row && row.at > stored(S, id).c0, 'the ledger that was saved carries the moment the row was uploaded — later than the moment the line was typed, which is what let it close the line', row && [row.at, stored(S, id).c0]);
@@ -2986,11 +2986,11 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   const r = stored(S, g);
   same([S.M.END, S.M.now, JSON.stringify(S.P.banks) === banks, r.paid.on, r.paid.by, typeof r.paid.at, 'paidAdj' in r, acct(S.M, 'Wise|GBP').est, S.P.banks[0].amt + ' ' + S.P.banks[0].asOf], [10880, 9000, true, T, 'Mika', 'number', false, 9000, '10120 2026-09-30'],
     '… END unchanged, NOW with the words «в т.ч. отмечено вручную» under it, plan.banks deep-equal (§5.8): the mark is {on: today, at, by} on the row, the typed balance still reads £10,120 as of 30 Sep, and only the reckoning beside it is 1,000 lower');
-  same([await csRow(pg, 'team', g), await toastText(pg)], ['cs-done | line-through | no tick | Person G | 1,000 | GBP | 7 окт | Wise | отмечено · ждёт выписку', 'Оплачено: Person G'], '… the row stays in its place in October, struck through, and says the mark waits for a statement');
+  same([await csRow(pg, 'team', g), await toastText(pg)], ['cs-done | none | no tick | Person G | 1,000 | GBP | 7 окт | Wise | отмечено · ждёт выписку', 'Оплачено: Person G'], '… the row stays in its place in October, struck through, and says the mark waits for a statement');
   // under its own day in «По дням», toggle still working
   await pg.click('#view-cash [data-cs-view="days"]');
   await openDay(pg, '2026-10-07');
-  same([await dayLine(pg, '2026-10-07'), await dayRows(pg, '2026-10-07')], [['ср 7 окт', '£9,000', '—', '—', '£9,000', 'оплачено 1'], [`${g} | cs-ispaid cs-done | line-through | оплачено ✓|true | no date | no фикс | отмечено · ждёт выписку | −£1,000`]], 'in «По дням» it stands under its own day, 7 Oct, struck through and counted in nothing: the day\'s line has no money and says «оплачено 1»');
+  same([await dayLine(pg, '2026-10-07'), await dayRows(pg, '2026-10-07')], [['ср 7 окт', '£9,000', '—', '—', '£9,000', 'оплачено 1'], [`${g} | cs-ispaid cs-done | none | оплачено ✓|true | no date | no фикс | отмечено · ждёт выписку | −£1,000`]], 'in «По дням» it stands under its own day, 7 Oct, struck through and counted in nothing: the day\'s line has no money and says «оплачено 1»');
   await pg.click(`#cs-stmt li[data-cs-li="${g}"] [data-ed-do="unpaid"]`);
   S = await holds(pg, 'the mark taken back', 'cash');
   shows(S, { now: 10000, out: 7120 }, 'pressed again there: back in the plan');
@@ -3004,11 +3004,11 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   shows(S, { now: 9000, out: 6120 }, 'the row, still unrecognised in «Разбор», replaces the mark');
   same([S.M.END, S.M.now, S.M.marksGbp, item(S.M, g).done.by, item(S.M, g).done.day], [10880, 9000, 0, 'row', T], '… NOW 9,000 with nothing of it a mark any more, END where it was; the line is closed by the row');
   await openDay(pg, T);
-  same((await dayRows(pg, T)).filter((x) => x.startsWith(g)), [`${g} | cs-ispaid cs-done | line-through | по выписке 6 окт | no date | no фикс |  | −£1,000`], '… and now stands under the day of the statement\'s row, 6 Oct — «по выписке», with nothing left to press');
+  same((await dayRows(pg, T)).filter((x) => x.startsWith(g)), [`${g} | cs-ispaid cs-done | none | по выписке 6 окт | no date | no фикс |  | −£1,000`], '… and now stands under the day of the statement\'s row, 6 Oct — «по выписке», with nothing left to press');
   await pg.click('#view-cash [data-cs-view="plan"]');
   await rowCard(pg, 'team', g);
   // (layout 1, 1 November 2026: how the line stands is said on the line of its month in «Сведения»)
-  same([(await csRow(pg, 'team', g)).split(' | ').slice(0, 3), /Закрыто.*6 окт/.test(await monthOf(pg))], [['cs-done', 'line-through', 'no tick'], true], '… the same in its month: struck through, and its card says which day of the statement closed it');
+  same([(await csRow(pg, 'team', g)).split(' | ').slice(0, 3), /Закрыто.*6 окт/.test(await monthOf(pg))], [['cs-done', 'none', 'no tick'], true], '… the same in its month: struck through, and its card says which day of the statement closed it');
   await pg.click(K('row') + '[data-ed-x]');
   ok(JSON.stringify((await look(pg, 'cash')).P.banks) === banks, 'through all of it no bank row of the plan changed');
   await finish(pg);
@@ -3021,7 +3021,7 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   await goCash(po);
   S = await holds(po, 'a row the old Касса had as paid', 'cash');
   const old = S.P.team[0];
-  same([old.paid, 'paidAdj' in old, await csRow(po, 'team', old.id), S.P.banks[0].amt, S.P.banks[0].legacy], [{ on: '', legacy: true }, false, 'cs-done | line-through | no tick | Person G | 1,000 | GBP | 7 окт | Wise | отмечено в старой Кассе', 9000, true], 'a row the old Касса had as «оплачено» is done on that old word; the note of what it once did to a balance is dropped');
+  same([old.paid, 'paidAdj' in old, await csRow(po, 'team', old.id), S.P.banks[0].amt, S.P.banks[0].legacy], [{ on: '', legacy: true }, false, 'cs-done | none | no tick | Person G | 1,000 | GBP | 7 окт | Wise | отмечено в старой Кассе', 9000, true], 'a row the old Касса had as «оплачено» is done on that old word; the note of what it once did to a balance is dropped');
   await rowDo(po, 'team', old.id, 'unpaid');
   S = await holds(po, 'the old mark taken back', 'cash');
   same(['paid' in S.P.team[0], S.P.banks[0].amt, (await csRow(po, 'team', old.id)).split(' | ')[0]], [false, 9000, 'typed'], '… taken back, it is an open row again, and the old balance is left exactly as it came');
@@ -3132,6 +3132,17 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
     same([plain(await text(pg, '#view-today .td-sdr')).replace(/^\S+ /, ''), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd), (await pg.evaluate(() => document.documentElement.scrollWidth)) <= w], ['20 окт · уйдёт −£6,000 · останется −£6,500 · открыть день', '2026-10-20', true], `${w}px: a press on the 20th says under the strip what goes on it and what is left, and the page does not scroll sideways`);
     await pg.click('#view-today .td-sd[data-td-sd="2026-10-20"]');
     same(await pg.$('#view-today .td-sdr'), null, `${w}px: … and a second press takes the line away`);
+    // «График» opens the balance by day under the strip - the chart of «Аналитика», where the question was asked - and a tap on a day of it is a press on that day's cell.
+    same([await pg.$('#td-plot'), await pg.$eval('#view-today [data-td-graph]', (b) => b.textContent + ' ' + b.getAttribute('aria-expanded'))], [null, 'График false'], `${w}px: the chart is shut until asked for`);
+    await pg.click('#view-today [data-td-graph]');
+    await pg.waitForSelector('#td-plot path');
+    const i20 = cells.findIndex((c) => c[0] === '2026-10-20');
+    same([await pg.$eval('#td-plot', (e) => e.querySelectorAll('[data-td-p]').length), await pg.$eval('#view-today [data-td-graph]', (b) => b.textContent + ' ' + b.getAttribute('aria-expanded')), (await pg.evaluate(() => document.documentElement.scrollWidth)) <= w], [S.M.days.length, 'Скрыть график true', true], `${w}px: «График» draws the balance for every day of the plan, inside the page's width, and the button now shuts it`);
+    await pg.$eval(`#td-plot [data-td-p="${i20}"]`, (e) => e.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    same([await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd), !!(await pg.$('#td-plot path'))], ['2026-10-20', true], `${w}px: a tap on the 20th in the chart chooses its cell, and the chart stays`);
+    await pg.click('#view-today [data-td-graph]');
+    same([await pg.$('#td-plot'), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd)], [null, '2026-10-20'], `${w}px: «Скрыть график» takes the chart away and leaves the day chosen`);
+    await pg.click('#view-today .td-sd.on');
     await pg.click('#view-today .td-verdict [data-td-days]');
     await pg.waitForSelector('#cs-answer');
     const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
@@ -3146,6 +3157,34 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
 });
 
 
+
+await run('todo', '«Сделать сегодня»: the rows of today with a circle that marks one in a press, and what is done stays, ticked', async () => {
+  // Today, 6 Oct: Client Z is to pay 3,000 and Person T is to be paid 1,200. Both stand in «Сделать сегодня», right
+  // under the five figures; the circle of Person T is «Оплачено» in one press, and the row stays there, ticked.
+  const P = planW({ inflows: [row('z1', 'Client Z', 3000, T)], team: [row('t1', 'Person T', 1200, T)] });
+  const pg = await scene('todo', ledA(), P);
+  let S = await holds(pg, 'two rows of today');
+  const top = (sel) => pg.$eval('#view-today ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
+  const seen = async () => ({ note: await text(pg, '#view-today .td-todo [data-td-tn]'), groups: await texts(pg, '#view-today .td-todo .td-tg'), rows: await pg.$$eval('#view-today .td-todo .td-trow', (l) => l.map((r) => [r.dataset.edOpen, r.querySelector('.td-nm').textContent, r.classList.contains('td-tdone'), !!r.querySelector('button.td-ck'), !!r.querySelector('.td-ck.on')])), bar: await pg.$eval('#view-today .td-tbar i', (e) => e.style.width) });
+  same(await seen(), { note: 'сделано 0 из 2', groups: ['получить', 'заплатить'], rows: [['z1', 'Client Z', false, true, false], ['t1', 'Person T', false, true, false]], bar: '0%' }, 'what comes first, then what goes: each row with an empty circle, and nothing done yet');
+  ok((await top('.kpis')) < (await top('.td-todo')) && (await top('.td-todo')) < (await top('.td-acc')), 'the block stands under the five figures and above «Счета»');
+  same(await pg.$$eval('#view-today .td-todo [data-live]', (l) => l.length), 0, 'none of its figures is a data-live: the same rows are the screen\'s under «сегодня» in the plan by weeks');
+  await pg.click('#view-today .td-todo button.td-ck[data-ed-id="t1"]');
+  await pg.waitForFunction(() => document.querySelector('#view-today .td-todo [data-td-tn]').textContent.includes('1 из 2'));
+  S = await holds(pg, 'Person T marked by the circle');
+  same([await seen(), !!S.P.team.find((r) => r.id === 't1').paid, S.M.items.find((it) => it.id === 't1').state, await pg.$('#view-today .td-todo [data-ed-card="row"]')],
+    [{ note: 'сделано 1 из 2', groups: ['получить', 'сделано'], rows: [['z1', 'Client Z', false, true, false], ['t1', 'Person T', true, false, true]], bar: '50%' }, true, 'done', null],
+    'one press on the circle is «Оплачено»: the plan holds the mark, the row is done and stays in the block - muted, ticked, under «сделано» - and no card was opened for it');
+  // A press on the row itself opens its card under it, here.
+  await pg.click('#view-today .td-todo .td-trow[data-ed-open="z1"] .td-nm');
+  await pg.waitForSelector('#view-today .td-todo [data-ed-card="row"]');
+  same(await pg.$$eval('#view-today [data-ed-card="row"]', (l) => l.map((c) => !!c.closest('.td-todo'))), [true], 'a press on a row opens its card under it in the block, and nowhere else');
+  await pg.context().close();
+  // A day with no rows has no block.
+  const p2 = await scene('todo, none', ledA(), planW());
+  same(await p2.$('#view-today .td-todo'), null, 'on a day with no rows of its own the block is not drawn');
+  await p2.context().close();
+});
 await run('demo', 'the fabricated studio on three different days', async () => {
   for (const day of ['2026-10-06', '2026-11-12', '2026-12-21']) {
     // The studio's ledger carries the moment each statement row was uploaded; its plan is version 3 — every balance
@@ -3680,7 +3719,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   const oct = 'rB@2026-10';
   shows(S, { now: 26600, out: 18400, end: 33400 }, '22 Oct, sixty days');
   await pg.click('#view-today [data-td-flip="past"]');
-  same([item(S.M, oct).state, (await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), S.M.cards.filter((c) => c.item === oct).length], ['done', 'line-through | Person B | Wise · заплатили £5,400, в плане £6,000 | −£5,400', 0], 'the month is closed by its payment at what came — «заплатили £5,400, в плане £6,000» — and nobody is asked about the difference');
+  same([item(S.M, oct).state, (await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), S.M.cards.filter((c) => c.item === oct).length], ['done', 'none | Person B | Wise · заплатили £5,400, в плане £6,000 | −£5,400', 0], 'the month is closed by its payment at what came — «заплатили £5,400, в плане £6,000» — and nobody is asked about the difference');
   await pg.click(inDays(oct));
   // (layout 1, 1 November 2026: the band of a closed month - its answers, and «Ещё…» with «Выбрать платёж…»; no
   // «Изменить строку», there is nothing of a closed month left to change; × in the corner)
@@ -3725,7 +3764,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   same([item(S.M, debt.id).state, item(S.M, debt.id).day, item(S.M, debt.id).cash, item(S.M, 'rB@2026-11').day, item(S.M, 'rB@2026-11').cash, card(S.M, 9).length], ['due', '2026-11-12', -600, '2026-11-20', -6000, 0], '… it is due on that day; November\'s own month stands on the 20th untouched; nothing is «без даты»');
   shows(S, { now: 26600, out: 19000, end: 32800 }, '… «Уйдёт» is more by the 600 and the end of the sixty days less by it; «сейчас» is as it was');
   await allDays(pg);
-  same([(await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), (await drawn(pg, debt.id)).split(' | ').slice(2).join(' | '), (await drawn(pg, 'rB@2026-11')).split(' | ').slice(2).join(' | ')], ['line-through | Person B | Wise · оплачено £5,400 из £6,000 | −£5,400', 'Person B — остаток с октября | Wise | −£600 | чт 12 ноя', 'Person B | Wise · каждый месяц | −£6,000 | пт 20 ноя'],
+  same([(await drawn(pg, oct)).split(' | ').slice(1, 5).join(' | '), (await drawn(pg, debt.id)).split(' | ').slice(2).join(' | '), (await drawn(pg, 'rB@2026-11')).split(' | ').slice(2).join(' | ')], ['none | Person B | Wise · оплачено £5,400 из £6,000 | −£5,400', 'Person B — остаток с октября | Wise | −£600 | чт 12 ноя', 'Person B | Wise · каждый месяц | −£6,000 | пт 20 ноя'],
     'on «Сегодня» October reads «оплачено £5,400 из £6,000», the rest stands under the day the founder named — 12 Nov, saying nothing but its name — and November\'s own payment under the 20th');
   await pg.click(inDays(debt.id));
   // (layout 1, 1 November 2026: where it came from in «Сведения» - the rest it carries is its «Повтор», its day the
@@ -3738,7 +3777,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   // The constructor: the month it left is closed at what was paid; the rest is a row of the month of its day.
   await goCash(pg);
   S = await holds(pg, 'October in the constructor', 'cash');
-  same([await listed(pg, 'team'), S.fig('mon.team.exp'), S.fig('mon.team.done'), await csRow(pg, 'team', oct)], [[oct], 5400, 5400, 'cs-done | line-through | no tick | Person B | 6,000 | GBP | 20 окт | Wise | оплачено £5,400 из £6,000'],
+  same([await listed(pg, 'team'), S.fig('mon.team.exp'), S.fig('mon.team.done'), await csRow(pg, 'team', oct)], [[oct], 5400, 5400, 'cs-done | none | no tick | Person B | 6,000 | GBP | 20 окт | Wise | оплачено £5,400 из £6,000'],
     'in the constructor October — the month it left — holds its one row, closed at what was paid: 5,400 expected, 5,400 done');
   await toMonth(pg, '2026-11');
   S = await holds(pg, 'November with the rest', 'cash');
@@ -3792,7 +3831,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   const mk = await scene('paid is paid', ledA({ tx: [reach('Wise', '2026-10-12', 'GBP', AT4)] }), planW({ team: [g({ paid: paid(T) })] }), { at: '2026-10-13T12:00:00+01:00' });
   S = await holds(mk, 'marked on 6 Oct; the statements uploaded since reach 12 Oct and show no such payment');
   await mk.click('#view-today [data-td-flip="past"]');
-  same([item(S.M, 'g').state, item(S.M, 'g').done.by, S.M.cards.length, (await drawn(mk, 'g')).split(' | ').slice(1, 5).join(' | '), S.fig('marks'), (await kpi(mk, 0))[1]], ['done', 'ok', 0, 'line-through | Person G | Wise · отмечено вручную | −£1,000', undefined, '£10,000'],
+  same([item(S.M, 'g').state, item(S.M, 'g').done.by, S.M.cards.length, (await drawn(mk, 'g')).split(' | ').slice(1, 5).join(' | '), S.fig('marks'), (await kpi(mk, 0))[1]], ['done', 'ok', 0, 'none | Person G | Wise · отмечено вручную | −£1,000', undefined, '£10,000'],
     'a row marked paid stays closed when the statements go past its day without showing it: struck through, «отмечено вручную», no card, nothing owed again — and no longer inside «сейчас»');
   await mk.click(inDays('g'));
   // (layout 1, 1 November 2026: where the line came from at the foot of «Сведения», how it stands under its month; the
@@ -3845,7 +3884,7 @@ await run('partly, other days', '«Частично» with the rest in the same 
   shows(S, { now: 26400, marks: -200, out: 18800 }, '… the 200 said to be paid is in «сейчас» as a mark, and «Уйдёт» holds the 400 in place of the 600');
   await goToday(pg);
   await allDays(pg);
-  same([(await drawn(pg, next.id)).split(' | ').slice(2).join(' | '), (await drawn(pg, debt.id)).split(' | ').slice(1).join(' | ')], ['Person B — остаток с октября | Wise | −£400 | вт 15 дек', 'line-through | Person B — остаток с октября | Wise · оплачено £200 из £600 | −£200 | пт 30 окт'],
+  same([(await drawn(pg, next.id)).split(' | ').slice(2).join(' | '), (await drawn(pg, debt.id)).split(' | ').slice(1).join(' | ')], ['Person B — остаток с октября | Wise | −£400 | вт 15 дек', 'none | Person B — остаток с октября | Wise · оплачено £200 из £600 | −£200 | пт 30 окт'],
     'on «Сегодня» the 400 stands under 15 Dec, two months on, and the first rest is struck through under its own day — «оплачено £200 из £600»');
   await goCash(pg);
   await toMonth(pg, '2026-12');
@@ -4415,7 +4454,7 @@ await run('old plan', 'the one way in for the old planner\'s plan: wrapped or ba
     'onto an empty plan a wrapped export goes straight in, as version 3: ids that last (two rows shared one), balances waiting to be confirmed, «Другой» → Barclays, the old «оплачено» tag dropped, a paid row as an old mark without its balance note, a broken date and a year 2062 as «без даты» — and the page asks for the balances before it gives a total');
   same([await toastText(pg), await out(), await pg.$eval('#cs-imp-text', (e) => e.value), await text(pg, '#cs-undo span')], ['План загружен — счетов: 2, строк: 6 (поступления 1 · команда 2 · налоги 1 · прочее 2)', '', '', 'Последнее изменение: загрузка плана из старой Кассы'], '… it says what came, clears the field, and can be undone');
   same([await saved(pg), store.cash.puts, store.cash.doc.v, '_savedAt' in store.cash.doc, store.cash.doc.tax.rules.map((r) => r.id), store.cash.doc.inflows[0].vat, store.led.puts], [true, 1, 3, false, ['vat', 'usn'], false, 0], '… one save, without the artifact\'s private fields — and with what version 3 adds: the two tax rules, and on every inflow whether its invoice carries VAT');
-  same([await csRow(pg, 'team', S.P.team[1].id), (await listed(pg, 'other')).length, (await listed(pg, 'taxes')).length], ['cs-done | line-through | no tick | Person B | 3,750 | USD | 2 окт | Barclays | отмечено в старой Кассе', 2, 1], '… its rows stand in October: dated ones by their date, the ones without a date in the running month');
+  same([await csRow(pg, 'team', S.P.team[1].id), (await listed(pg, 'other')).length, (await listed(pg, 'taxes')).length], ['cs-done | none | no tick | Person B | 3,750 | USD | 2 окт | Barclays | отмечено в старой Кассе', 2, 1], '… its rows stand in October: dated ones by their date, the ones without a date in the running month');
   // now the plan has rows: a second one must ask — the bare shape, opened as a file
   const bare = { cushion: 5000, horizon: '2026-11-10', fx: { USD: 1.25, RUB: 100, EUR: 1.2, AMD: 500 }, banks: [R('r1', 'Wise — GBP', 1000, 'GBP', 'Wise')], inflows: [R('r2', 'Client Z', 5000, 'GBP', 'Wise', '2026-10-16')], team: [R('r3', 'Person X', 3000, 'GBP', 'Wise', '2026-10-08')], taxes: [], other: [] };
   await pg.setInputFiles('#cs-imp-file', { name: 'kassa-selfstudio.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bare)) });
