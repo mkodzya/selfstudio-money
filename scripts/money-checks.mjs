@@ -2204,6 +2204,12 @@ function want(M, k, at) {
   if (k === 'mon.off.out' || k === 'mon.off.in') return ((M.months.by[at.month] || {}).off || {})[k.slice(8)];
   // (the bank's fees of the month in view - 19 October 2026)
   if (k === 'mon.fees') return ((M.months.by[at.month] || {}).fees || {}).gbp;
+  // (the month as two bars on one scale - 12 November 2026: what comes, what goes, what of each has happened, and
+  // what the month comes to by the plan; each is the sections' own totals added up)
+  if (k.startsWith('mon.sc.')) {
+    const mo = M.months.by[at.month] || {}, g = (l, f) => round2(sum(l.map((x) => (mo[x] || {})[f] || 0))), O = ['team', 'taxes', 'subs', 'other', 'div'];
+    return { in: g(['inflows'], 'expected'), ind: g(['inflows'], 'done'), out: g(O, 'expected'), outd: g(O, 'done'), res: round2(g(['inflows'], 'expected') - g(O, 'expected')) }[k.slice(7)];
+  }
   if (k.startsWith('mon.') && k !== 'mon.div.ptax' && k !== 'mon.tax.accrued') { const [, list, f] = k.split('.'), mo = M.months.by[at.month] || {}; return f === 'off' ? (((mo.off || {}).by || {})[list] || {}).gbp : (mo[list] || {})[{ exp: 'expected', done: 'done' }[f]]; }
   if (k === 'say') return M.v0 ? 'v0' : M.LOW < 0 ? 'minus' : M.LOW < M.cushion ? 'low' : 'fine';
   const b = M.month.blocks;
@@ -2920,7 +2926,7 @@ await run('kassa figures', '«Касса» is the plan by months and by days, an
     let B = await holds(pg, `${name}, «Касса · По месяцам»`, 'cash');
     same([await there(pg, GONE), await texts(pg, '#view-cash .tabs2 button'), await texts(pg, '#view-cash .page-head button'), await text(pg, '#view-cash .page-sub'), await pg.$$eval('#cs-plan section.cs-rows', (l) => l.length), !!(await pg.$('#cs-cov'))],
       [[], ['По месяцам', 'По дням'], ['‹', '›', 'По месяцам', 'По дням'], await (async () => { await pg.click('.nav [data-tab="today"]'); const t = await text(pg, '#view-today .page-sub'); await goCash(pg); return 'идёт · сегодня ' + t; })(), 6, true],
-      `${name} (${verdict}): «По месяцам» is the month, its six sections and «Покрытие по банкам» — no figures of the forecast, no balances, nothing in the head but the month with its arrows, the two views and the line of «Сегодня» (variant «В», 2 November 2026)`);
+      `${name} (${verdict}): «По месяцам» is the month - two bars and the accounts (since 12 November 2026 above the lists) - and its six sections — no figures of the forecast, no balances, nothing in the head but the month with its arrows, the two views and the line of «Сегодня» (variant «В», 2 November 2026)`);
     await goCash(pg, 'days');
     B = await holds(pg, `${name}, «Касса · По дням»`, 'cash');
     same([await there(pg, GONE), await texts(pg, '#cs-scope [data-cs-h]'), await pg.$eval('#cs-scope [data-cs-h][aria-pressed="true"]', (b) => b.textContent), !!(await pg.$('#cs-cal')), !!(await pg.$('#cs-stmt')), !!(await pg.$('#cs-covd'))],
@@ -3184,6 +3190,50 @@ await run('todo', '«Сделать сегодня»: the rows of today with a c
   const p2 = await scene('todo, none', ledA(), planW());
   same(await p2.$('#view-today .td-todo'), null, 'on a day with no rows of its own the block is not drawn');
   await p2.context().close();
+});
+await run('cash-top', '«Касса · По месяцам» opens with the month as two bars on one scale and with each account as a bar from zero, above the lists', async () => {
+  // 12 November 2026, the fourth part of the owner's prototype. A made-up studio on 6 Oct: £1,000 on Wise and £500 on
+  // Barclays; in October Client Z is to pay 3,000 on the 20th, Person T is paid 1,200 on the 10th - both through Wise -
+  // and Rent of 2,500 leaves Barclays on the 15th; in November Client N pays 500 on the 10th. So October: 3,000 comes,
+  // 3,700 goes, the month is −700; Wise ends it at 2,800 but is 200 short on the 10th, before Client Z has paid, and
+  // Barclays ends it at −2,000, short from the 15th.
+  const P = plan3({ banks: [bal('Wise', 'GBP', 1000, T), bal('Barclays', 'GBP', 500, T)],
+    inflows: [row('z1', 'Client Z', 3000, '2026-10-20', { vat: false }), row('n1', 'Client N', 500, '2026-11-10', { vat: false })],
+    team: [row('t1', 'Person T', 1200, '2026-10-10')], other: [row('o1', 'Rent', 2500, '2026-10-15', { bank: 'Barclays' })] });
+  const pg = await scene('cash-top', ledger([]), P, { H: 60 });
+  await goCash(pg);
+  let S = await holds(pg, 'October of the made-up studio', 'cash');
+  const top = (sel) => pg.$eval('#view-cash ' + sel, (e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
+  const bars = () => pg.$$eval('#cs-scale .cs-scr', (l) => l.map((r) => [r.querySelector('b').textContent, r.querySelector('.cs-scc').textContent.replace(/\s+/g, ' ').trim(), r.querySelector('.cs-scbar').style.width, r.querySelector('.cs-scbar i').style.width]));
+  const result = async () => [await text(pg, '#cs-scale .cs-scres .lbl'), await text(pg, '#cs-scale .cs-scbig'), await text(pg, '#cs-scale .cs-scres .note')];
+  const banks = () => pg.$$eval('#cs-cov .cs-bk[data-cs-bank]', (l) => l.map((r) => { const t = (q) => { const e = r.querySelector(q); return e ? e.textContent.replace(/\s+/g, ' ').trim() : null; }, i = r.querySelector('.cs-bkt i'); return [r.dataset.csBank, t('.cs-bknow'), t('.cs-bkend'), t('.cs-bkdo'), t('.cs-bkmv'), i ? [i.className, i.style.left, i.style.width].join(' ') : null]; }));
+  same([await bars(), await result()], [[['Придёт', '£3,000 · пока ничего не получено', '81.1%', '0%'], ['Уйдёт', '£3,700 · пока ничего не оплачено', '100%', '0%']], ['Результат октября по плану', '−£700', 'расходов больше, чем поступлений']],
+    'two bars to one scale - 3,000 is 81% of 3,700 - with nothing of either done yet, and beside them what October comes to: −£700');
+  same([await text(pg, '#cs-banks h2'), await texts(pg, '#cs-cov .cs-bkh .lbl'), await banks()],
+    ['Хватит ли на каждом счётедо конца октября · в £', ['банк', 'сейчас', 'к концу октября', 'что сделать'],
+      [['Wise', '£1,000', '£2,800', 'докинуть £200 — первый минус 10 окт', 'Поступления £3,000. Платежи £1,200. Ещё платить £1,200.', ' 41.7% 58.3%'], ['Barclays', '£500', '−£2,000', 'докинуть £2,000 — первый минус 15 окт', 'Платежи £2,500. Ещё платить £2,500.', 'neg 0% 41.7%']]],
+    'each account is a bar from one zero: Wise ends October at £2,800 - and is £200 short on the way, on the 10th; Barclays ends it at −£2,000, to the left of zero, with what to add and the first day it is short');
+  ok((await top('#cs-scale')) < (await top('#cs-banks')) && (await top('#cs-banks')) < (await top('#cs-two')), 'the bars stand first, the accounts under them, the lists under both');
+  // A sum typed in a row moves the bars and the accounts at once, without the lists being drawn again.
+  await pg.fill(box('team', 't1', 'amt'), '1500');
+  await pg.waitForFunction(() => document.querySelector('#cs-scale .cs-scbig').textContent.includes('1,000'));
+  same([(await bars())[1].slice(0, 2), (await result())[1], (await banks())[0][2]], [['Уйдёт', '£4,000 · пока ничего не оплачено'], '−£1,000', '£2,500'], '1,500 typed for Person T: 4,000 goes, the month is −£1,000 and Wise ends at £2,500 - while the cursor is still in the box');
+  await pg.keyboard.press('Enter');
+  S = await holds(pg, 'Person T at 1,500', 'cash');
+  // A month ahead: what each account goes into it with, by the plan; an account below zero from its first day says so.
+  await toMonth(pg, '2026-11');
+  S = await holds(pg, 'November', 'cash');
+  same([await bars(), await text(pg, '#cs-banks h2'), await texts(pg, '#cs-cov .cs-bkh .lbl'), (await banks()).map((r) => r.slice(0, 4))],
+    [[['Придёт', '£500 · пока ничего не получено', '100%', '0%'], ['Уйдёт', '£0 · в плане ничего нет', '0%', '0%']], 'Хватит ли на каждом счётеноябрь, по плану · в £', ['банк', 'на начало', 'к концу ноября', 'что сделать'],
+      [['Wise', '£2,500', '£3,000', 'хватает'], ['Barclays', '−£2,000', '−£2,000', 'докинуть £2,000 — первый минус 1 ноя']]],
+    'November: 500 comes and nothing goes; Wise goes in with October\'s £2,500, and Barclays - below zero with nothing moving - is short from the 1st');
+  await pg.context().close();
+  // On a phone the same two blocks, no wider than the screen; the bars of the accounts give way to the words.
+  const ph = await scene('cash-top, phone', ledger([]), P, { w: 375, h: 812, H: 60 });
+  await goCash(ph);
+  same([await ph.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), await ph.$$eval('#cs-cov .cs-bkt', (l) => l.every((e) => getComputedStyle(e).display === 'none')), (await ph.$$eval('#cs-cov .cs-bk[data-cs-bank] .cs-bkdo', (l) => l.map((e) => e.textContent))).map(plain)],
+    [true, true, ['докинуть £200 — первый минус 10 окт', 'докинуть £2,000 — первый минус 15 окт']], 'at 375 px nothing runs off the screen: each account is its name, what it ends the month at and what to do');
+  await ph.context().close();
 });
 await run('tax-parts', 'a tax paid in parts: «Сумма по декларации» is the whole bill in the form, and the row\'s box in «Касса» is what is left of it', async () => {
   // 12 November 2026. A quarter's tax split into dated parts leaves a computed row for what the parts do not cover.
