@@ -464,6 +464,18 @@ button.cs-link:active{transform:none}
 .cs-bk[data-cs-bank]:focus-visible{outline:2px solid var(--text-primary);outline-offset:-2px}
 .cs-bkf{margin:10px 0 0}
 .cs-rows tr.cs-hid{display:none}
+/* a list says under its name what is still ahead in it - how much, in how many rows, and when the nearest is due -
+   over a thin bar of how much of it is done; the lists of what goes out fold into that one line by a press on the name */
+.cs-cat{display:inline-flex;align-items:center;gap:8px;height:auto;min-height:0;padding:0;border:0;border-radius:0;background:none;font:inherit;font-weight:600;text-transform:none;letter-spacing:inherit;color:inherit;cursor:pointer}
+.cs-cat:hover{background:none}
+.cs-cat::before{content:"";width:0;height:0;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent var(--text-muted);transform:rotate(90deg)}
+.cs-cat[aria-expanded="false"]::before{transform:none}
+.cs-catsay{margin:0 0 6px}
+.cs-catbar{height:3px;background:var(--panel-alt);margin:0 0 6px}
+.cs-catbar i{display:block;height:100%;background:var(--text-primary)}
+#cs-sec-inflows .cs-catbar i{background:var(--ok)}
+.cs-rows.cs-catshut .tbl,.cs-rows.cs-catshut .cs-secfoot,.cs-rows.cs-catshut .cs-addrow{display:none}
+.cs-rows.cs-catshut .cs-catsay,.cs-rows.cs-catshut .cs-catbar{margin-bottom:0}
 /* the closed rows of a list - received, paid, and what passed outside the plan - stand under the open ones, behind
    one button, in the running month and the months ahead; a row whose card is open stays in sight */
 .cs-rows.cs-folded tr.cs-done:not(.cs-open){display:none}
@@ -2943,7 +2955,7 @@ const Cash=(()=>{
  // What the tab remembers between draws: which half is shown and which month; on «По дням» the account looked at,
  // the day picked and the lines unfolded; the row being typed into; whether «Подписки» stands unfolded (it is folded
  // each time the page is opened); and what «Загрузить план из старой Кассы» holds.
- const cu={view:"plan",month:"",subs:false,scope:"__all",sel:null,open:null,past:false,V:null,sugg:[],auto:null,addAt:"",follow:null,edit:"",imp:null,impText:"",impMsg:"",impOpen:false,line:null,helper:null,land:"",bank:"",shown:{}};
+ const cu={view:"plan",month:"",subs:false,scope:"__all",sel:null,open:null,past:false,V:null,sugg:[],auto:null,addAt:"",follow:null,edit:"",imp:null,impText:"",impMsg:"",impOpen:false,line:null,helper:null,land:"",bank:"",shown:{},cat:{}};
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  const monL=ym=>MONF[+ym.slice(5)-1].toLowerCase(),monP=ym=>MONP[+ym.slice(5)-1],monG=ym=>MONGF[+ym.slice(5)-1];
  const undoStack=[];let undoN=0;
@@ -3266,6 +3278,20 @@ const Cash=(()=>{
  const shownKey=k=>cu.month+"|"+k,shownOf=k=>k==="subs"||(shownKey(k) in cu.shown?cu.shown[shownKey(k)]:cu.month<M.T.slice(0,7));
  const shutN=k=>k==="subs"?0:mon(k).rows.map(id=>by[id]).filter(it=>it&&it.state==="done"&&inBank(it)).length+offRows(k).filter(inBank).length;
  const shutSay=(n,open)=>`${open?"Скрыть закрытые":"Показать закрытые"} · ${n}`;
+ // What is still ahead in a list, in one line under its name (12 November 2026, the owner's prototype): how much is
+ // left of what the month expects in it, in how many open rows, and when the nearest of them is due - or that all of
+ // it is done. Under the line, a bar of how much of the list is done. «Подписки» says this in its own folded
+ // sentence, and has neither.
+ const CATS=["team","taxes","other","div"];
+ function catSay(k){
+  if(k==="subs")return "";
+  const mo=mon(k),rows=mo.rows.map(id=>by[id]).filter(Boolean),open=rows.filter(it=>it.state!=="done"&&it.on!==false&&it.exp>0);
+  if(!rows.length||!(mo.expected>0.5))return "";
+  if(!open.length)return "всё закрыто";
+  const left=Math.max(0,round2((mo.expected||0)-(mo.done||0))),next=open.map(it=>it.date).filter(Boolean).sort()[0],T=M.T;
+  return `${k==="inflows"?"ждём ещё":"осталось"} ${fmt(left)} · ${count(open.length,"строка","строки","строк")}${!next?"":next<T?" · есть просроченные":next===T?" · ближайшая сегодня":` · ближайшая ${dRu(next)}`}`;
+ }
+ const catPc=k=>{const mo=mon(k);return k==="subs"||!(mo.expected>0.5)?-1:Math.max(0,Math.min(100,100*(mo.done||0)/mo.expected));};
  function section(k,adding){
   const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k),outs=offRows(k),all=rows.length+outs.length;
   // Folded: only «Подписки», only while it has rows, and never over a card or «+ новая подписка» standing open in it.
@@ -3282,7 +3308,12 @@ const Cash=(()=>{
   const nob=cu.bank&&all>0&&!rows.some(inBank)&&!outs.some(inBank)?`<tr class="cs-nob"><td class="note">Через ${esc(cu.bank)} здесь ничего не идёт.</td></tr>`:"";
   // Under «Налоги»: what the month itself accrues, which is not what is paid in it.
   const foot=tax&&tax.gbp>0.5?`<p class="note cs-secfoot" id="cs-taxfoot">За ${monL(cu.month)} начислено ${lv("mon.tax.accrued",tax.gbp,fmt(Math.round(tax.gbp)))} — срок позже: ${esc(tax.rules.map(x=>`${x.name} ${dRu(x.due)}`).join(" · "))}.</p>`:"";
-  return `<section class="card cs-rows${folded?" cs-folded":""}" id="cs-sec-${k}"><h2>${SEC[k].title}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
+  // A list of what goes out folds into its name, its line and its bar by a press on the name - never over a card or
+  // «+ новая строка» standing open in it. What comes in stays open: it is the one list of its column.
+  const shutCat=CATS.includes(k)&&!!cu.cat[k]&&!adding&&!rows.some(isOpen),say=catSay(k),pc=catPc(k);
+  const name=CATS.includes(k)?`<button class="cs-cat" data-cs-cat="${k}" aria-expanded="${!shutCat}" title="${shutCat?"Развернуть список":"Свернуть список в одну строку"}">${SEC[k].title}</button>`:SEC[k].title;
+  return `<section class="card cs-rows${folded?" cs-folded":""}${shutCat?" cs-catshut":""}" id="cs-sec-${k}"><h2>${name}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
+   ${k==="subs"?"":`<p class="note cs-catsay" data-cs-catsay${say?"":" hidden"}>${say}</p><div class="cs-catbar" data-cs-catbar${pc<0?" hidden":""}><i style="width:${Math.max(0,pc).toFixed(1)}%"></i></div>`}
    ${k==="subs"&&all?`<div class="cs-fold" id="cs-subs-fold"${fold?"":" hidden"}><p class="note" id="cs-subs-say">${esc(subsSay(rows))}</p><button class="sm ghost" data-cs-fold aria-expanded="false">Показать ${count(all,"строку","строки","строк")}</button></div>`:""}
    <div class="tbl"${fold?" hidden":""}><table><tbody>${body}${nob}</tbody></table></div>${foot}
    <div class="row cs-addrow"${fold?" hidden":""}><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">${k==="subs"?"+ новая подписка":"+ новая строка"}</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}${k==="subs"&&all?'<button class="sm ghost" data-cs-fold aria-expanded="true">Свернуть</button>':""}</div>${adding?Ed.sheet("add"):""}</section>`;
@@ -3732,7 +3763,9 @@ const Cash=(()=>{
    if(tr.contains(act)){if(it)derive(tr,it);return;}
    if(it&&it.ym===cu.month)tr.insertAdjacentHTML("afterend",rowHTML(it));
    tr.remove();});
-  SECS.forEach(k=>{const sec=q("#cs-sec-"+k);if(!sec)return;sec.querySelector("[data-cs-tot]").innerHTML=totalHTML(k);});
+  SECS.forEach(k=>{const sec=q("#cs-sec-"+k);if(!sec)return;sec.querySelector("[data-cs-tot]").innerHTML=totalHTML(k);
+   const cs=sec.querySelector("[data-cs-catsay]"),cb=sec.querySelector("[data-cs-catbar]");if(cs){const t=catSay(k);cs.textContent=t;cs.hidden=!t;}
+   if(cb){const pc=catPc(k);cb.hidden=pc<0;cb.firstElementChild.style.width=Math.max(0,pc).toFixed(1)+"%";}});
   // (a sum typed in a line may close it with a row that stood outside the plan, or let one go: those rows are
   // drawn again where they belong - there is no box in them to take from under a cursor)
   root.querySelectorAll("#cs-plan tr[data-cs-out]").forEach(tr=>tr.remove());
@@ -3906,6 +3939,10 @@ const Cash=(()=>{
    if(x.dataset.edDo==="unpaid")cu.open.add(it.date&&it.date>=M.T?it.date:M.T);}
   if((x=c("[data-cs-view]")))return setView(x.dataset.csView);
   // «Подписки»: the rows fold away before the line of words is drawn, and grow out of it.
+  // A list of what goes out, folded into one line or unfolded, in place. A card open in it is shut first.
+  if((x=c("[data-cs-cat]"))){const k=x.dataset.csCat,sec=x.closest("section"),shut=!cu.cat[k];cu.cat[k]=shut;
+   if(shut&&sec&&sec.querySelector("[data-ed-card]")&&Ed.open()){Ed.close();return;}
+   if(sec)sec.classList.toggle("cs-catshut",shut);x.setAttribute("aria-expanded",String(!shut));x.title=shut?"Развернуть список":"Свернуть список в одну строку";return;}
   // «Показать закрытые» / «Скрыть закрытые»: the list is not drawn again - its closed rows are shown or hidden in place.
   if((x=c("[data-cs-shut]"))){const k=x.dataset.csShut,sec=x.closest("section"),open=!shownOf(k);cu.shown[shownKey(k)]=open;if(sec)sec.classList.toggle("cs-folded",!open);
    x.setAttribute("aria-expanded",String(open));x.textContent=shutSay(shutN(k),open);return;}

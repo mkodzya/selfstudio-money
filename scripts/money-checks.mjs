@@ -3359,6 +3359,36 @@ await run('cash-day', '«Касса · По дням»: a day pressed in the cal
     'at 375 px the day stands under the calendar, and every part of its row ends inside the screen');
   await ph.context().close();
 });
+await run('cash-cats', 'a list of the month says under its name what is still ahead in it, over a bar of what is done - and a list of what goes out folds into that line by a press on its name', async () => {
+  // 12 November 2026, the ninth part of the owner's prototype. A made-up studio on 6 Oct with £5,000 on Wise: Person T
+  // is paid 1,200 and Person U 800 on the 10th, and Client Z pays 3,000 on the 20th.
+  const P = plan3({ banks: [bal('Wise', 'GBP', 5000, T)], team: [row('t1', 'Person T', 1200, '2026-10-10'), row('t2', 'Person U', 800, '2026-10-10')], inflows: [row('z1', 'Client Z', 3000, '2026-10-20', { vat: false })] });
+  const pg = await scene('cash-cats', ledger([]), P, { H: 60 });
+  await goCash(pg);
+  const sec = (k) => pg.$eval('#cs-sec-' + k, (s) => { const b = s.querySelector('[data-cs-cat]'), say = s.querySelector('[data-cs-catsay]'), bar = s.querySelector('[data-cs-catbar]'), shown = (e) => !!e && getComputedStyle(e).display !== 'none' && !e.hidden;
+    return [say && !say.hidden ? say.textContent.replace(/ /g, ' ') : '', bar && !bar.hidden ? bar.firstElementChild.style.width : '', b ? b.getAttribute('aria-expanded') : 'no fold', s.classList.contains('cs-catshut'), shown(s.querySelector('.tbl')), shown(s.querySelector('.cs-addrow'))]; });
+  same([await sec('inflows'), await sec('team'), await sec('taxes'), await pg.$('#cs-sec-subs [data-cs-catsay], #cs-sec-subs [data-cs-cat]')],
+    [['ждём ещё £3,000 · 1 строка · ближайшая 20 окт', '0%', 'no fold', false, true, true], ['осталось £2,000 · 2 строки · ближайшая 10 окт', '0%', 'true', false, true, true], ['', '', 'true', false, true, true], null],
+    'under each name: what is still ahead, in how many rows, the nearest day - and a bar with nothing of it done yet; an empty list says nothing; «Поступления» does not fold, «Подписки» has its own sentence');
+  const saved = await puts('cash', 0);
+  await pg.click('#cs-sec-team [data-cs-cat]');
+  same([await sec('team'), (await puts('cash', 0)) - saved], [['осталось £2,000 · 2 строки · ближайшая 10 окт', '0%', 'false', true, false, false], 0], 'a press on «Команда»: the list is its name, its line and its bar - the rows and «+ новая строка» are folded away, and nothing is saved');
+  await pg.click('#cs-sec-team [data-cs-cat]');
+  await rowDo(pg, 'team', 't1', 'paid');
+  same(await sec('team'), ['осталось £800 · 1 строка · ближайшая 10 окт', '60%', 'true', false, true, true], 'unfolded again, Person T paid: £800 is left in one row, and the bar is at 60%');
+  // A press on the name with a card open in the list shuts the card first, then folds the list.
+  await pg.click('#cs-sec-team [data-cs-cat]');
+  await pg.waitForSelector('#cs-sec-team.cs-catshut');
+  same([await pg.$('#cs-sec-team [data-ed-card]'), (await sec('team')).slice(2)], [null, ['false', true, false, false]], 'folded with Person T\'s card open in it: the card is shut, and the list folds');
+  await pg.click('#cs-sec-team [data-cs-cat]');
+  // A sum typed in a row moves the line and the bar at once.
+  await pg.fill(box('team', 't2', 'amt'), '1000');
+  await pg.waitForFunction(() => document.querySelector('#cs-sec-team [data-cs-catsay]').textContent.includes('1,000'));
+  same((await sec('team')).slice(0, 2), ['осталось £1,000 · 1 строка · ближайшая 10 окт', '54.5%'], '1,000 typed for Person U: £1,000 is left, 1,200 of 2,200 is done - while the cursor is still in the box');
+  await pg.keyboard.press('Enter');
+  await holds(pg, 'Person U at 1,000', 'cash');
+  await pg.context().close();
+});
 await run('tax-parts', 'a tax paid in parts: «Сумма по декларации» is the whole bill in the form, and the row\'s box in «Касса» is what is left of it', async () => {
   // 12 November 2026. A quarter's tax split into dated parts leaves a computed row for what the parts do not cover.
   // Its form offered that remainder under «Сумма по декларации» and stored whatever was typed as the WHOLE bill; the
