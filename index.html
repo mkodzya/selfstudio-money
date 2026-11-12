@@ -571,6 +571,27 @@ button.cs-link:active{transform:none}
 .td-own{margin:10px 0 0;font-size:15px;line-height:1.45;max-width:86ch}
 .td-say{font-size:19px;font-weight:600;line-height:1.35;letter-spacing:-.01em;margin:0;max-width:62ch;text-wrap:balance}
 .td-v4 .td-say{color:var(--mark-crit)}
+/* The headline says it; the sentence under it is then plain text, and the side line alone carries the colour. */
+.td-hd{font-size:22px;font-weight:600;line-height:1.25;letter-spacing:-.015em;margin:0 0 6px;max-width:44ch;text-wrap:balance}
+.td-hd+.td-say,.td-v4 .td-hd+.td-say{font-size:16px;font-weight:400;line-height:1.45;letter-spacing:0;color:var(--text-primary);max-width:78ch;text-wrap:pretty}
+/* The days ahead, a cell to a day. */
+.td-sbox{margin-top:16px}
+.td-strip{display:grid;grid-template-columns:repeat(var(--n,31),minmax(0,1fr));gap:3px}
+.td-sd{display:block;height:26px;line-height:26px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--text-secondary);background:var(--panel-alt);border-radius:3px;cursor:pointer;user-select:none;font-variant-numeric:tabular-nums}
+.td-sd:hover{background:var(--accent-dim)}
+.td-sd.lo{background:var(--warn-dim);color:var(--warn)}
+.td-sd.ng{background:var(--bad-dim);color:var(--mark-crit)}
+.td-sd.t{box-shadow:inset 0 0 0 1.5px var(--text-primary);color:var(--text-primary);font-weight:600}
+.td-sd.on{outline:2px solid var(--text-primary);outline-offset:1px}
+.td-sd:focus-visible{outline:2px solid var(--text-primary);outline-offset:1px}
+.td-sl{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;margin:8px 0 0;font-size:12px;color:var(--text-muted)}
+.td-sl span{display:inline-flex;align-items:center;gap:6px}
+.td-sl i{width:12px;height:12px;border-radius:3px;background:var(--panel-alt);flex:none}
+.td-sl i.t{box-shadow:inset 0 0 0 1.5px var(--text-primary)}.td-sl i.lo{background:var(--warn-dim)}.td-sl i.ng{background:var(--bad-dim)}
+.td-sl a{margin-left:auto;color:var(--text-primary)}
+.td-sdr{margin:10px 0 0;font-size:14px;line-height:1.45;font-variant-numeric:tabular-nums}
+.td-sdr b{font-weight:600}
+@media (max-width:620px){.td-hd{font-size:19px}.td-strip{grid-template-columns:repeat(16,minmax(0,1fr))}.td-sd{height:30px;line-height:30px}}
 .td-verdict .note{margin:8px 0 0;max-width:86ch}
 .td-verdict .row{margin-top:14px}
 .td-kpi{cursor:pointer}
@@ -8421,7 +8442,7 @@ const Today=(()=>{
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  // `wk` holds the weeks a founder opened or shut by hand (the week's Monday → open); `anl` is «Аналитика», and is
  // remembered in this browser like the choice of 30 or 60 days: whoever reads the chart every morning opens it once.
- const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false,wi:false};
+ const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false,wi:false,sd:""};
  try{st.anl=localStorage.getItem(ANL)==="1";}catch(e){}
  let M=null,by={},chartW=0;
  const num=v=>typeof v==="number"?v.toFixed(2):esc(v==null?"":v);
@@ -8439,35 +8460,45 @@ const Today=(()=>{
  function verdict(){
   // When the newest balance or statement is older than yesterday the sentence says as of which day it speaks.
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
-  const v=M.verdict,H=M.H,pre=v.asOf?`По остаткам на ${dRuF(v.asOf)}`:"",cap=(s,join)=>pre?pre+(join||": ")+s[0].toLowerCase()+s.slice(1):s;let s,btn="";
+  const v=M.verdict,H=M.H,pre=v.asOf?`По остаткам на ${dRuF(v.asOf)}`:"",cap=(s,join)=>pre?pre+(join||": ")+s[0].toLowerCase()+s.slice(1):s;let s,btn="",hd="";
+  // The headline (12 November 2026, Mika's «давай что-то совсем простое»): a few words about the whole stretch of
+  // days, never about one of them, and under it one sentence in which every figure names its day. The line «Своих
+  // денег» already says what the accounts hold, so the sentence repeats it only where that line is not drawn; with
+  // balances older than yesterday the sentence still says as of which day it speaks.
+  const hasOwn=!(M.v0||v.id==="vE"||!(M.taxes.reserve>0.5));
+  const lead=(t,join)=>hasOwn?cap(t,join):(v.asOf?`По остаткам на ${dRuF(v.asOf)} на счетах ${fmt(M.now)}. `:`Сейчас на счетах ${fmt(M.now)}. `)+t;
   const helper='<button data-td-helper>Подставить по прошлым месяцам</button>';
-  if(v.id==="v0"){const who=M.missing.map(k=>acc(k).name);
+  if(v.id==="v0"){const who=M.missing.map(k=>acc(k).name);hd="Не хватает остатков, чтобы посчитать";
    s=`Нет остатка: ${who.join(", ")}. Без ${who.length>1?"них":"него"} итог не посчитать. ${M.empty?"План пока пуст.":`По плану за ${H} дней придёт ${fmt(M.IN)} и уйдёт ${fmt(M.OUT)}.`}`;
    // Only a typed balance is a way out of here: a statement brings rows, and no balance, until the page reads
    // balances off statements. With nothing written either, the second thing to do stands beside the first.
    btn='<button class="primary" data-ed-bal>Вписать остатки</button>'+(M.empty?fillBtn(M,M.T.slice(0,7)," ")+helper:"");}
   // Nothing is written ahead: the page says what is in the bank and what of it is not the studio's, and that is
   // all it can say. No verdict about a plan that is not there.
-  else if(v.id==="vE"){const res=M.taxes.reserve||0,sh=v.short;
+  else if(v.id==="vE"){const res=M.taxes.reserve||0,sh=v.short;hd="Вперёд ничего не вписано";
    s=cap(`План пуст: на счетах ${fmt(M.now)}${res<0.5?"":res>M.now?`, а под налоги нужно ${fmt(res)}`:`, из них ${fmt(res)} — под налоги`}. Вперёд ничего не вписано, поэтому на сколько хватит денег, сказать не могу.${sh&&sh.name?` ${dRuF(sh.d)} срок налога ${sh.name} — ${fmt(sh.gbp)}: на счетах сейчас меньше.`:""}`," ");
    btn=fillBtn(M,M.T.slice(0,7),"primary")+helper;}
   // The day the money runs out comes first: that is the day to act by. The deepest day may be weeks later, and
   // named alone it read as "nothing to do until December" with a minus four days off.
-  else if(v.id==="v4"){const out=M.plusDay?`В плюс выходим ${dRuF(M.plusDay)}.`:"До конца периода в плюс не выходим.";
-   s=cap(M.minusDay&&M.minusDay!==M.LOWDAY?`${dRuF(M.minusDay)} не хватит ${fmt(-M.minus)} — это первый минус. Глубже всего ${dRuF(M.LOWDAY)}: не хватит ${fmt(-M.LOW)}. ${out}`:`${dRuF(M.LOWDAY)} не хватит ${fmt(-M.LOW)}. ${out}`);
+  // (Until 12 November the sentence named the first day short, its sum, the deepest day and the day out of the minus:
+  // the headline now says from which day to which, and the sentence the deepest. Where the days below zero are not
+  // one stretch, the headline does not pretend they are.)
+  else if(v.id==="v4"){const a=M.minusDay||M.LOWDAY,b=M.plusDay?dAdd(M.plusDay,-1):"",run=M.days.filter(x=>x.d>=a&&(!b||x.d<=b)).every(x=>x.e<0);
+   hd=!run?`В ближайшие ${H} дней денег не хватит`:!b?`С ${dRuF(a)} денег не хватит`:b>a?`С ${a.slice(0,7)===b.slice(0,7)?+a.slice(8):dRuF(a)} по ${dRuF(b)} денег не хватит`:`${dRuF(a)} денег не хватит`;
+   s=lead(`Глубже всего — ${dRuF(M.LOWDAY)}: ${fmt(M.LOW)}.${M.plusDay?"":" До конца периода в плюс не выходим."}`," ");
    btn=`<button data-td-days="${M.minusDay||M.LOWDAY}" data-td-why>Как закрыть</button>`;}
-  else if(v.id==="v3"){s=cap(`Хватает, но впритык: ${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`," ");btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
+  else if(v.id==="v3"){hd=`Денег хватает, но ${dRuF(M.LOWDAY)} будет тесно`;s=lead(`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`);btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
   // No money of the studio's own (vR, Mika's «16 да» of 31 October 2026): the plan stays above zero only on money the
   // taxes are owed, so the sentence says so and never «хватает». In the place of v3 it still names the day under the
   // cushion, with its button.
-  else if(v.id==="vR"){const low=v.base==="v3";
-   s=cap(`Минуса в ближайшие ${H} дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. ${low?`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`}`);
+  else if(v.id==="vR"){const low=v.base==="v3";hd="Минуса нет, но своих денег нет";
+   s=cap(`Под налоги нужно больше, чем лежит на счетах. ${low?`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`}`);
    if(low)btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
-  else if(v.id==="vi"){s=`Сначала разберите ${count(M.inbox.inN,"поступление","поступления","поступлений")} на ${fmt(M.inbox.inGbp)}: часть ожидаемых денег, возможно, уже пришла.`;btn='<button class="primary" data-tabgo="inbox">Разобрать</button>';}
+  else if(v.id==="vi"){hd="Сначала разберите поступления";s=`Сначала разберите ${count(M.inbox.inN,"поступление","поступления","поступлений")} на ${fmt(M.inbox.inGbp)}: часть ожидаемых денег, возможно, уже пришла.`;btn='<button class="primary" data-tabgo="inbox">Разобрать</button>';}
   // A plan with less than half a usual month of costs written is not one to say «денег хватает» about.
-  else if(v.id==="vT"){const t=M.free.thin;
+  else if(v.id==="vT"){const t=M.free.thin;hd="План не дописан";
    s=cap(`План на ${dRu(t.from)} – ${dRu(t.to)} не дописан: расходов на команду и прочее вписано ${fmt(t.plan)}, обычный месяц — ${fmt(t.usual)}. Пока так, «денег хватает» сказать не могу. Нижняя точка по вписанному — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`," ");btn=fillBtn(M,t.month,"primary");}
-  else s=cap(`Денег хватает на ${H} дней по тому, что вписано в план. Нижняя точка — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`);
+  else{hd=`Денег хватает на все ${H} дней`;s=lead(`Нижняя точка по плану — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`," ");}
   const old=M.accounts.find(a=>a.stale||a.handOld);
   const SUB={
    between:()=>`${count(M.between.n,"строка","строки","строк")} на ${fmt(M.between.gbp)} между выписками и вписанным остатком — возможно, ${M.between.n===1?"посчитана":"посчитаны"} дважды.`,
@@ -8481,7 +8512,22 @@ const Today=(()=>{
   // it is read: the model's `own` is to the penny, and each part is printed to the pound, as everywhere else.
   const pd=x=>(x<0?-1:1)*Math.round(Math.abs(x)),ownP=M.v0?0:pd(M.now)-pd(M.taxes.reserve);
   const own=M.v0||v.id==="vE"||!(M.taxes.reserve>0.5)?"":`<p class="td-own">Своих денег${M.nowIsToday||!M.nowDate?"":" на "+dRu(M.nowDate)} <b${ownP<0?' class="neg"':""}>${lv("own",M.own,fmt(ownP))}</b>: на счетах ${lv("own.now",M.now,fmt(M.now))}, под налоги ${lv("own.res",M.taxes.reserve,fmt(M.taxes.reserve))}</p>`;
-  return `<section class="card td-verdict td-${v.id}" aria-label="Итог"><p class="td-say" data-live="verdict" data-v="${v.id}">${esc(s)}</p>${own}${subs.map(x=>`<p class="note">${esc(x)}</p>`).join("")}${btn?`<div class="row">${btn}</div>`:""}</section>`;
+  return `<section class="card td-verdict td-${v.id}" aria-label="Итог"><p class="td-hd" role="heading" aria-level="2">${esc(hd)}</p><p class="td-say" data-live="verdict" data-v="${v.id}">${esc(s)}</p>${own}${subs.map(x=>`<p class="note">${esc(x)}</p>`).join("")}${btn?`<div class="row">${btn}</div>`:""}${strip()}</section>`;
+ }
+ // ---- the days ahead, a cell to a day ----
+ // What the chart says, at a glance and without opening it: a day under the cushion is amber, a day below zero is
+ // the minus's own colour, today is framed. A press on a day says under the strip what comes, what goes and what is
+ // left on it; nothing here changes the plan, and no figure of it is a data-live - the screen's own figures are in
+ // «План на … дней» and in the chart. Not drawn without every balance (the line is then a change, not a balance) or
+ // with nothing written ahead (a row of grey cells would read as a forecast).
+ function strip(){
+  if(M.v0||M.empty||!M.days.length)return "";
+  const D=st.sd?M.days.find(x=>x.d===st.sd):null,cu=M.cushion>0.5;
+  const cell=x=>{const on=!!(D&&D.d===x.d);
+   return `<span class="td-sd${x.e<0?" ng":cu&&x.e<M.cushion?" lo":""}${x.d===M.T?" t":""}${on?" on":""}" data-td-sd="${x.d}" role="button" tabindex="0" aria-pressed="${on}" title="${dRuW(x.d)}: останется ${fmt(x.e)}">${+x.d.slice(8)}</span>`;};
+  const say=D?`<p class="td-sdr"><b>${D.d===M.T?"сегодня, ":""}${dRuW(D.d)}</b> · ${[D.in?`придёт +${fmt(D.in)}`:"",D.out?`уйдёт −${fmt(D.out)}`:"",`останется ${fmt(D.e)}`].filter(Boolean).join(" · ")} · <a href="#cash" data-td-days="${D.d}">открыть день</a></p>`:"";
+  return `<div class="td-sbox"><div class="td-strip" style="--n:${M.days.length>31?Math.ceil(M.days.length/2):M.days.length}" role="group" aria-label="Остаток по дням: ${M.H} дней">${M.days.map(cell).join("")}</div>
+   <p class="td-sl"><span><i class="t"></i>сегодня</span>${cu?`<span><i class="lo"></i>меньше запаса ${fmtK(M.cushion)}</span>`:""}<span><i class="ng"></i>минус</span><a href="#today" data-td-graph>График</a></p>${say}</div>`;
  }
 
  // ---- «Можно вывести», in words ----
@@ -8819,7 +8865,11 @@ const Today=(()=>{
    if(d.open)return fold(body,()=>{d.open=false;});
    d.open=true;st.anl=true;chart();return unfold(body);}
   if((x=c("[data-td-day]"))){st.day=x.dataset.tdDay;root.querySelector("#td-dayinfo").innerHTML=st.day?dayInfo(st.day):"";return;}
-  if((x=c("[data-td-days]"))){Cash.day(x.dataset.tdDays,x.hasAttribute("data-td-why"));return setTab("cash");}
+  // A day of the strip: its line under the strip, and away on a second press.
+  if((x=c("[data-td-sd]"))){st.sd=st.sd===x.dataset.tdSd?"":x.dataset.tdSd;const d=st.sd;render();const b=d&&root.querySelector(`[data-td-sd="${d}"]`);if(b)b.focus({preventScroll:true});return;}
+  // «График»: the chart is in «Аналитика», under everything a founder acts on - it is opened and brought into view.
+  if(c("[data-td-graph]")){e.preventDefault();const d=root.querySelector(".td-anl");if(!d)return;if(!d.open){d.open=true;st.anl=true;chart();}return d.scrollIntoView({behavior:CALM()?"auto":"smooth",block:"start"});}
+  if((x=c("[data-td-days]"))){e.preventDefault();Cash.day(x.dataset.tdDays,x.hasAttribute("data-td-why"));return setTab("cash");}
   // The two things to do about an empty plan: open the month to type it in, or the list of who is paid every month.
   if((x=c("[data-td-fill]"))){Cash.month(x.dataset.tdFill);return setTab("cash");}
   if(c("[data-td-helper]")){Cash.month(M.T.slice(0,7),true);return setTab("cash");}
@@ -9137,7 +9187,7 @@ document.addEventListener("click",ev=>{
 });
 document.addEventListener("keydown",ev=>{
  const t=ev.target;if(ev.key!=="Enter"||!t.matches)return;
- if(t.matches("[data-row],[data-repgo],[data-reprow],[data-focus]"))return t.click();
+ if(t.matches("[data-row],[data-repgo],[data-reprow],[data-focus],[data-td-sd]"))return t.click();
  if(t.matches("#view-inbox input.lab,#view-inbox input.vat")){const r=inboxRow(t);if(r&&r.c){if(t.dataset.f==="v"){r.v=round2(+t.value||0);r.vSet=true;}else{r.l=t.value.trim();r.auto=false;r.touched=true;if(!r.vSet)r.v=vatOf(r);}accept([r.id]);}}
  if(t.matches("[data-ipdate]")){ev.preventDefault();const r=inboxRow(t);if(ui.ipart&&r)ui.ipart.date=t.value;return partGo(r);}
  if(t.id==="ownIn"){const b=document.querySelector("[data-ownadd]");if(b)b.click();}
