@@ -464,6 +464,13 @@ button.cs-link:active{transform:none}
 .cs-bk[data-cs-bank]:focus-visible{outline:2px solid var(--text-primary);outline-offset:-2px}
 .cs-bkf{margin:10px 0 0}
 .cs-rows tr.cs-hid{display:none}
+/* the closed rows of a list - received, paid, and what passed outside the plan - stand under the open ones, behind
+   one button, in the running month and the months ahead; a row whose card is open stays in sight */
+.cs-rows.cs-folded tr.cs-done:not(.cs-open){display:none}
+.cs-rows tr.cs-shutr,.cs-rows tr.cs-shutr td,.cs-rows tr.cs-allshut,.cs-rows tr.cs-allshut td,.cs-rows tr.cs-nob,.cs-rows tr.cs-nob td{display:block}
+.cs-rows tr.cs-shutr td{padding:6px 0 2px}
+.cs-rows tr.cs-allshut td,.cs-rows tr.cs-nob td{padding:7px 0}
+.cs-rows:not(.cs-folded) tr.cs-allshut{display:none}
 .cs-bk.cs-flat{grid-template-columns:118px minmax(0,1fr)}
 .cs-bkn{display:inline-flex;align-items:center;gap:8px;font-weight:600;min-width:0}
 .cs-bk .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:13px}
@@ -2914,7 +2921,7 @@ const Cash=(()=>{
  // What the tab remembers between draws: which half is shown and which month; on «По дням» the account looked at,
  // the day picked and the lines unfolded; the row being typed into; whether «Подписки» stands unfolded (it is folded
  // each time the page is opened); and what «Загрузить план из старой Кассы» holds.
- const cu={view:"plan",month:"",subs:false,scope:"__all",sel:null,open:null,past:false,V:null,sugg:[],auto:null,addAt:"",follow:null,edit:"",imp:null,impText:"",impMsg:"",impOpen:false,line:null,helper:null,land:"",bank:""};
+ const cu={view:"plan",month:"",subs:false,scope:"__all",sel:null,open:null,past:false,V:null,sugg:[],auto:null,addAt:"",follow:null,edit:"",imp:null,impText:"",impMsg:"",impOpen:false,line:null,helper:null,land:"",bank:"",shown:{}};
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  const monL=ym=>MONF[+ym.slice(5)-1].toLowerCase(),monP=ym=>MONP[+ym.slice(5)-1],monG=ym=>MONGF[+ym.slice(5)-1];
  const undoStack=[];let undoN=0;
@@ -3229,15 +3236,31 @@ const Cash=(()=>{
  const subsSay=all=>{const rows=all.filter(inBank),gone=rows.filter(it=>it.state==="done"),todo=rows.filter(it=>it.state!=="done"&&it.exp>0),rest=rows.filter(it=>it.state!=="done"&&!(it.exp>0)),out=offRows("subs").filter(inBank);
   const names=l=>l.slice(0,12).map(it=>it.name||"(без названия)").join(", ")+(l.length>12?` и ещё ${l.length-12}`:"");
   return [todo.length?`Ещё ${todo.length} на ${fmt(Math.round(todo.reduce((a,it)=>a+it.exp-it.expDone,0)))}: ${names(todo)}.`:"",gone.length?`${todo.length?"Уже списаны":"Все списаны"}: ${names(gone)}.`:"",rest.length?`Не в расчёте: ${names(rest)}.`:"",out.length?`Вне плана: ${names(out)}.`:""].filter(Boolean).join(" ");};
+ // «Показать закрытые»: whether a list shows its closed rows. Until it is pressed, the running month and the months
+ // ahead keep them folded, and a month gone by - where they are most of what there is - shows them. What was pressed
+ // holds for the list while the page is open; nothing is stored.
+ // («Подписки» is folded into a line of words as a whole: unfolded, it shows every row, and has no second button.)
+ // (what was pressed is the list's in the month it was pressed in: another month opens as that month does by itself)
+ const shownKey=k=>cu.month+"|"+k,shownOf=k=>k==="subs"||(shownKey(k) in cu.shown?cu.shown[shownKey(k)]:cu.month<M.T.slice(0,7));
+ const shutN=k=>k==="subs"?0:mon(k).rows.map(id=>by[id]).filter(it=>it&&it.state==="done"&&inBank(it)).length+offRows(k).filter(inBank).length;
+ const shutSay=(n,open)=>`${open?"Скрыть закрытые":"Показать закрытые"} · ${n}`;
  function section(k,adding){
   const rows=mon(k).rows.map(id=>by[id]).filter(Boolean),tax=k==="taxes"?(M.months.by[cu.month]||{}).tax:null,dups=dupOf(k),outs=offRows(k),all=rows.length+outs.length;
   // Folded: only «Подписки», only while it has rows, and never over a card or «+ новая подписка» standing open in it.
   const fold=k==="subs"&&all>0&&!cu.subs&&!adding&&!rows.some(isOpen);
-  const body=mixed(rows,outs).map(x=>{if(x.r)return outHTML(x.r,k);const it=x.it,card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td>${card}</td></tr>`:"");}).join("")||`<tr class="cs-none"><td class="note">${k==="subs"?"В этом месяце подписок нет.":"В этом месяце строк нет."}</td></tr>`;
+  // The open rows first, in the order of their dates; under them the closed ones - what is received or paid, and
+  // what passed outside the plan, each before the first closed line dated after it - behind «Показать закрытые»
+  // (12 November 2026: a month's list mixed what is done with what is still to do, and the eye had to sort them).
+  const one=x=>{if(x.r)return outHTML(x.r,k);const it=x.it,card=Ed.under(it.id,"plan");return rowHTML(it)+lineHTML(it)+(card?`<tr class="cs-edrow"><td>${card}</td></tr>`:"");};
+  const live=rows.filter(it=>it.state!=="done"),shut=rows.filter(it=>it.state==="done"),nShut=shutN(k),folded=!shownOf(k);
+  // («Подписки», unfolded, is every row in the order of its dates, as it was: it has no closed part of its own.)
+  const body=k==="subs"&&all?mixed(rows,outs).map(one).join(""):all?live.map(it=>one({it})).join("")+(!live.length&&nShut?'<tr class="cs-allshut"><td class="note">Открытых строк нет.</td></tr>':"")
+    +`<tr class="cs-shutr"${nShut?"":" hidden"}><td><button class="sm ghost" data-cs-shut="${k}" aria-expanded="${!folded}">${shutSay(nShut,!folded)}</button></td></tr>`+mixed(shut,outs).map(one).join("")
+   :`<tr class="cs-none"><td class="note">${k==="subs"?"В этом месяце подписок нет.":"В этом месяце строк нет."}</td></tr>`;
   const nob=cu.bank&&all>0&&!rows.some(inBank)&&!outs.some(inBank)?`<tr class="cs-nob"><td class="note">Через ${esc(cu.bank)} здесь ничего не идёт.</td></tr>`:"";
   // Under «Налоги»: what the month itself accrues, which is not what is paid in it.
   const foot=tax&&tax.gbp>0.5?`<p class="note cs-secfoot" id="cs-taxfoot">За ${monL(cu.month)} начислено ${lv("mon.tax.accrued",tax.gbp,fmt(Math.round(tax.gbp)))} — срок позже: ${esc(tax.rules.map(x=>`${x.name} ${dRu(x.due)}`).join(" · "))}.</p>`:"";
-  return `<section class="card cs-rows" id="cs-sec-${k}"><h2>${SEC[k].title}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
+  return `<section class="card cs-rows${folded?" cs-folded":""}" id="cs-sec-${k}"><h2>${SEC[k].title}<span class="note mono" data-cs-tot>${totalHTML(k)}</span></h2>
    ${k==="subs"&&all?`<div class="cs-fold" id="cs-subs-fold"${fold?"":" hidden"}><p class="note" id="cs-subs-say">${esc(subsSay(rows))}</p><button class="sm ghost" data-cs-fold aria-expanded="false">Показать ${count(all,"строку","строки","строк")}</button></div>`:""}
    <div class="tbl"${fold?" hidden":""}><table><tbody>${body}${nob}</tbody></table></div>${foot}
    <div class="row cs-addrow"${fold?" hidden":""}><button class="sm ghost" data-ed-add="${k}" data-ed-mon="${cu.month}" data-cs-addat="${k}">${k==="subs"?"+ новая подписка":"+ новая строка"}</button>${dups.length?`<button class="sm ghost" data-cs-dup="${k}">Продублировать с ${monG(prevYm(cu.month))} · ${dups.length} ${plural(dups.length,"строка","строки","строк")}</button>`:""}${k==="subs"&&all?'<button class="sm ghost" data-cs-fold aria-expanded="true">Свернуть</button>':""}</div>${adding?Ed.sheet("add"):""}</section>`;
@@ -3398,7 +3421,7 @@ const Cash=(()=>{
   // at its head; an earlier month still holds the plan's rows alone, and says so.
   const mo=M.months.by[m]||{},of=mo.off,pay=n=>count(n,"платёж","платежа","платежей");
   const past=m<ymT&&!of?'<p class="note" id="cs-past">Здесь — только строки плана за этот месяц. Всё, что прошло по выпискам, — в «Месяцах».</p>':"";
-  const outs=of&&of.nIn+of.nOut?`<p class="note" id="cs-off">Оплачено вне плана в ${monP(m)}: ${[of.nOut?`ушло ${lv("mon.off.out",of.out,fmt(of.out))} (${pay(of.nOut)})`:"",of.nIn?`пришло ${lv("mon.off.in",of.in,fmt(of.in))} (${pay(of.nIn)})`:""].filter(Boolean).join(", ")}. Эти строки стоят в списках ниже, серым; в расчёт плана они не входят.</p>`:"";
+  const outs=of&&of.nIn+of.nOut?`<p class="note" id="cs-off">Оплачено вне плана в ${monP(m)}: ${[of.nOut?`ушло ${lv("mon.off.out",of.out,fmt(of.out))} (${pay(of.nOut)})`:"",of.nIn?`пришло ${lv("mon.off.in",of.in,fmt(of.in))} (${pay(of.nIn)})`:""].filter(Boolean).join(", ")}. Эти строки стоят в списках ниже, серым, среди закрытых; в расчёт плана они не входят.</p>`:"";
   const wait=mo.wait&&mo.wait.n?`<p class="note" id="cs-wait">Ещё ${pay(mo.wait.n)} на ${fmt(mo.wait.gbp)} за ${monL(m)} ${plural(mo.wait.n,"ждёт","ждут","ждут")} в «Разборе»: статьи пока нет, поэтому в списках ${mo.wait.n===1?"его":"их"} нет. <button class="cs-link" data-tab="inbox">Открыть «Разбор»</button></p>`:"";
   // The plan holds only what a founder wrote, so a month may be empty. Thirty rows are a lot to type: the helper
   // is one press away at the head of the tab, and is offered again, in full view, by a month nobody has written.
@@ -3411,7 +3434,7 @@ const Cash=(()=>{
   // Above the lists (12 November 2026, the owner's choice of the prototype): the month as two bars, and the accounts.
   const sc=scale(),banks=`<section class="card" id="cs-banks"><h2>${m>=ymT?"Хватит ли на каждом счёте":"По банкам"}<span class="note">${m===ymT?`до конца ${monG(m)}`:m>ymT?`${mn}, по плану`:`${mn}: что прошло через каждый банк по плану`} · в £ · нажмите на счёт — в списках останутся его строки</span></h2><div class="cs-bks" id="cs-cov">${cover()}</div>${cu.bank?`<p class="note cs-bkf" id="cs-bankf">В списках ниже — только строки ${esc(cu.bank)}; итоги разделов — по всем счетам. <button class="cs-link" data-cs-bankoff>Показать все</button></p>`:""}</section>`;
   return `<div id="cs-plan" class="stack">${notes}${help}<section class="card cs-scale" id="cs-scale"${sc?"":" hidden"}>${sc}</section>${banks}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
-   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: сверху — что о строке известно, снизу — что с ней можно сделать: «Получено» или «Оплачено», «Частично…», «Перенести…», «Не придёт…». Название, сумму, банк, дату и «каждый месяц» меняет «Изменить строку»; выбрать платёж из выписки, «Что если…» и «Удалить строку» — в «Ещё…». Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
+   <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». В каждом списке сверху — то, что ещё впереди; полученное и оплаченное — под кнопкой «Показать закрытые» (в прошедшем месяце они открыты сразу). Серая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит среди закрытых, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: сверху — что о строке известно, снизу — что с ней можно сделать: «Получено» или «Оплачено», «Частично…», «Перенести…», «Не придёт…». Название, сумму, банк, дату и «каждый месяц» меняет «Изменить строку»; выбрать платёж из выписки, «Что если…» и «Удалить строку» — в «Ещё…». Серым — налог студии, который страница посчитала по правилу. С галочкой — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — ответ рядом: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Подписки</b> — те же прочие расходы в своей графе; она свёрнута в одну строку, пока её не откроют. Строку переносит туда и обратно галочка «это подписка» в её карточке.
     <b>Даты.</b> Строка без даты остаётся в своём месяце, но в расчёт по дням не идёт.</p>
@@ -3682,9 +3705,10 @@ const Cash=(()=>{
   // drawn again where they belong - there is no box in them to take from under a cursor)
   root.querySelectorAll("#cs-plan tr[data-cs-out]").forEach(tr=>tr.remove());
   SECS.forEach(k=>{const body=q(`#cs-sec-${k} tbody`);if(!body)return;offRows(k).slice().sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0).forEach(r=>{
-   const at=[...body.querySelectorAll("tr[data-cs-id]")].find(tr=>{const it=by[tr.dataset.csId];return !!it&&(!it.date||it.date>r.d);});
+   const at=[...body.querySelectorAll(body.querySelector("tr.cs-shutr")?"tr.cs-shutr~tr.cs-done[data-cs-id]":"tr[data-cs-id]")].find(tr=>{const it=by[tr.dataset.csId];return !!it&&(!it.date||it.date>r.d);});
    const none=body.querySelector("tr.cs-none");if(none)none.remove();
-   if(at)at.insertAdjacentHTML("beforebegin",outHTML(r,k));else body.insertAdjacentHTML("beforeend",outHTML(r,k));});});
+   if(at)at.insertAdjacentHTML("beforebegin",outHTML(r,k));else body.insertAdjacentHTML("beforeend",outHTML(r,k));});
+   const b=q(`#cs-sec-${k} [data-cs-shut]`);if(b){const n=shutN(k);b.textContent=shutSay(n,b.getAttribute("aria-expanded")==="true");b.closest("tr").hidden=!n;}});
   const f=q("#cs-subs-say");if(f)f.textContent=subsSay(mon("subs").rows.map(id=>by[id]).filter(Boolean));
   const c=q("#cs-cov");if(c)c.innerHTML=cover();
   const sc=q("#cs-scale");if(sc){const h=scale();sc.innerHTML=h;sc.hidden=!h;}
@@ -3847,6 +3871,9 @@ const Cash=(()=>{
    if(x.dataset.edDo==="unpaid")cu.open.add(it.date&&it.date>=M.T?it.date:M.T);}
   if((x=c("[data-cs-view]")))return setView(x.dataset.csView);
   // «Подписки»: the rows fold away before the line of words is drawn, and grow out of it.
+  // «Показать закрытые» / «Скрыть закрытые»: the list is not drawn again - its closed rows are shown or hidden in place.
+  if((x=c("[data-cs-shut]"))){const k=x.dataset.csShut,sec=x.closest("section"),open=!shownOf(k);cu.shown[shownKey(k)]=open;if(sec)sec.classList.toggle("cs-folded",!open);
+   x.setAttribute("aria-expanded",String(open));x.textContent=shutSay(shutN(k),open);return;}
   // «Только этот счёт»: a second press on the account, or «Показать все», brings every row back. A card open in a
   // row is shut with it, as «Свернуть» shuts one.
   if((x=c(".cs-bk[data-cs-bank],[data-cs-bankoff]"))){const b=x.dataset.csBank||"",go=()=>{cu.bank=cu.bank===b?"":b;if(Ed.open())Ed.close();else draw();
@@ -8392,7 +8419,10 @@ const Ed=(()=>{
  // card took the cursor away with it, and Tab began again at the top of the page (the third review of 1 November
  // 2026).
  const opener=c=>{const id=String(c.id).replace(/["\\]/g,"\\$&"),l=[...document.querySelectorAll(`[data-ed-open="${id}"]`)].filter(e=>e.getClientRects().length&&(e.tagName==="BUTTON"||e.tabIndex>=0)),at=l.filter(e=>(e.dataset.edAt||"")===(c.at||""));
-  return at.find(e=>!e.dataset.edAsk&&!e.dataset.edFocus)||at[0]||l.find(e=>!e.dataset.edAsk&&!e.dataset.edFocus)||l[0]||null;};
+  // (a row of «Касса» that its answer has just closed goes behind «Показать закрытые» as its card shuts - since 12
+  // November 2026 - and then that button is what the cursor is given)
+  const hid=()=>{const tr=document.querySelector(`#view-cash .cs-folded tr.cs-done[data-cs-id="${id}"]`),sec=tr&&tr.closest("section");return sec?sec.querySelector("tr.cs-shutr:not([hidden]) [data-cs-shut]"):null;};
+  return at.find(e=>!e.dataset.edAsk&&!e.dataset.edFocus)||at[0]||l.find(e=>!e.dataset.edAsk&&!e.dataset.edFocus)||l[0]||hid();};
  const shut=card=>{const was=cur;fold(card||document.querySelector("[data-ed-card]"),()=>{if(cur===was){cur=null;Plan.redraw();
   const a=document.activeElement,o=was&&was.k==="row"&&(!a||a===document.body||!a.isConnected)?opener(was):null;if(o)o.focus({preventScroll:true});}});};
  // A row's card shut by ×, by Escape at rest or by the second press on its row - unless its form holds what has
