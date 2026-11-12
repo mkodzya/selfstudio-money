@@ -828,6 +828,26 @@ button.td-wk:focus-visible{outline-offset:-2px}
 .ed-rc-menu small{display:block;margin-top:1px;font-size:12px;color:var(--text-muted)}
 .ed-rc-menu .ed-rc-bad{color:var(--bad)}
 .ed-rc-act .ed-ask{border-top:0;padding:0}
+/* 12 November 2026: an answer is a button with, beside it, what a press will do; what was under «Ещё…» stands open in
+   the same two columns; at rest the answers come first and what is known is a quiet list under them. */
+.ed-rc-ans{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+.ed-rc-a{display:grid;grid-template-columns:168px minmax(0,1fr);gap:4px 14px;align-items:center;min-width:0}
+.ed-rc-a>button{width:100%;min-width:0;height:auto;min-height:var(--control-sm,28px);padding-top:4px;padding-bottom:4px;white-space:normal;line-height:1.25;text-align:center;overflow-wrap:break-word}
+.ed-rc-cap{font-size:12.5px;line-height:1.4;color:var(--text-secondary);min-width:0;overflow-wrap:anywhere}
+.ed-rc-more{display:flex;flex-direction:column;align-items:stretch;gap:0}
+.ed-rc-more>.ed-rc-a{padding:2px 0 8px}
+.ed-rc-more>.ed-rc-a>button{margin:0;color:var(--text-primary)}
+.ed-rc-more .ed-rc-menu{margin:0}
+.ed-rc-menu button{display:grid;grid-template-columns:168px minmax(0,1fr);gap:2px 14px;align-items:center;padding:8px 0}
+.ed-rc-menu button>span{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;text-align:center}
+.ed-rc-menu small{margin-top:0;font-size:12.5px;line-height:1.4;color:var(--text-secondary)}
+.ed-rc-rest{flex-direction:column}
+.ed-rc-rest .ed-rc-act{order:1;background:none;border-top:0;padding-right:46px}
+.ed-rc-rest .ed-rc-info{order:2;background:var(--panel-alt);border-top:1px solid var(--border);padding-top:12px;padding-bottom:12px;gap:6px}
+.ed-rc-rest .ed-rc-h{padding-right:0;font-size:13px;line-height:1.4}
+.ed-rc-rest .ed-rc-dl{gap:3px 14px;margin:0}
+.ed-rc-rest .ed-rc-dl dd{font-size:12.5px;color:var(--text-secondary)}
+.ed-rc-rest .ed-rc-dl dd .mono{font-size:12px}
 .ed-rc-act [data-ed-saves]>span{font-size:12.5px;color:var(--text-muted);flex:1 1 100%}
 .cs-rows tr.cs-edrow .ed-rc{padding:0}
 .cs-rows tr.cs-edrow .ed-rc-info{padding:6px 10px 14px}
@@ -842,7 +862,10 @@ button.td-wk:focus-visible{outline-offset:-2px}
   .ed-rc-info{padding:14px 14px 16px}
   .ed-rc-act{padding:12px 14px 10px}
   .ed-rc-dl{grid-template-columns:70px minmax(0,1fr);gap:8px 12px}
-  .ed-rc-ans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ed-rc-ans{display:flex}
+  .ed-rc-a,.ed-rc-menu button{grid-template-columns:124px minmax(0,1fr);gap:4px 12px}
+  .ed-rc-rest .ed-rc-act{padding-right:14px}
+  .ed-rc-rest .ed-rc-blk:first-child .ed-rc-q{padding-right:34px}
   /* (a label longer than half the band - «Повторять каждый месяц», «Нет, это другой платёж» - goes onto a second line
      inside its button, and the two of a row stand at the same height) */
   .ed-rc-ans>button{width:100%;min-width:0;height:auto;min-height:26px;padding:5px 8px;white-space:normal;line-height:1.25;text-align:center;overflow-wrap:break-word}
@@ -7407,7 +7430,7 @@ const Ed=(()=>{
  const asks=(verb,it)=>verb==="part"?"part":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"?"skip":verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
  // The control a step was opened from inside the card, for the cursor to go back to when the step is left or its
  // answer taken back: an item of «Ещё…» gives it back to «Ещё…», whose list has shut. Nothing for a press outside.
- const retOf=x=>!x||!x.closest||!x.closest('[data-ed-card="row"]')?"":x.closest("[data-ed-menu]")?"[data-ed-more]":x.dataset.edDo?`[data-ed-do="${x.dataset.edDo}"]`:x.dataset.edAsk!==undefined?`[data-ed-ask="${x.dataset.edAsk}"]`:x.matches("[data-wi-open]")?"[data-wi-open]":"";
+ const retOf=x=>!x||!x.closest||!x.closest('[data-ed-card="row"]')?"":x.dataset.edDo?`[data-ed-do="${x.dataset.edDo}"]`:x.dataset.edAsk!==undefined?`[data-ed-ask="${x.dataset.edAsk}"]`:x.matches("[data-wi-open]")?"[data-wi-open]":"";
  function act(verb,x,direct){
   if(Plan.lost())return;
   const it=item(x.dataset.edId),V=VERBS[verb];if(!it)return;
@@ -7504,6 +7527,10 @@ const Ed=(()=>{
  }
 
  // ---- the card of one row ----
+ // Since 12 November 2026 (the owner's answer of 11 November: a list of answers with what each does, and no hidden
+ // «Ещё…») the card at rest is its answers - each a button with a caption beside it (.ed-rc-a, .ed-rc-cap) - then
+ // «Изменить строку» and, open, what «Ещё…» held; what is known of the line is a quiet list under them (.ed-rc-rest
+ // turns the two blocks over by the style sheet). The blocks themselves, and everything a step does, are as below.
  // Layout 1 «Стопкой» (the owner's choice of 1 November 2026). Two blocks, strictly apart:
  //  · «Сведения» (.ed-rc-info) on white - what is known of the line, and nothing to press: its name; then a list of
  //    label and value - Сумма, Повтор (a tax worked out by a rule: Период), Банк, Чей (a withdrawal), Относится (a row
@@ -7593,13 +7620,19 @@ const Ed=(()=>{
  // …?», «К чему относится этот налог?» - stand above the answers. So the band holds at most six buttons in sight
  // (the answers, «Изменить строку», «Ещё…»), and where the card asks a question of its own above them, up to eight.
  function answers(it){
-  const inn=it.dir>0,d=it.done,tax=it.src==="tax",occ=it.src==="occ",own=it.src==="row",st=it.state,ym=ymOf(it)||"",b=(v,l,c)=>btn(v,l,it,c),blocks=[],menu=[],ask=(q,btns)=>{if(btns)blocks.push({q,btns});};
+  const inn=it.dir>0,d=it.done,tax=it.src==="tax",occ=it.src==="occ",own=it.src==="row",st=it.state,ym=ymOf(it)||"",blocks=[],menu=[],ask=(q,btns)=>{if(btns)blocks.push({q,btns});};
+  // Every answer says beside it what a press will do (12 November 2026: Mika's two comments on the prototype were both
+  // «не понимаю, что происходит при нажатии»). The words are outside the button: its own text is the answer's name.
+  const CAP={paid:inn?"деньги уже пришли — закрою строку":"платёж уже ушёл — закрою строку",part:`спрошу, сколько уже ${inn?"пришло":"ушло"} и на какой день остаток`,move:it.date?"спрошу новый день":"спрошу день",
+   skip:occ?"спрошу: только этот месяц или и дальше":"уберу из расчёта, строка останется в плане",unpaid:"сниму отметку — строка снова ждёт",on:"строка снова пойдёт в расчёт",
+   tick:"такая же строка встанет в каждый следующий месяц",same:"следующие месяцы — на ту сумму, что пришла",tx:"закрою строку этим платежом",notx:"строка останется открытой"};
+  const cap=(html,words)=>`<div class="ed-rc-a">${html}${words?`<span class="ed-rc-cap">${words}</span>`:""}</div>`,b=(v,l,c)=>cap(btn(v,l,it,c),CAP[v]||"");
   const hinted=!!it.hint&&!d;
   if(hinted)ask(`Похоже, уже ${inn?"пришло":"оплачено"}: ${inn?"+":"−"}${nat(it.hint.amt,it.hint.cur)} · ${dRu(it.hint.d)}${it.hint.label?" · "+it.hint.label:""}`,b("tx","Это оно","primary")+b("notx",inn?"Нет, это новый счёт":"Нет, это другой платёж"));
   // A month of a row the table had no name for was closed by an amount: whose payment that was is asked once.
   if(it.payer)ask(`${it.payer.label} в таблице — это «${it.name}»?`,b("payer","Да")+b("nopayer","Нет, другой"));
   // A row of «Налоги» that does not say yet what it is for is not saved until it does.
-  if(!d&&it.list==="taxes"&&!tax&&!it.ptax&&ofValue(it)==="")ask("К чему относится этот налог?",'<button class="sm primary" data-ed-ask="edit" data-ed-focus="of">Выбрать…</button>');
+  if(!d&&it.list==="taxes"&&!tax&&!it.ptax&&ofValue(it)==="")ask("К чему относится этот налог?",cap('<button class="sm primary" data-ed-ask="edit" data-ed-focus="of">Выбрать…</button>',"откроется форма строки"));
   const one=blocks.some(x=>/primary/.test(x.btns))?"":"primary",at=it.date||occ?` за ${mon(ym)}`:"";
   const pay=b("paid",inn?"Получено":"Оплачено",one),part=tax?"":b("part","Частично…");
   // A line that is paid can still be made to repeat: a first invoice marked received is often the first of many.
@@ -7608,12 +7641,13 @@ const Ed=(()=>{
   else if(hinted){}
   else if(st==="missed")ask(`Платёж${at} был?`,pay+part);
   else if(st==="doubt"){}
-  else if(st==="empty")ask(`Сумма${at} не вписана.`,'<button class="sm primary" data-ed-ask="edit" data-ed-focus="amt">Вписать сумму</button>');
+  else if(st==="empty")ask(`Сумма${at} не вписана.`,cap('<button class="sm primary" data-ed-ask="edit" data-ed-focus="amt">Вписать сумму</button>',"откроется форма строки"));
   else ask(tax?`Что с налогом за ${(M.taxes.periods.find(x=>x.key===it.tax.key)||{pname:mon(ym)}).pname}?`:`Что с ${it.wd?"выводом":inn?"деньгами":"оплатой"}${at}?`,
    pay+part+b("move",it.date?"Перенести…":"Поставить дату…")+(tax?b("skip","Не платим"):occ?b("skip",inn?"Не придёт…":"Не платим…"):b("skip",inn?"Не придёт":"Не платим")));
-  // «Ещё…»: what is asked for less often. «Удалить строку» stands where the card had «Удалить» (the owner's
-  // decision of 1 November 2026: three presses everywhere - the row, «Ещё…», «Удалить строку»; it acts at once, and
-  // the toast and the band offer «Отменить»). Never on a month of a repeat: that ends with «Не придёт… → и дальше».
+  // What is asked for less often stands under the answers, in sight (until 12 November 2026 it was a list folded
+  // under «Ещё…»; Mika's answer of 11 November: no hidden «Ещё…»). «Удалить строку» is the last of it - two presses
+  // now, the row and the button; it acts at once, and the toast and the band offer «Отменить». Never on a month of a
+  // repeat: that ends with «Не придёт… → и дальше».
   if(pickable(it))menu.push(`<button type="button" data-ed-do="pick" data-ed-id="${esc(it.id)}"><span>Выбрать платёж из выписки…</span><small>${d?"если строку закрыл не тот платёж":inn?"деньги пришли, а строка их не нашла":"платёж прошёл, а строка его не нашла"}</small></button>`);
   if(Trial.fits(M,it))menu.push('<button type="button" data-wi-open><span>Что если…</span><small>проба: в план ничего не записывается</small></button>');
   if(own&&!d&&st!=="late")menu.push(`<button type="button" data-ed-do="del" data-ed-id="${esc(it.id)}" data-ed-now><span class="ed-rc-bad">Удалить строку</span><small>уйдёт из плана; «Отменить» вернёт</small></button>`);
@@ -7807,12 +7841,16 @@ const Ed=(()=>{
   if(cur.ask&&cur.ask!=="edit"&&cur.ask!=="move"){const a=askBox(it);if(a)return a;}
   cur.ask="";
   const A=answers(it),blk=A.blocks.map(x=>`<div class="ed-rc-blk">${x.q?`<p class="ed-rc-q">${esc(x.q)}</p>`:""}<div class="ed-rc-ans">${x.btns}</div></div>`).join(""),n=A.menu.length;
-  const more=A.edit||n?`<div class="ed-rc-more">${A.edit?'<button class="sm ghost" data-ed-ask="edit">Изменить строку</button>':""}${n?`<button class="sm ghost" data-ed-more aria-expanded="${!!cur.menu}" aria-controls="ed-rc-menu">Ещё…</button>`:""}</div>${n?`<ul class="ed-rc-menu" id="ed-rc-menu" data-ed-menu${cur.menu?"":" hidden"}>${A.menu.map(m=>`<li>${m}</li>`).join("")}</ul>`:""}`:"";
+  const more=A.edit||n?`<div class="ed-rc-more">${A.edit?'<div class="ed-rc-a"><button class="sm ghost" data-ed-ask="edit">Изменить строку</button><span class="ed-rc-cap">название, сумма, банк, день, повтор</span></div>':""}${n?`<ul class="ed-rc-menu" id="ed-rc-menu" data-ed-menu>${A.menu.map(m=>`<li>${m}</li>`).join("")}</ul>`:""}</div>`:"";
   return blk+more;
  }
  function rowCard(it){
   const top=!RO&&!cur.wi&&cur.ask==="edit"&&editable(it)?form(it):info(it),act=band(it);
-  return `<article class="ed-card ed-rc" data-ed-card="row" data-ed-id="${esc(it.id)}" aria-label="${esc(it.name||"Строка")}"><button type="button" class="ed-rc-x" data-ed-x aria-label="Закрыть" title="Закрыть">×</button><div class="ed-rc-info" role="group" aria-label="Сведения">${top}</div>${act?`<div class="ed-rc-act" role="group" aria-label="Действия">${act}</div>`:""}</article>`;
+  // At rest the card is its answers, and what is known of the line is a quiet list under them (.ed-rc-rest, by the
+  // style sheet alone: the two blocks stand in the document as they always did). A step, the form, «Что если…» and
+  // «Отменить» keep the old order - what is being answered above, its buttons below.
+  const rest=!!act&&!RO&&!cur.wi&&!cur.ask&&!(said()&&!cur.rest);
+  return `<article class="ed-card ed-rc${rest?" ed-rc-rest":""}" data-ed-card="row" data-ed-id="${esc(it.id)}" aria-label="${esc(it.name||"Строка")}"><button type="button" class="ed-rc-x" data-ed-x aria-label="Закрыть" title="Закрыть">×</button><div class="ed-rc-info" role="group" aria-label="Сведения">${top}</div>${act?`<div class="ed-rc-act" role="group" aria-label="Действия">${act}</div>`:""}</article>`;
  }
  const miss=(card,k,msg)=>{const f=q(card,`[data-ed-f="${k}"]`);if(f)f.focus();toast(msg);};
  // What the card holds against what the line is. A field the card does not hold - «Перенести…» holds the date
