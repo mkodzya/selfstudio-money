@@ -3185,6 +3185,42 @@ await run('todo', '«Сделать сегодня»: the rows of today with a c
   same(await p2.$('#view-today .td-todo'), null, 'on a day with no rows of its own the block is not drawn');
   await p2.context().close();
 });
+await run('tax-parts', 'a tax paid in parts: «Сумма по декларации» is the whole bill in the form, and the row\'s box in «Касса» is what is left of it', async () => {
+  // 12 November 2026. A quarter's tax split into dated parts leaves a computed row for what the parts do not cover.
+  // Its form offered that remainder under «Сумма по декларации» and stored whatever was typed as the WHOLE bill; the
+  // row's box in «Касса» did the same. A made-up studio: Client Z's September invoice carried £200 of VAT, so UK VAT
+  // за III кв. is £200, due 7 Nov; a part of £120 is written for 20 Oct. The computed row holds the other £80.
+  const vat = 't|vat|2026Q3', key = 'vat|2026Q3';
+  const L = ledA({ tx: [sheet('va', '2026-09-10', 1200, 'rev', 'Client Z', { v: 200 })] });
+  const P0 = planW({ taxes: [row('p1', 'VAT — часть', 120, '2026-10-20', { blk: 'tax', of: { r: 'vat', p: '2026Q3', part: true } })] });
+  const pg = await scene('tax-parts', L, P0, { H: 60 });
+  let S = await holds(pg, 'a part of £120 and what is left of the quarter');
+  const told = (S) => [item(S.M, vat).amt, item(S.M, vat).tax.bill, per(S.M, key).owed, per(S.M, key).left, (S.P.tax.per[key] || {}).amt];
+  same(told(S), [80, 200, 200, 80, undefined], 'the computed row is the £80 the part leaves, and it knows the whole bill: £200');
+  await openRow(pg, vat);
+  same((await texts(pg, K('row') + '.ed-rc-dl dd'))[0], '£80 · остаток от £200 · посчитано по правилу', 'its card says the sum is what is left, and of what');
+  await rowForm(pg);
+  same([await pg.$eval('#ed-amt', (e) => e.value), await texts(pg, K('row') + '.ed-rc-info span.note')], ['200', ['весь налог за период: £120 из него уже стоит частями или оплачено, в этой строке остаток — £80']],
+    '«Сумма по декларации» in the form is the whole bill, £200 - and under it, how much of it the parts cover and what this row is');
+  await fill(pg, 'row', { amt: 180 });
+  await saveRow(pg);
+  S = await holds(pg, 'the declared sum £180');
+  same([told(S), per(S.M, key).approx], [[60, 180, 180, 60, 180], false], '£180 typed there is the quarter\'s bill: the part still covers £120 of it, and the row is the £60 left');
+  await openRow(pg, vat);
+  await rowForm(pg);
+  same([await pg.$eval('#ed-amt', (e) => e.value), (await texts(pg, K('row') + '.ed-rc-info span.note'))[0]], ['180', 'весь налог за период: £120 из него уже стоит частями или оплачено, в этой строке остаток — £60'], 'opened again, the form holds what was typed');
+  // The row's own box in «Касса» shows the remainder, and a figure typed into it is the remainder.
+  await goCash(pg);
+  await toMonth(pg, '2026-11');
+  same(await pg.$eval(box('taxes', vat, 'amt'), (e) => e.value), '60', 'in «Касса» the row\'s box holds what is left: 60');
+  await pg.fill(box('taxes', vat, 'amt'), '50');
+  await pg.keyboard.press('Enter');
+  await pg.waitForFunction((sel) => { const e = document.querySelector(sel); return !!e && e.value === '50' && document.activeElement !== e; }, box('taxes', vat, 'amt'));
+  S = await holds(pg, '50 typed into the row in «Касса»', 'cash');
+  same([told(S), !!S.P.taxes.find((r) => r.id === 'p1'), await pg.$eval(box('taxes', vat, 'amt'), (e) => e.value)], [[50, 170, 170, 50, 170], true, '50'],
+    '50 typed in the box is the new remainder: the bill is that and the £120 of the part - £170 - and the row stays, at £50');
+  await pg.context().close();
+});
 await run('demo', 'the fabricated studio on three different days', async () => {
   for (const day of ['2026-10-06', '2026-11-12', '2026-12-21']) {
     // The studio's ledger carries the moment each statement row was uploaded; its plan is version 3 — every balance
