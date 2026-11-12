@@ -379,9 +379,10 @@ button.cs-link:active{transform:none}
 .cs-rows tr.cs-r:hover .cs-more::before,.cs-more:focus-visible::before,.cs-rows tr.cs-open .cs-more::before{opacity:1}
 .cs-rows tr.cs-open .cs-more::before{transform:translateY(2px) rotate(-135deg)}
 @media (hover:none){.cs-more::before{opacity:1}}
-/* What the page worked out by a rule is in muted ink, what is paid is struck through, what is switched off is faint. */
+/* What the page worked out by a rule is in muted ink, what is paid is muted with a green tick before its name (it was
+   struck through until 12 November 2026: Mika's «серым с галочкой»), what is switched off is faint. */
 .cs-rows tr.cs-hist td,.cs-rows tr.cs-done td,.cs-rows tr.cs-gone td{color:var(--text-muted)}
-.cs-rows tr.cs-done .cs-nt,.cs-rows tr.cs-done .cs-at{text-decoration:line-through}
+.cs-rows tr.cs-done .cs-nt::before,.td-done .td-nm::before{content:"✓";color:var(--ok);font-weight:600;margin-right:6px}
 /* a row of the statements that the plan did not hold: paid, and so drawn like a paid row - but it is nobody's line, and answers to no press */
 .cs-rows tr.cs-out{cursor:default}
 .cs-rows tr.cs-out:hover::before{background:none}
@@ -554,7 +555,7 @@ button.cs-link:active{transform:none}
 .cs-bkn{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:12px;white-space:nowrap}
 .cs-stmt .cs-rm{display:inline;padding:0}
 .cs-stmt li.cs-hist .cs-nmt,.cs-stmt li.cs-hist .cs-am{color:var(--text-muted)}
-.cs-stmt li.cs-ispaid .cs-nmt,.cs-stmt li.cs-ispaid .cs-am{text-decoration:line-through;color:var(--text-muted)}
+.cs-stmt li.cs-ispaid .cs-nmt,.cs-stmt li.cs-ispaid .cs-am{color:var(--text-muted)}
 .cs-mv{display:flex;align-items:center;gap:2px}
 .cs-mv input{width:134px}
 .cs-mv button{width:26px;height:28px;padding:0;border-radius:0;border-color:var(--border-strong);font-size:14px}
@@ -706,7 +707,7 @@ button.td-wk:focus-visible{outline-offset:-2px}
 /* A word where a figure would stand: said like a remark, not like a sum. */
 .td-am.td-word{font-family:inherit;color:var(--text-muted)}
 .td-hist .td-nm,.td-hist .td-am{color:var(--text-muted)}
-.td-done .td-nm,.td-done .td-am{color:var(--text-muted);text-decoration:line-through}
+.td-done .td-nm,.td-done .td-am{color:var(--text-muted)}
 .td-foot{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin-top:12px}
 .td-dayinfo{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
 /* Two columns of cards under the chart: what can be taken out and the coming days; the taxes and the month. The
