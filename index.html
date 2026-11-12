@@ -442,6 +442,34 @@ button.cs-link:active{transform:none}
 .cs-chk:checked::after{content:"";width:4px;height:8px;border:solid var(--accent-contrast);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
 .cs-paid[aria-pressed="true"]{background:var(--accent-dim);border-color:var(--border-strong);color:var(--text-secondary)}
 /* The banks of a month. */
+/* the month at a glance (12 November 2026): what comes and what goes as two bars on one scale - solid is what has
+   happened, the outline what is still ahead - and, under them, each account as a bar from zero */
+.cs-sc{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,auto);gap:18px 40px;align-items:center}
+.cs-scr{display:grid;grid-template-columns:64px minmax(0,1fr);gap:4px 14px;align-items:center;padding:6px 0}
+.cs-scr>b{font-size:14.5px;font-weight:600}
+.cs-scbar{height:26px;display:flex;align-items:stretch;border:1.5px solid var(--ok);min-width:2px;box-sizing:border-box}
+.cs-scbar i{display:block;background:var(--ok)}
+.cs-scbar.out{border-color:var(--text-primary)}.cs-scbar.out i{background:var(--text-primary)}
+.cs-scc{grid-column:2;font-size:12.5px;color:var(--text-muted)}
+.cs-scc b{color:var(--text-primary);font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.cs-scbig{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:500;letter-spacing:-.03em;margin:4px 0 2px;white-space:nowrap}
+.cs-scbig.neg{color:var(--mark-crit)}
+@media (max-width:820px){.cs-sc{grid-template-columns:minmax(0,1fr)}}
+.cs-bk{display:grid;grid-template-columns:118px 96px minmax(60px,1fr) 96px minmax(0,1.4fr);gap:0 14px;align-items:center;padding:9px 0;border-top:1px solid var(--border);font-size:13.5px}
+.cs-bk.cs-bkh{border-top:0;padding:2px 0 4px}
+.cs-bk.cs-flat{grid-template-columns:118px minmax(0,1fr)}
+.cs-bkn{display:inline-flex;align-items:center;gap:8px;font-weight:600;min-width:0}
+.cs-bk .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:13px}
+.cs-bk .r{text-align:right}
+.cs-bkt{position:relative;height:16px}
+.cs-bkt i{position:absolute;top:2px;bottom:2px;background:var(--text-primary);opacity:.75}
+.cs-bkt i.neg{background:var(--mark-crit);opacity:1}
+.cs-bkt u{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--text-primary)}
+.cs-bkdo{font-size:12.5px;color:var(--text-muted)}.cs-bkdo.neg,.cs-bk .neg{color:var(--mark-crit)}
+.cs-bkmv{grid-column:1/-1;font-size:12px;color:var(--text-muted);margin-top:3px}
+.cs-bk.cs-flat .cs-bkmv{grid-column:2;margin-top:0;font-size:12.5px}
+@media (max-width:760px){.cs-bk{grid-template-columns:minmax(0,1fr) auto;gap:2px 12px}.cs-bkt,.cs-bk.cs-bkh,.cs-bknow{display:none}.cs-bkdo{grid-column:1/-1}
+ .cs-bk.cs-flat{grid-template-columns:minmax(0,1fr)}.cs-bk.cs-flat .cs-bkmv{grid-column:1}}
 .cs-cov{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:10px;margin-top:10px}
 .cs-bank{background:var(--panel-raised);border:1px solid var(--border-strong);padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
 .cs-bn{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:4px}
@@ -3260,10 +3288,41 @@ const Cash=(()=>{
    if(ahead&&it.day&&it.cash&&it.day<=to){const x=get(it.bank);if(it.day<from)return void(x.start+=it.cash);
     x.any=true;x.day[it.day]=(x.day[it.day]||0)+it.cash;
     if(it.cash<0)x.cur[it.cur]=(x.cur[it.cur]||0)-it.cash*rate(it.cur);}});
-  return BANKS.filter(b=>B[b]&&B[b].any).map(b=>{const x=B[b];let bal=x.start,min=Infinity,minD="";
+  // (an account that goes into the month below zero is short from its first day - today, in the running month)
+  const L=BANKS.filter(b=>B[b]&&B[b].any).map(b=>{const x=B[b];let bal=x.start,min=x.start,minD=x.start<-0.5?(m===ymT?M.T:from):"";
    Object.keys(x.day).sort().forEach(d=>{bal+=x.day[d];if(bal<min)min=bal;if(bal<-0.5&&!minD)minD=d;});
-   return bankCard(b,ln("Поступления",x.in?fmt(x.in)+(x.inD?` · получено ${fmt(x.inD)}`:""):"—")+ln("Платежи",x.out?fmt(x.out)+(x.outD?` · оплачено ${fmt(x.outD)}`:""):"—")+owed(x)
-    +(!ahead?"":!x.known?ln("Остаток","не вписан"):ln(m===ymT?"Сейчас":"На начало месяца, по плану",fmt(x.start))+ends(m===ymT?"К концу месяца":"К концу месяца, по плану",bal,min,minD)));}).join("")||'<p class="note" style="margin:0">В этом месяце по банкам ничего нет.</p>';
+   return{b,x,bal,min,minD,bar:ahead&&x.known};});
+  if(!L.length)return '<p class="note" style="margin:0">В этом месяце по банкам ничего нет.</p>';
+  // One scale for every account: zero stands where the deepest minus puts it, and a bar runs left of it or right.
+  const S=L.filter(r=>r.bar),neg=Math.max(0,...S.map(r=>-r.bal)),pos=Math.max(0,...S.map(r=>r.bal)),tot=neg+pos||1,z=100*neg/tot;
+  // What goes through the bank in the month, in a line of words under its bar: what is expected and what of it has
+  // come, what is paid from it and what of that is paid - and what is still to be paid, in the currency it is owed in.
+  const moves=x=>{const need=Object.entries(x.cur).filter(([,v])=>v>0.5).map(([c,v])=>nat(Math.round(v),c)).join(" + ");
+   return [x.in?`Поступления ${fmt(x.in)}${x.inD?`, получено ${fmt(x.inD)}`:""}.`:"",x.out?`Платежи ${fmt(x.out)}${x.outD?`, оплачено ${fmt(x.outD)}`:""}.`:"",need?`Ещё платить ${need}.`:""].filter(Boolean).join(" ")||"В этом месяце через банк ничего не идёт.";};
+  const head=ahead?`<div class="cs-bk cs-bkh" aria-hidden="true"><span class="lbl">банк</span><span class="lbl r">${m===ymT?"сейчас":"на начало"}</span><span class="lbl">к концу ${monG(m)}</span><span></span><span class="lbl">что сделать</span></div>`:"";
+  return head+L.map(r=>{const x=r.x,w=100*Math.abs(r.bal)/tot,name=`<span class="cs-bkn">${dot(r.b)}${esc(r.b)}</span>`;
+   // A month gone by has no balance to speak of: what went through the bank is all there is to say.
+   if(!ahead)return `<div class="cs-bk cs-flat" data-cs-bank="${esc(r.b)}">${name}<span class="cs-bkmv">${moves(x)}</span></div>`;
+   if(!x.known)return `<div class="cs-bk" data-cs-bank="${esc(r.b)}">${name}<span class="cs-bknow mono">—</span><div class="cs-bkt"><u style="left:${z.toFixed(1)}%"></u></div><span class="mono">—</span><span class="cs-bkdo">остаток не вписан</span><span class="cs-bkmv">${moves(x)}</span></div>`;
+   const short=r.min<-0.5;
+   return `<div class="cs-bk" data-cs-bank="${esc(r.b)}">${name}<span class="cs-bknow mono">${fmt(x.start)}</span>
+    <div class="cs-bkt"><i${r.bal<0?' class="neg"':""} style="left:${(r.bal<0?z-w:z).toFixed(1)}%;width:${w.toFixed(1)}%"></i><u style="left:${z.toFixed(1)}%"></u></div>
+    <span class="cs-bkend mono${r.bal<0?" neg":""}"><b>${fmt(r.bal)}</b></span><span class="cs-bkdo${short?" neg":""}">${short?`докинуть ${fmt(-r.min)} — первый минус ${dRu(r.minD)}`:"хватает"}</span>
+    <span class="cs-bkmv">${moves(x)}</span></div>`;}).join("");
+ }
+ // ---- the month: what comes and what goes, as two bars on one scale ----
+ // The whole of the month's plan in one look (12 November 2026): the bar of what comes and the bar of what goes are
+ // drawn to one scale, so the longer one is the larger sum; the solid part of each is what has already been received
+ // or paid, the outline what is still ahead. Beside them, what the month comes to by the plan. The figures are the
+ // sections' own totals (months.by[ym][list].expected and .done) - what stood outside the plan is in none of them.
+ function scale(){
+  const I=mon("inflows"),O=SECS.filter(k=>k!=="inflows").reduce((a,k)=>{const x=mon(k);a.e+=x.expected||0;a.d+=x.done||0;return a;},{e:0,d:0});
+  const ie=I.expected||0,id=I.done||0,oe=round2(O.e),od=round2(O.d);if(!(ie>0.5||oe>0.5))return "";
+  const sc=Math.max(ie,oe),res=round2(ie-oe),pc=(a,b)=>(b>0?Math.max(0,Math.min(100,100*a/b)):0).toFixed(1),m=cu.month,past=m<M.T.slice(0,7);
+  // (a month with nothing received or paid yet says so in words, not as «£0»; a month gone by speaks in the past)
+  const bar=(name,cls,e,d,key,dw,lw,none)=>`<div class="cs-scr"><b>${name}</b><div><div class="cs-scbar${cls}" style="width:${pc(e,sc)}%"><i style="width:${pc(d,e)}%"></i></div></div><span class="cs-scc"><b>${lv("mon.sc."+key,e,fmt(e))}</b> · ${d>0.5?`${dw} ${lv("mon.sc."+key+"d",d,fmt(d))}${e-d>0.5?`, ${lw} ${fmt(e-d)}`:""}`:e>0.5?none:"в плане ничего нет"}</span></div>`;
+  return `<div class="cs-sc"><div>${bar(past?"Приход":"Придёт","",ie,id,"in","получено",past?"не пришло":"ждём ещё","пока ничего не получено")}${bar(past?"Расход":"Уйдёт"," out",oe,od,"out","оплачено",past?"не оплачено":"платить ещё","пока ничего не оплачено")}</div>
+   <div class="cs-scres"><span class="lbl">Результат ${monG(m)} по плану</span><div class="cs-scbig${res<0?" neg":""}">${lv("mon.sc.res",res,fmt(res))}</div><span class="note">${res<-0.5?"расходов больше, чем поступлений":res>0.5?"поступлений больше, чем расходов":"поступления равны расходам"}</span></div></div>`;
  }
  // A bank's card: lines of a name and a figure; what is still to be paid from it, in the currency it is owed in;
  // and what the bank holds at the end, with how much it must be topped up, and by when, if it goes below zero on
@@ -3336,8 +3395,9 @@ const Cash=(()=>{
   const notes=`<div class="cs-notes" id="cs-notes"><div class="cs-nl">${undoStrip()}${back}${far}${past}${outs}${wait}</div>${bar?'<button class="sm" data-cs-helper>Подставить по прошлым месяцам</button>':""}</div>`;
   // What comes in on the left, what goes out on the right.
   const col=ks=>`<div class="stack">${ks.map(k=>section(k,adding&&cu.addAt===k)+(k==="other"?feesHTML():"")).join("")}</div>`;
-  return `<div id="cs-plan" class="stack">${notes}${help}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
-   <section class="card"><h2>Покрытие по банкам<span class="note">${mn}: что ждём через каждый банк и сколько из этого уже закрыто, в £</span></h2><div class="cs-cov" id="cs-cov">${cover()}</div></section>
+  // Above the lists (12 November 2026, the owner's choice of the prototype): the month as two bars, and the accounts.
+  const sc=scale(),banks=`<section class="card" id="cs-banks"><h2>${m>=ymT?"Хватит ли на каждом счёте":"По банкам"}<span class="note">${m===ymT?`до конца ${monG(m)}`:m>ymT?`${mn}, по плану`:`${mn}: что прошло через каждый банк по плану`} · в £</span></h2><div class="cs-bks" id="cs-cov">${cover()}</div></section>`;
+  return `<div id="cs-plan" class="stack">${notes}${help}<section class="card cs-scale" id="cs-scale"${sc?"":" hidden"}>${sc}</section>${banks}<div class="two cs-two" id="cs-two">${col(["inflows"])}${col(SECS.filter(k=>k!=="inflows"))}</div>
    <p class="note cs-how"><b>Как читать.</b> Слева — что придёт, справа — что уйдёт. В плане только то, что вписали вы: разовые строки и строки «каждый месяц». Серая зачёркнутая строка со словами «вне плана» — платёж из выписки, которого в плане не было: он уже прошёл, в расчёт плана не входит и стоит здесь, чтобы месяц был виден целиком. Сумму можно поправить прямо в строке; в месяце строки «каждый месяц» такая правка меняет только этот месяц — «и дальше так же» появится под строкой. Нажмите на строку — откроется её карточка: сверху — что о строке известно, снизу — что с ней можно сделать: «Получено» или «Оплачено», «Частично…», «Перенести…», «Не придёт…». Название, сумму, банк, дату и «каждый месяц» меняет «Изменить строку»; выбрать платёж из выписки, «Что если…» и «Удалить строку» — в «Ещё…». Серым — налог студии, который страница посчитала по правилу. Зачёркнуто — уже получено или оплачено: по выписке или по вашей отметке.
     <b>Отметка.</b> «Получено» и «Оплачено» — в карточке каждой строки, и у посчитанного налога тоже. Оплачено — значит оплачено: строка закрыта, что бы потом ни показала выписка; когда платёж в ней появится, он встанет на место отметки. «Вернуть в план» снимает отметку. «Частично…» — ответ рядом: строка закрывается на том, что оплачено, а остаток встаёт отдельной строкой на день, который вы выберете.
     <b>Подписки</b> — те же прочие расходы в своей графе; она свёрнута в одну строку, пока её не откроют. Строку переносит туда и обратно галочка «это подписка» в её карточке.
@@ -3614,6 +3674,7 @@ const Cash=(()=>{
    if(at)at.insertAdjacentHTML("beforebegin",outHTML(r,k));else body.insertAdjacentHTML("beforeend",outHTML(r,k));});});
   const f=q("#cs-subs-say");if(f)f.textContent=subsSay(mon("subs").rows.map(id=>by[id]).filter(Boolean));
   const c=q("#cs-cov");if(c)c.innerHTML=cover();
+  const sc=q("#cs-scale");if(sc){const h=scale();sc.innerHTML=h;sc.hidden=!h;}
  }
  const inSync=()=>SECS.every(k=>{const sec=q("#cs-sec-"+k);return !!sec&&[...sec.querySelectorAll("tr[data-cs-id]")].map(t=>t.dataset.csId).join("\n")===mon(k).rows.join("\n");});
  // The sum of a row, as it is typed. The first keystroke in a row keeps a copy of the plan for «Отменить»; each one
