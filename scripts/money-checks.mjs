@@ -2469,7 +2469,7 @@ await run('30 the shell', 'where the page opens, its tabs, a phone, midnight —
   same(await page.evaluate(() => [typeof window.__money.compute, typeof window.__money.model, typeof window.__money.upgrade, typeof window.__money.passed, window.__money.today, window.__money.by]), ['function', 'function', 'function', 'function', T, 'Mika'], 'window.__money: compute, model, upgrade, passed, today — the date in London — and who is signed in');
   const S = await holds(page, 'the fabricated studio, 60 days');
   same([S.M.v0, S.P.v, S.P.banks.every((b) => b.asOf === '2026-10-04' && !b.legacy)], [false, 3, true], '… whose plan is version 3, with every balance typed as of 4 Oct');
-  ok(/^вторник, 6 октября · выписки и остатки по 4 октября \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .td-at .td-tl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && (await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября: денег хватает на 60 дней') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the sentence answers the question — «денег хватает» — and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
+  ok(/^вторник, 6 октября · выписки и остатки по 4 октября \(.+\)$/.test(await text(page, '#view-today .page-sub')) && (await text(page, '#view-today .td-at .td-tl')) === 'Денег на 4 окт' && S.M.verdict.id === 'v1' && plain(await text(page, '#view-today .td-hd')) === 'Денег хватает на все 60 дней' && plain(await text(page, '#view-today .td-say')).startsWith('По остаткам на 4 октября нижняя точка по плану — ') && (await texts(page, '#view-today .td-verdict .note')).some((x) => x.startsWith('В разборе ')), 'the head and the first figure say as of which day they speak — 4 Oct, two days back; the headline answers the question — «денег хватает» — the sentence under it says as of which day, and the one incoming payment nobody has filed, too small to change that answer, is the line under it', [await text(page, '#view-today .page-sub'), await text(page, '#view-today .td-say'), await texts(page, '#view-today .td-verdict .note')]);
   await calm(page, 'the fabricated studio');
   const viaDocs = await page.evaluate(async () => {
     const led = (await (await fetch('/api/founder/money')).json()).doc;
@@ -3123,8 +3123,15 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
   for (const w of [1320, 375]) {
     const pg = await scene('first minus ' + w, ledA(), P, { w, h: 812 });
     const S = await holds(pg, `${w}px, a minus`);
-    same([await text(pg, '#view-today .td-say'), plain(S.live.minusday.t), await pg.$eval('#view-today .td-verdict [data-td-days]', (b) => b.dataset.tdDays + ' ' + b.textContent)],
-      ['12 октября не хватит £500 — это первый минус. Глубже всего 20 октября: не хватит £6,500. В плюс выходим 28 октября.', '12 окт', '2026-10-12 Как закрыть'], `${w}px: the sentence leads with the first day short and then names the deepest; «Нижняя точка» says «первый минус 12 окт»`);
+    same([plain(await text(pg, '#view-today .td-hd')), plain(await text(pg, '#view-today .td-say')), plain(S.live.minusday.t), await pg.$eval('#view-today .td-verdict [data-td-days]', (b) => b.dataset.tdDays + ' ' + b.textContent)],
+      ['С 12 по 27 октября денег не хватит', 'Сейчас на счетах £10,000. Глубже всего — 20 октября: −£6,500.', '12 окт', '2026-10-12 Как закрыть'], `${w}px: the headline says from which day to which the money is short - the first day is the day to act by - and the sentence names the deepest; «Нижняя точка» says «первый минус 12 окт»`);
+    // The days ahead, a cell to a day (12 November 2026): the days below zero are the stretch the headline names, and a press on one says what is left on it.
+    const cells = await pg.$$eval('#view-today .td-sd', (l) => l.map((e) => [e.dataset.tdSd, e.classList.contains('ng'), e.classList.contains('t')]));
+    same([cells.length, cells.filter((c) => c[1]).map((c) => c[0]).filter((d, i, l) => !i || i === l.length - 1), cells.filter((c) => c[2]).map((c) => c[0]), await pg.$('#view-today .td-sdr')], [S.M.days.length, ['2026-10-12', '2026-10-27'], [S.M.T], null], `${w}px: the strip has a cell for each day of the plan; the cells below zero run from the 12th to the 27th, today is framed, and no day is spoken of until one is pressed`);
+    await pg.click('#view-today .td-sd[data-td-sd="2026-10-20"]');
+    same([plain(await text(pg, '#view-today .td-sdr')).replace(/^\S+ /, ''), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd), (await pg.evaluate(() => document.documentElement.scrollWidth)) <= w], ['20 окт · уйдёт −£6,000 · останется −£6,500 · открыть день', '2026-10-20', true], `${w}px: a press on the 20th says under the strip what goes on it and what is left, and the page does not scroll sideways`);
+    await pg.click('#view-today .td-sd[data-td-sd="2026-10-20"]');
+    same(await pg.$('#view-today .td-sdr'), null, `${w}px: … and a second press takes the line away`);
     await pg.click('#view-today .td-verdict [data-td-days]');
     await pg.waitForSelector('#cs-answer');
     const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
@@ -3134,7 +3141,7 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
   }
   // One stretch of minus whose first day is its deepest reads as the design has it.
   const pg = await scene('one minus', ledA(), planW({ team: [row('t1', 'Person T', 9000, '2026-10-12')] }));
-  same([await text(pg, '#view-today .td-say'), await pg.$('#view-today [data-live="minusday"]')], ['20 октября не хватит £5,000. В плюс выходим 28 октября.', null], 'when the first day short is the deepest, one sentence says both');
+  same([plain(await text(pg, '#view-today .td-hd')), plain(await text(pg, '#view-today .td-say')), await pg.$('#view-today [data-live="minusday"]')], ['С 20 по 27 октября денег не хватит', 'Сейчас на счетах £10,000. Глубже всего — 20 октября: −£5,000.', null], 'when the first day short is the deepest, the headline and the sentence name it once each');
   await pg.context().close();
 });
 
@@ -7741,9 +7748,10 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   // ---- 1. Wise £8,000: no minus, and no money of its own.
   let pg = await scene('own money, below zero', led(), P(8000));
   let S = await holds(pg, 'Wise £8,000, £10,000 held for taxes');
+  same(plain(await text(pg, '#view-today .td-hd')), 'Минуса нет, но своих денег нет', 'the headline says it in five words (12 November 2026), and the sentence under it does not say it again');
   same(plain(await pg.$eval('#view-today .td-wi > summary .td-meta', (e) => e.textContent)), 'платёж придёт позже · клиент уйдёт · наймём человека · выводим другую сумму', 'the folded «Что если» names four things to ask: no client owes a payment here');
   same([S.M.verdict.id, S.M.verdict.base, S.M.own, S.M.LOW, S.M.LOWDAY], ['vR', 'v1', -2000, 7000, '2026-10-20'], 'its own money 8,000 − 10,000 = −2,000; the lowest point 7,000 on 20 Oct over the cushion: vR in the place of v1');
-  same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. Нижняя точка — £7,000, 20 октября.', own: 'Своих денег −£2,000: на счетах £8,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: true },
+  same(await seen(pg), { say: 'Под налоги нужно больше, чем лежит на счетах. Нижняя точка — £7,000, 20 октября.', own: 'Своих денег −£2,000: на счетах £8,000, под налоги £10,000', order: ['td-hd', 'td-say', 'td-own', 'note', 'td-sbox'], btn: [], red: true },
     'no «хватает»: no minus, but no money of its own, and the lowest point; the line under it, above the line about the taxes in the lowest point, gives the three sums, and its minus is red');
   await pg.click('#view-today .td-wi > summary');
   await pg.waitForSelector(F + '[data-wi-panel]');
@@ -7776,7 +7784,7 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   pg = await scene('own money, below zero and under the cushion', led(), P(5500));
   S = await holds(pg, 'Wise £5,500');
   same([S.M.verdict.id, S.M.verdict.base, S.M.own, S.M.LOW], ['vR', 'v3', -4500, 4500], 'its own money 5,500 − 10,000 = −4,500; the lowest point 4,500 under the cushion: vR in the place of v3');
-  same(await seen(pg), { say: 'Минуса в ближайшие 30 дней по плану нет, но своих денег нет — под налоги нужно больше, чем лежит на счетах. 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-say', 'td-own', 'note', 'row'], btn: ['Как подстраховаться'], red: true },
+  same(await seen(pg), { say: 'Под налоги нужно больше, чем лежит на счетах. 20 октября останется £4,500 — меньше запаса £5,000.', own: 'Своих денег −£4,500: на счетах £5,500, под налоги £10,000', order: ['td-hd', 'td-say', 'td-own', 'note', 'row', 'td-sbox'], btn: ['Как подстраховаться'], red: true },
     'no «хватает, но впритык»: no money of its own, then the day under the cushion with «Как подстраховаться», and the line between the sentence and the lines under it');
   // (width and colour: every card has a 1px solid border, and v4's side line is of another colour)
   same(await pg.$eval('#view-today .td-verdict', (e) => { const c = getComputedStyle(e); return [c.borderLeftWidth, c.borderLeftColor]; }), ['3px', 'rgb(154, 107, 0)'], 'the card of vR has the side line of v3 - 3px of --warn');
@@ -7797,20 +7805,20 @@ await run('own-money', '«Сегодня» says «Своих денег» under 
   // ---- 3. Wise £12,000: some of its own.
   pg = await scene('own money, above zero', led(), P(12000));
   S = await holds(pg, 'Wise £12,000');
-  same([S.M.verdict.id, 'base' in S.M.verdict, S.M.own, await seen(pg)], ['v1', false, 2000, { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £11,000, 20 октября.', own: 'Своих денег £2,000: на счетах £12,000, под налоги £10,000', order: ['td-say', 'td-own', 'note'], btn: [], red: false }],
+  same([S.M.verdict.id, 'base' in S.M.verdict, S.M.own, await seen(pg)], ['v1', false, 2000, { say: 'Нижняя точка по плану — £11,000, 20 октября.', own: 'Своих денег £2,000: на счетах £12,000, под налоги £10,000', order: ['td-hd', 'td-say', 'td-own', 'note', 'td-sbox'], btn: [], red: false }],
     '£2,000 of its own (12,000 − 10,000): the sentence is v1 as it was, with no other in its place, and the line stands under it');
   await pg.context().close();
   // ---- 4. Typed for 3 Oct: the day «Денег на 3 окт» is of.
   pg = await scene('own money, as of 3 Oct', led(), P(8000, '2026-10-03'));
   S = await holds(pg, 'Wise £8,000 typed for 3 Oct');
   const s4 = await seen(pg);
-  same([S.M.nowIsToday, S.M.nowDate, S.M.verdict.id, await text(pg, '#view-today .td-at .td-tl'), s4.own, s4.say.startsWith('По остаткам на 3 октября: минуса в ближайшие 30 дней по плану нет, но своих денег нет')],
+  same([S.M.nowIsToday, S.M.nowDate, S.M.verdict.id, await text(pg, '#view-today .td-at .td-tl'), s4.own, s4.say.startsWith('По остаткам на 3 октября: под налоги нужно больше, чем лежит на счетах.')],
     [false, '2026-10-03', 'vR', 'Денег на 3 окт', 'Своих денег на 3 окт −£2,000: на счетах £8,000, под налоги £10,000', true], 'balances of 3 Oct: «Денег на 3 окт», and the line and the sentence of that day too');
   await pg.context().close();
   // ---- 5. Nothing held for taxes.
   pg = await scene('own money, nothing held for taxes', led(0), P(8000));
   S = await holds(pg, 'nothing held for taxes');
-  same([S.M.verdict.id, S.M.taxes.reserve, S.M.own, await seen(pg)], ['v1', 0, 8000, { say: 'Денег хватает на 30 дней по тому, что вписано в план. Нижняя точка — £7,000, 20 октября.', own: null, order: ['td-say'], btn: [], red: false }],
+  same([S.M.verdict.id, S.M.taxes.reserve, S.M.own, await seen(pg)], ['v1', 0, 8000, { say: 'Сейчас на счетах £8,000. Нижняя точка по плану — £7,000, 20 октября.', own: null, order: ['td-hd', 'td-say', 'td-sbox'], btn: [], red: false }],
     'nothing held for taxes: no line - it would only say «Денег сейчас» again - and the sentence as it was');
   // Below zero with nothing held for taxes - Wise −£200 typed for today, Client A's £10,000 due today, Person B on
   // 20 Oct: an overdraft, not taxes the accounts cannot cover. The lowest point £8,800 is over the cushion: v1 as it
