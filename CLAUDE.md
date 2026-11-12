@@ -528,6 +528,33 @@ a deploy:
   a founder's block, an own transfer, a bank's fee row, a possible repeat, a
   withdrawal or a computed tax, nor for a payment a line already holds by
   hand. The check `inbox-part` holds it.
+- **A line paid in part is one line on the screen, and two rows in the
+  plan** (the owner's word of 12 November 2026, to a prototype: «Да,
+  делаем»). «Частично…» writes what it always wrote - the mark at what was
+  paid (`paid.amt`) and the rest as a row of its own (`carry`) - and the
+  engine deals and counts the two as two. The page draws them as one: the
+  rest's row, under the line's own name, on the day of the rest, its sum what
+  is left and not typed into, its words «оплачено X из Y, остаток Z»; one
+  card for the whole line («Что с остатком …?», «Ещё часть…», «Перенести
+  остаток…», «Остаток не платим», «Убрать оплату …», and «Оплаты» and
+  «Остаток» in «Сведения»); a line closed in parts says «оплачено двумя
+  частями: …»; a rest in another month leaves the marked line a closed row
+  of its own month that says where the rest is, and is «{name} — остаток за
+  {октябрь}» in its own. The tie is the moment of the press - the rest's
+  `c0` is the mark's `paid.at`, in one list - so pairs written before this
+  are read the same way and nothing is rewritten (`Ed.grp`, `nm`, `one`,
+  `shut`). Not tied, and drawn as before: a withdrawal, a computed tax, a
+  rest in another currency than its line, a rest ticked «каждый месяц», and
+  a rest somebody typed as a plain row. **A change that draws a row of the
+  plan goes through `Ed.one` and `Ed.nm`** - a list that maps items to rows
+  without them shows the pair again - **and nothing of it may reach
+  `Live.compute` or the plan document**: `checks/withdrawals/` and every
+  figure read the two rows as before. A part that is not the last of its
+  line has no «Вернуть в план»; the last payment is taken back from the
+  rest («Убрать оплату …» - the mark and the rest it wrote go together).
+  The check `part-one` holds it, and `partly`, `partly, other days`,
+  `partly, from before` and `inbox-part` hold the same answers read as one
+  line.
 - **A row's card keeps what is known apart from what can be done** (the
   owner's choice of 1 November 2026, layout 1 «Стопкой»). At rest «Сведения»
   (`.ed-rc-info`) hold no control, for an editor or a reader; every control
