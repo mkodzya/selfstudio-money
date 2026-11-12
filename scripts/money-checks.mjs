@@ -3210,10 +3210,26 @@ await run('cash-top', '«Касса · По месяцам» opens with the mont
   same([await bars(), await result()], [[['Придёт', '£3,000 · пока ничего не получено', '81.1%', '0%'], ['Уйдёт', '£3,700 · пока ничего не оплачено', '100%', '0%']], ['Результат октября по плану', '−£700', 'расходов больше, чем поступлений']],
     'two bars to one scale - 3,000 is 81% of 3,700 - with nothing of either done yet, and beside them what October comes to: −£700');
   same([await text(pg, '#cs-banks h2'), await texts(pg, '#cs-cov .cs-bkh .lbl'), await banks()],
-    ['Хватит ли на каждом счётедо конца октября · в £', ['банк', 'сейчас', 'к концу октября', 'что сделать'],
+    ['Хватит ли на каждом счётедо конца октября · в £ · нажмите на счёт — в списках останутся его строки', ['банк', 'сейчас', 'к концу октября', 'что сделать'],
       [['Wise', '£1,000', '£2,800', 'докинуть £200 — первый минус 10 окт', 'Поступления £3,000. Платежи £1,200. Ещё платить £1,200.', ' 41.7% 58.3%'], ['Barclays', '£500', '−£2,000', 'докинуть £2,000 — первый минус 15 окт', 'Платежи £2,500. Ещё платить £2,500.', 'neg 0% 41.7%']]],
     'each account is a bar from one zero: Wise ends October at £2,800 - and is £200 short on the way, on the 10th; Barclays ends it at −£2,000, to the left of zero, with what to add and the first day it is short');
   ok((await top('#cs-scale')) < (await top('#cs-banks')) && (await top('#cs-banks')) < (await top('#cs-two')), 'the bars stand first, the accounts under them, the lists under both');
+  // A press on an account leaves in the lists the rows that go through it - the rest are hidden, not taken away: the
+  // sections' totals stay those of every account, and nothing is written. A second press, or «Показать все», brings
+  // them back; Enter on the account is a press.
+  const lists = () => pg.$$eval('#cs-plan section.cs-rows', (l) => l.map((s) => [s.id.slice(7), [...s.querySelectorAll('tbody tr[data-cs-id]')].filter((t) => getComputedStyle(t).display !== 'none').map((t) => t.dataset.csId).join(), ((s.querySelector('.cs-nob') || {}).textContent || '').trim()].filter(Boolean).join(': ')));
+  const pressed = () => pg.$$eval('#cs-cov .cs-bk[data-cs-bank]', (l) => l.map((e) => e.getAttribute('aria-pressed')).join());
+  const all = ['inflows: z1', 'team: t1', 'taxes', 'subs', 'other: o1', 'div'], saved = store.cash.puts;
+  same([await lists(), await pressed(), await pg.$('#cs-bankf')], [all, 'false,false', null], 'as the month opens every row is in its list and no account is pressed');
+  await pg.click('#cs-cov .cs-bk[data-cs-bank="Barclays"]');
+  same([await lists(), await pressed(), await text(pg, '#cs-bankf'), await text(pg, '#cs-sec-team [data-cs-tot]'), await pg.evaluate(() => document.activeElement.dataset.csBank)],
+    [['inflows: Через Barclays здесь ничего не идёт.', 'team: Через Barclays здесь ничего не идёт.', 'taxes', 'subs', 'other: o1', 'div'], 'false,true', 'В списках ниже — только строки Barclays; итоги разделов — по всем счетам. Показать все', '£1,200', 'Barclays'],
+    'Barclays pressed: Rent alone is left in the lists, a list with none of its rows says so, the totals are still every account\'s - and the cursor stays on the account');
+  await pg.keyboard.press('Enter');
+  same([await lists(), await pressed(), await pg.$('#cs-bankf')], [all, 'false,false', null], 'Enter on the account pressed is a second press: every row is back');
+  await pg.click('#cs-cov .cs-bk[data-cs-bank="Wise"]');
+  await pg.click('#cs-bankf [data-cs-bankoff]');
+  same([await lists(), await pressed(), (await puts('cash', 0)) - saved], [all, 'false,false', 0], 'Wise pressed, then «Показать все»: every row is back, and the plan was not saved once through all of it');
   // A sum typed in a row moves the bars and the accounts at once, without the lists being drawn again.
   await pg.fill(box('team', 't1', 'amt'), '1500');
   await pg.waitForFunction(() => document.querySelector('#cs-scale .cs-scbig').textContent.includes('1,000'));
@@ -3224,7 +3240,7 @@ await run('cash-top', '«Касса · По месяцам» opens with the mont
   await toMonth(pg, '2026-11');
   S = await holds(pg, 'November', 'cash');
   same([await bars(), await text(pg, '#cs-banks h2'), await texts(pg, '#cs-cov .cs-bkh .lbl'), (await banks()).map((r) => r.slice(0, 4))],
-    [[['Придёт', '£500 · пока ничего не получено', '100%', '0%'], ['Уйдёт', '£0 · в плане ничего нет', '0%', '0%']], 'Хватит ли на каждом счётеноябрь, по плану · в £', ['банк', 'на начало', 'к концу ноября', 'что сделать'],
+    [[['Придёт', '£500 · пока ничего не получено', '100%', '0%'], ['Уйдёт', '£0 · в плане ничего нет', '0%', '0%']], 'Хватит ли на каждом счётеноябрь, по плану · в £ · нажмите на счёт — в списках останутся его строки', ['банк', 'на начало', 'к концу ноября', 'что сделать'],
       [['Wise', '£2,500', '£3,000', 'хватает'], ['Barclays', '−£2,000', '−£2,000', 'докинуть £2,000 — первый минус 1 ноя']]],
     'November: 500 comes and nothing goes; Wise goes in with October\'s £2,500, and Barclays - below zero with nothing moving - is short from the 1st');
   await pg.context().close();
