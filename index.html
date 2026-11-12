@@ -537,6 +537,27 @@ button.cs-link:active{transform:none}
 .cs-auto ol{margin:0;padding-left:20px;font-size:13px;display:flex;flex-direction:column;gap:2px}
 @media (max-width:620px){.cs-sugg li{grid-template-columns:28px minmax(0,1fr)}.cs-sugg li>button{grid-column:2;justify-self:start}}
 .cs-chart .hit{cursor:pointer}
+/* «По дням» (12 November 2026): the calendar on the left and the day chosen in it on the right - what the account
+   held, what came, what went, what is left, and the day's rows, each a circle to mark it and a name that opens its
+   card. The long statement by days is gone; what stands on no day of the calendar is listed under them. */
+.cs-dgrid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:16px;align-items:start}
+.cs-dgrid .cs-cal{grid-template-columns:repeat(7,minmax(76px,1fr));min-width:560px}
+@media (max-width:1180px){.cs-dgrid{grid-template-columns:minmax(0,1fr)}}
+.cs-dpanel h2{margin:2px 0 8px}
+.cs-dflow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 10px;padding:8px 0 10px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.cs-dflow>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cs-dflow b{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:500;white-space:nowrap}
+.cs-dflow .cs-dend b{font-weight:600}.cs-dflow .neg{color:var(--mark-crit)}
+.cs-dsay{margin:8px 0 0}
+.cs-pr{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:4px 10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+.cs-pr:last-child{border-bottom:0}
+.cs-pnm{display:flex;flex-direction:column;align-items:flex-start;gap:1px;height:auto;min-height:0;padding:0;border:0;border-radius:0;background:none;font:inherit;text-transform:none;letter-spacing:0;color:inherit;text-align:left;white-space:normal;overflow-wrap:anywhere;cursor:pointer;min-width:0}
+.cs-pnm:hover{background:none}.cs-pnm:hover .cs-nmt{text-decoration:underline}
+.cs-pmeta{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px;font-size:12px;color:var(--text-muted)}
+.cs-pr.cs-pdone .cs-nmt,.cs-pr.cs-pdone .cs-am,.cs-pr.cs-phist .cs-nmt,.cs-pr.cs-phist .cs-am{color:var(--text-muted)}
+.cs-pck.off{border-style:dashed;cursor:default}
+.cs-pcard{padding:0 0 6px}
+.cs-pcard .ed-card{margin:0;border:0;border-bottom:1px solid var(--text-primary);box-shadow:none;padding:6px 0 14px}
 .cs-stmt{min-width:760px}
 .cs-stmt tr.cs-day,.cs-stmt tr.cs-out{cursor:pointer}
 .cs-stmt tr.cs-day:hover td,.cs-stmt tr.cs-out:hover td{background:var(--accent-dim)}
@@ -3467,13 +3488,13 @@ const Cash=(()=>{
  }
  function cal(V){
   const f=V.cells[0].d,l=V.cells[V.cells.length-1].d,dow=d=>(new Date(dUTC(d)).getUTCDay()+6)%7,start=dAdd(f,-dow(f)),end=dAdd(l,6-dow(l));
-  let h=["пн","вт","ср","чт","пт","сб","вс"].map(x=>`<div class="cs-dow">${x}</div>`).join("");
+  let h=["пн","вт","ср","чт","пт","сб","вс"].map(x=>`<div class="cs-dow">${x}</div>`).join("");const sel=selDay(V);
   for(let d=start;d<=end;d=dAdd(d,1)){
    const i=V.ix[d],day=+d.slice(8),mon=MONG[+d.slice(5,7)-1];
    if(i==null){h+=`<div class="cs-d cs-out"><span class="cs-top"><span class="cs-num">${day}</span><span class="cs-mon">${mon}</span></span></div>`;continue;}
    const c=V.cells[i],st=stOf(V,c.e);
    const mv=(v,s)=>v?`<span>${s}${fmtK(v)}</span>`:"";
-   h+=`<button class="cs-d cs-${st}${d===M.T?" cs-today":""}${cu.sel===d?" cs-sel":""}" data-cs-cal="${d}" aria-label="${dRuW(d)}: ${STL[st]||"изменение"}, ${fmt(c.e)}">
+   h+=`<button class="cs-d cs-${st}${d===M.T?" cs-today":""}${sel===d?" cs-sel":""}" data-cs-cal="${d}" aria-pressed="${sel===d}" aria-label="${dRuW(d)}: ${STL[st]||"изменение"}, ${fmt(c.e)}">
     <span class="cs-top"><span class="cs-num">${day}</span><span class="cs-mon">${d===M.T?"сегодня":(day===1||d===f)?mon:""}</span></span>
     <span class="cs-st">${st==="ok"?"":STL[st]||""}</span>
     ${c.mi||c.mo?`<span class="cs-mvs">${mv(c.mi,"+")}${mv(c.mo,"−")}</span>`:""}
@@ -3556,7 +3577,7 @@ const Cash=(()=>{
   }
   const U=M.undated.ids.map(id=>by[id]).filter(Boolean);let warn="";
   if(U.length){const s=d=>U.filter(it=>it.dir===d).reduce((a,it)=>a+Math.abs(it.cash),0);
-   warn=`<div class="cs-sub cs-warn">${count(U.length,"строка","строки","строк")} без даты в расчёт по дням не ${U.length===1?"идёт":"идут"}: поступления ${fmt(s(1))}, платежи ${fmt(s(-1))}. Даты можно поставить в выписке внизу.</div>`;}
+   warn=`<div class="cs-sub cs-warn">${count(U.length,"строка","строки","строк")} без даты в расчёт по дням не ${U.length===1?"идёт":"идут"}: поступления ${fmt(s(1))}, платежи ${fmt(s(-1))}. Даты можно поставить ниже, в «Вне календаря».</div>`;}
   const SG=advise(V),base=SG.base,word=SG.floor?"до запаса не хватит":"не хватать будет";cu.sugg=SG.list;cu.auto=SG.auto;
   const eff=s=>s.full?`<span class="cs-good">${SG.floor?"запас сохранён":"минус закрыт полностью"}</span>`:`${word} ${fmt(s.r.need)} вместо ${fmt(base.need)}`;
   // Drawn rather than typed: an arrow typed as a character is whatever the reader's fonts happen to hold.
@@ -3580,7 +3601,33 @@ const Cash=(()=>{
   if(V.all)return (adv?`<h2>${how}<span class="note">на ${H} дней, по каждому счёту отдельно</span></h2>`:"")+warn+adv;
   return `<h2>Итог</h2>${head}${warn}${adv?`<h3 class="cs-h3">${how}</h3>${adv}`:""}`;
  }
- function pickDay(d){cu.sel=d;cu.open.add(d);draw();const el=document.getElementById("cs-row-"+d);if(el)el.scrollIntoView({behavior:"smooth",block:"center"});else toast("В этот день строк нет");}
+ // A day pressed in the calendar is the day the panel beside it shows; the cursor stays on the day.
+ function pickDay(d){cu.sel=d;draw();const b=root.querySelector(`[data-cs-cal="${d}"]`);if(b)b.focus({preventScroll:true});}
+ // The day in view: the one pressed, while it is among the days shown - else today.
+ const selDay=V=>V.ix[cu.sel]!=null?cu.sel:V.ix[M.T]!=null?M.T:V.cells[0].d;
+ const linesOf=ids=>(ids||[]).map(id=>by[id]).filter(it=>it&&inScope(it)),lineOrder=l=>l.sort((a,b)=>(b.dir-a.dir)||Math.abs(b.cash||b.full)-Math.abs(a.cash||a.full));
+ const doneNote=l=>{const o=l.filter(it=>it.dir<0).length,i=l.length-o;return [o?"оплачено "+o:"",i?"получено "+i:""].filter(Boolean).join(" · ");};
+ // A row of the day in view: a circle that marks it received or paid in one press - the card asks what it must -
+ // its name, which opens the card under it, the bank and what the row says of itself, «фикс» for a one-off row a
+ // founder wrote, and the sum. A row that is done is ticked and muted; its mark is taken back in its card.
+ function pRow(it){
+  // (a closed row with nothing else to say of itself says how it was closed - what its mark said in the statement)
+  const done=it.state==="done",id=esc(it.id),inn=it.dir>0,rm=(it.state==="undated"?"":Ed.remark(it))||(done&&it.done.by==="row"?`по выписке${it.done.on?" "+dRu(it.done.on):""}`:done&&it.done.by==="closed"?"закрыто":""),card=Ed.under(it.id,"days"),can=!RO&&!done&&!["off","empty","doubt"].includes(it.state);
+  const ck=done?'<span class="td-ck on" aria-hidden="true">✓</span>':can?`<button class="td-ck" data-ed-do="paid" data-ed-id="${id}" data-ed-at="days" aria-label="${esc(it.name||"строка")}: ${inn?"получено":"оплачено"}" title="${inn?"Отметить: получено":"Отметить: оплачено"}"></button>`:'<span class="td-ck cs-pck off" aria-hidden="true"></span>';
+  const fix=!done&&it.src==="row"&&it.kind==="typed"?`<button class="chip${it.fixed?" active":""}" data-cs-fix="${id}" aria-pressed="${!!it.fixed}" title="Фиксированная дата: советы её не двигают">фикс</button>`:"<span></span>";
+  return `<div class="cs-pr${done?" cs-pdone":it.kind!=="typed"?" cs-phist":""}" data-cs-li="${id}"><span class="td-ckw">${ck}</span><button class="cs-pnm" data-ed-open="${id}" data-ed-at="days" title="Открыть строку"><span class="cs-nmt">${esc(it.name||"(без названия)")}</span><span class="cs-pmeta">${dot(it.bank)}${esc(it.bank)}${rm?` · <span class="cs-rm">${esc(rm)}</span>`:""}</span></button>${fix}<span class="cs-am">${Ed.sum(it)}${it.cur!=="GBP"&&!done?` <span class="note">(${nat(round2(it.amt*(it.factor||1)),it.cur)})</span>`:""}${!done&&Ed.vatWords(it)?` <span class="note">(${Ed.vatWords(it)})</span>`:""}</span></div>${card?`<div class="cs-pcard">${card}</div>`:""}`;
+ }
+ function dayPanel(V){
+  const T=M.T,d=selDay(V),i=V.ix[d],c=V.cells[i],was=i?V.cells[i-1].e:V.start,st=stOf(V,c.e),n=Math.round((dUTC(d)-dUTC(T))/864e5);
+  const ms=linesOf(M.days[i].items),ds=linesOf(M.doneDays[d]),cell=(k,l,v,cls)=>`<span class="cs-d${k}"><span class="lbl">${l}</span><b${cls?` class="${cls}"`:""} data-cs-dc="${k}">${v}</b></span>`;
+  const say=st==="neg"?`<p class="note cs-dsay"><span class="cs-short">не хватает ${fmt(-c.e)}</span></p>`:st==="low"?`<p class="note cs-dsay"><span class="cs-short cs-warn">меньше запаса ${fmt(M.cushion)}</span></p>`:"";
+  const cnt=`${ms.length||!ds.length?count(ms.length,"строка","строки","строк"):""}${ds.length?`${ms.length?" · ":""}${doneNote(ds)}`:""}`;
+  const rows=lineOrder(ms).concat(lineOrder(ds)).map(pRow).join("");
+  return `<section class="card cs-dpanel" id="cs-day" data-cs-day="${d}" aria-live="polite"><span class="lbl" id="cs-dwhen">${d===T?"сегодня":n===1?"завтра":`через ${count(n,"день","дня","дней")}`}</span>
+   <h2><span id="cs-dname">${dRuW(d)}</span><span class="note" id="cs-dcnt">${rows?cnt:""}</span></h2>
+   <div class="cs-dflow">${cell("was","Было",sgn(V,was))}${cell("in","Пришло",c.mi?"+"+fmt(c.mi):"—")}${cell("out","Ушло",c.mo?"−"+fmt(c.mo):"—")}${cell("end","Стало",sgn(V,c.e),st==="neg"?"neg":"")}</div>${say}
+   ${rows?`<div class="cs-dl" id="cs-dlist">${rows}</div>`:'<p class="note cs-dsay" id="cs-dnone">В этот день движений нет — остаток не меняется.</p>'}</section>`;
+ }
  const mover=it=>{const id=esc(it.id);return `<span class="cs-mv"><button data-cs-shift="-1" data-cs-it="${id}" title="На день раньше" aria-label="На день раньше">‹</button><input type="date" data-cs-ldate data-cs-it="${id}" max="${dAdd(M.T,731)}" value="${esc(it.date)}"${it.date?"":' class="cs-nodate"'} aria-label="Дата: ${esc(it.name)}"><button data-cs-shift="1" data-cs-it="${id}" title="На день позже" aria-label="На день позже">›</button></span>`;};
  // A line of a day. An open row has its mark, its date to move and — if it is a one-off row — «фикс», which keeps
  // the advice off it. A row that is done keeps only what still applies: the mark that can be taken back, or the
@@ -3598,27 +3645,19 @@ const Cash=(()=>{
  // days gone by that hold such rows stand above today, a month back, folded into one line until somebody wants
  // them: with every monthly payment among them they would bury today.
  function stmt(V){
-  const T=M.T,get=ids=>(ids||[]).map(id=>by[id]).filter(it=>it&&inScope(it)),order=l=>l.sort((a,b)=>(b.dir-a.dir)||Math.abs(b.cash||b.full)-Math.abs(a.cash||a.full));
+  const T=M.T,get=linesOf,order=lineOrder;
   const items=l=>`<tr class="cs-items"><td colspan="6"><ul>${l.map(liHTML).join("")}</ul></td></tr>`;
-  const doneNote=l=>{const o=l.filter(it=>it.dir<0).length,i=l.length-o;return [o?"оплачено "+o:"",i?"получено "+i:""].filter(Boolean).join(" · ");};
   const group=(key,cls,title,l,by2)=>{if(!l.length)return "";const op=key==="__past"?cu.past:cu.open.has(key);
    return `<tbody><tr class="cs-day ${cls} ${op?"cs-open":""}" data-cs-row="${key}" tabindex="0" aria-expanded="${op}"><td colspan="6"><span class="cs-caret"></span><b>${title}</b> · ${count(l.length,"строка","строки","строк")}</td></tr>${op&&by2?items(by2(l)):""}</tbody>`;};
   const past=Object.keys(M.doneDays).filter(d=>d<T).sort().map(d=>[d,get(M.doneDays[d])]).filter(x=>x[1].length);
-  let rows=group("__past","cs-fold","Уже прошло, за 31 день — закрыто",past.flatMap(x=>x[1]),null),prev=V.start;
+  let rows=group("__past","cs-fold","Уже прошло, за 31 день — закрыто",past.flatMap(x=>x[1]),null);
   if(cu.past)past.forEach(([d,l])=>{const op=cu.open.has(d);
    rows+=`<tbody><tr class="cs-out ${op?"cs-open":""}" data-cs-row="${d}" id="cs-row-${d}" tabindex="0" aria-expanded="${op}" title="День уже прошёл: остаток за него не ведётся"><td><span class="cs-caret"></span><b>${dRuW(d)}</b></td><td class="m r">—</td><td class="m r">—</td><td class="m r">—</td><td class="m r">—</td><td class="m r">${doneNote(l)}</td></tr>${op?items(order(l)):""}</tbody>`;});
-  V.cells.forEach((c,i)=>{
-   const was=prev;prev=c.e;const ms=get(M.days[i].items),ds=get(M.doneDays[c.d]);if(!ms.length&&!ds.length)return;
-   const st=stOf(V,c.e),op=cu.open.has(c.d);
-   rows+=`<tbody><tr class="cs-day ${st==="neg"||st==="low"?"cs-"+st:""} ${op?"cs-open":""} ${cu.sel===c.d?"cs-sel":""}" data-cs-row="${c.d}" id="cs-row-${c.d}" tabindex="0" aria-expanded="${op}">
-    <td><span class="cs-caret"></span><b>${dRuW(c.d)}</b>${c.d===T?' <span class="cs-now">сегодня</span>':""}</td>
-    <td class="m r">${sgn(V,was)}</td><td class="m r">${c.mi?"+"+fmt(c.mi):"—"}</td><td class="m r">${c.mo?"−"+fmt(c.mo):"—"}</td>
-    <td class="m r${st==="neg"?" neg":""}"><b>${sgn(V,c.e)}</b>${st==="neg"?`<span class="cs-short">не хватает ${fmt(-c.e)}</span>`:st==="low"?'<span class="cs-short cs-warn">мало</span>':""}</td><td class="m r">${ms.length||!ds.length?ms.length:""}${ds.length?`<span class="cs-dn">${ms.length?" · ":""}${doneNote(ds)}</span>`:""}</td></tr>
-    ${op?items(order(ms).concat(order(ds))):""}</tbody>`;
-  });
   // What is written and is in no day: a row without a date; money that is long late, which the line no longer
   // counts on, the months after it of a client who has gone quiet, and a monthly payout nobody made. And, last,
   // what is done: every one-off row, whenever that was, and the months and taxes closed in the last two months.
+  // (Until 12 November 2026 the days in view stood here too, one row to a day, each unfolding into its lines - «Выписка
+  // по дням». A day is now pressed in the calendar and read in the panel beside it.)
   const lately=dAdd(T,-62);
   rows+=group("__undated","cs-und","Без даты — не в расчёте",get(M.undated.ids),order);
   // A debt carried over from a month paid in part with no date — a plan from before the rest got a day of its own —
@@ -3626,7 +3665,7 @@ const Cash=(()=>{
   rows+=group("__carry","cs-und","Долги без даты — в расчёте с первого дня своего месяца",M.items.filter(it=>it.state==="carry"&&inScope(it)&&V.ix[it.day]==null),order);
   rows+=group("__late","cs-und","Не пришло, не оплачено и под вопросом — не в расчёте",M.items.filter(it=>inScope(it)&&((it.state==="late"&&!it.day)||it.state==="doubt"||it.state==="missed")),order);
   rows+=group("__paid","cs-pgrp","Оплачено / получено",M.items.filter(it=>it.state==="done"&&inScope(it)&&(it.src==="row"||(it.done.day||it.date)>=lately)),l=>l.sort((a,b)=>((a.done.day||"9")<(b.done.day||"9")?-1:1)));
-  return `<thead><tr><th>День</th><th class="r">Было</th><th class="r">Пришло</th><th class="r">Ушло</th><th class="r">Стало</th><th class="r">Строк</th></tr></thead>${rows||'<tbody><tr><td colspan="6" class="note">В эти дни строк нет.</td></tr></tbody>'}`;
+  return rows;
  }
  // The banks over the days in view, from the same lanes the calendar of one bank is drawn from: what each holds
  // now, what comes and goes through it, what it is left with — and whether it runs dry on the way.
@@ -3638,18 +3677,17 @@ const Cash=(()=>{
  }
  function daysView(){
   const V=cu.V=scope(),H=M.H;
-  if(!cu.open)cu.open=new Set(V.known?V.cells.filter(c=>c.e<0).map(c=>c.d):[]);
-  if(cu.sel)cu.open.add(cu.sel);
-  const said=answer(V);
+  if(!cu.open)cu.open=new Set();
+  const said=answer(V),off=stmt(V);
   const chips=[["__all","Все счета",""],...V.banks.map(b=>[b,b,dot(b)])].map(([k,l,sw])=>`<button class="chip${cu.scope===k?" active":""}" data-cs-scope="${esc(k)}" aria-pressed="${cu.scope===k}">${sw}${esc(l)}</button>`).join("");
   return `<div id="cs-days" class="stack">
    <div class="row cs-scope" id="cs-scope"><span class="row" role="group" aria-label="Какой счёт показывать">${chips}</span><span class="row cs-hh" role="group" aria-label="На сколько дней вперёд">${[30,60].map(h=>`<button class="chip${H===h?" active":""}" data-cs-h="${h}" aria-pressed="${H===h}">${h} дней</button>`).join("")}</span></div>
    ${said?`<section class="card" id="cs-answer">${said}</section>`:""}
-   <section class="card"><h2>Календарь<span class="note">остаток на конец дня${V.known?"":" — изменение от сегодняшнего"} · нажмите на день — откроется в выписке</span></h2>
+   <div class="cs-dgrid" id="cs-dgrid"><section class="card"><h2>Календарь<span class="note">остаток на конец дня${V.known?"":" — изменение от сегодняшнего"} · нажмите на день — справа его строки</span></h2>
     <div class="legend"><span><i class="sw cs-sw-ok"></i>хватает</span>${V.all?`<span><i class="sw cs-sw-low"></i>меньше запаса ${fmtK(M.cushion)}</span>`:""}<span><i class="sw cs-sw-neg"></i>минус</span><span><i class="sw cs-sw-out"></i>вне периода</span></div>
-    <div class="tbl"><div class="cs-cal" id="cs-cal">${cal(V)}</div></div></section>
-   <section class="card"><h2>Выписка по дням<span class="note">нажмите на день, чтобы увидеть строки и подвинуть даты · серым — налог по правилу</span></h2>
-    <div class="tbl"><table class="cs-stmt" id="cs-stmt">${stmt(V)}</table></div></section>
+    <div class="tbl"><div class="cs-cal" id="cs-cal">${cal(V)}</div></div></section>${dayPanel(V)}</div>
+   ${off?`<section class="card" id="cs-offcal"><h2>Вне календаря<span class="note">строки без даты, то, что не пришло и не оплачено, и уже закрытое · нажмите на строку списка, чтобы раскрыть · серым — налог по правилу</span></h2>
+    <div class="tbl"><table class="cs-stmt" id="cs-stmt">${off}</table></div></section>`:""}
    <section class="card"><h2>Покрытие по банкам<span class="note">на ${H} дней: что пройдёт через каждый банк, в £</span></h2><div class="cs-cov" id="cs-covd">${coverDays(V)}</div></section></div>`;
  }
 
@@ -3774,7 +3812,7 @@ const Cash=(()=>{
  }
  function setDate(it,v){
   if(v===it.date)return;
-  if(cu.open&&v&&v>=M.T)cu.open.add(v);
+  if(cu.open&&v&&v>=M.T){cu.open.add(v);cu.sel=v;}
   Plan.edit(`${it.name||"строка"}: ${it.date?dRuW(it.date):"без даты"} → ${v?dRuW(v):"без даты"}`,(P,now,who)=>{Ed.apply(P,it,{name:it.name,amt:it.amt,cur:it.cur,bank:it.bank,date:v,vat:it.vat},{date:true},now,who);})
    &&toast(v?`Перенесено на ${dRuW(v)}`:"Дата снята",()=>popUndo());
  }
@@ -3785,7 +3823,7 @@ const Cash=(()=>{
   if(s.type==="split")Plan.edit(`${it.name}: разделён на две части`,(P,now,who)=>{const l=P[it.list],r=l.find(x=>String(x.id)===it.id);if(!r)return;
    const z=Object.assign({},r,{id:uid(),name:r.name+" (остаток)",amt:s.restNat,date:s.to,tag:"",info:false,c0:now,m:{t:now,by:who}});["tx","notx","closed","sk","skBy","paid","mon","fixed"].forEach(f=>delete z[f]);
    r.amt=s.nowNat;r.m={t:now,by:who};l.splice(l.indexOf(r)+1,0,z);});
-  cu.open.add(s.to);toast("Готово — можно отменить",()=>popUndo());
+  cu.open.add(s.to);cu.sel=s.to;toast("Готово — можно отменить",()=>popUndo());
  }
  // Which half is in view is in the address, so a reload — or a link — comes back to it.
  const address=()=>{try{history.replaceState(null,"",cu.view==="days"?"#cash-days":"#cash");}catch(e){}};

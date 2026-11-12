@@ -2836,7 +2836,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
 const goCash = async (pg, view = 'plan') => {
   await pg.click('.nav [data-tab="cash"]');
   await pg.click(`#view-cash [data-cs-view="${view}"]`);
-  await pg.waitForSelector(view === 'plan' ? '#cs-plan' : '#cs-stmt');
+  await pg.waitForSelector(view === 'plan' ? '#cs-plan' : '#cs-days');
 };
 // A row of a month's section, its one box - the sum - and the button at its end that opens its card.
 const cs = (k, id) => `#cs-sec-${k} tr[data-cs-id="${id}"]`;
@@ -2901,14 +2901,29 @@ async function addInList(pg, k, f) {
 const leave = async (pg) => { await pg.click('#cs-mname'); await sleep(60); };
 const fmtP = (v) => (v < 0 ? '−' : '') + '£' + Math.abs(Math.round(v)).toLocaleString('en-GB');
 const toastText = (pg) => pg.$eval('#toast', (e) => (e.hidden ? '' : e.querySelector('#toastText').textContent.replace(/ /g, ' ')));
-// A line of «Выписка по дням»: its cells; and the rows under it, each as it is drawn.
-const dayLine = (pg, d) => pg.$eval(`#cs-stmt tr[data-cs-row="${d}"]`, (tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim()));
-const dayRows = (pg, d) => pg.$$eval(`#cs-stmt tr[data-cs-row="${d}"] + tr.cs-items li`, (l) => l.map((li) => {
-  const g = (s) => li.querySelector(s);
-  const b = g('.cs-ctl button');
-  return [li.dataset.csLi, li.className.trim() || 'typed', getComputedStyle(g('.cs-nmt')).textDecorationLine, b ? b.textContent.trim() + '|' + (b.getAttribute('aria-pressed') ?? '') : g('.cs-ctl').textContent.trim(), li.querySelectorAll('[data-cs-ldate]').length ? 'date' : 'no date', li.querySelectorAll('[data-cs-fix]').length ? 'фикс' : 'no фикс', g('.cs-rm') ? g('.cs-rm').textContent : '', g('.cs-am').textContent.replace(/\s+/g, ' ').trim()].join(' | ').replace(/ /g, ' ');
-}));
-const openDay = async (pg, d) => { if ((await pg.$eval(`#cs-stmt tr[data-cs-row="${d}"]`, (e) => e.getAttribute('aria-expanded'))) === 'false') await pg.click(`#cs-stmt tr[data-cs-row="${d}"] td:first-child`); };
+// «Касса · По дням» (since 12 November 2026): a day is pressed in the calendar and read in the panel beside it. The
+// day as the panel says it - its name, what was, what came, what went, what is left, and how many rows - in the six
+// cells the old statement's row had; a group of what stands on no day is still a row of the list under the calendar.
+const openDay = async (pg, d) => { if ((await pg.$eval('#cs-day', (e) => e.dataset.csDay)) !== d) await pg.click(`#cs-cal [data-cs-cal="${d}"]`); await pg.waitForSelector(`#cs-day[data-cs-day="${d}"]`); };
+const dayLine = async (pg, d) => {
+  if (d.startsWith('__')) return pg.$eval(`#cs-stmt tr[data-cs-row="${d}"]`, (tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim()));
+  await openDay(pg, d);
+  return pg.$eval('#cs-day', (e) => { const t = (q) => { const x = e.querySelector(q); return x ? x.textContent.replace(/\s+/g, ' ').trim() : ''; };
+    return [t('#cs-dname'), t('[data-cs-dc="was"]'), t('[data-cs-dc="in"]'), t('[data-cs-dc="out"]'), t('[data-cs-dc="end"]') + t('.cs-dsay .cs-short'), t('#cs-dcnt').replace(/(\d+) строк[аи]?/, '$1')]; });
+};
+// … and its rows, each as it is drawn: the line, what kind it is, whether its name is struck through, its mark - a
+// circle to press, a tick, or nothing - «фикс», what it says of itself, and its sum.
+const dayRows = async (pg, d) => {
+  await openDay(pg, d);
+  await pg.mouse.move(0, 0);
+  return pg.$$eval('#cs-day .cs-pr', (l) => l.map((r) => {
+    const g = (s) => r.querySelector(s);
+    return [r.dataset.csLi, r.classList.contains('cs-pdone') ? 'done' : r.classList.contains('cs-phist') ? 'by rule' : 'typed', getComputedStyle(g('.cs-nmt')).textDecorationLine, g('button.td-ck') ? 'circle' : g('.td-ck.on') ? 'ticked' : 'no mark',
+      g('[data-cs-fix]') ? 'фикс' : 'no фикс', g('.cs-rm') ? g('.cs-rm').textContent : '', g('.cs-am').textContent.replace(/\s+/g, ' ').trim()].join(' | ').replace(/\u00a0/g, ' ');
+  }));
+};
+// The card of a row of the day in view, opened under it in the panel.
+const dayCard = async (pg, d, id) => { await openDay(pg, d); await pg.click(`#cs-day [data-cs-li="${id}"] [data-ed-open]`); await pg.waitForSelector('#cs-day ' + K('row')); };
 const wiseCsv = (rows) => 'TransferWise ID,Date,Amount,Currency,Description,Payment Reference,Payer Name,Payee Name,Merchant,Card Holder Full Name\n' + rows.map(([id, d, a, text, payer, payee]) => `${id},${d.slice(8)}-${d.slice(5, 7)}-${d.slice(0, 4)},${a.toFixed(2)},GBP,${text},,${payer || ''},${payee || ''},,`).join('\n');
 const feed = (pg, csv) => pg.evaluate((c) => { const r = window.__tx.feed(window.__tx.parseGrid(window.__tx.parseCSV(c), 'wise.csv'), 'wise.csv'); return [r.bank, r.added]; }, csv);
 
@@ -2936,9 +2951,9 @@ await run('kassa figures', '«Касса» is the plan by months and by days, an
       `${name} (${verdict}): «По месяцам» is the month - two bars and the accounts (since 12 November 2026 above the lists) - and its six sections — no figures of the forecast, no balances, nothing in the head but the month with its arrows, the two views and the line of «Сегодня» (variant «В», 2 November 2026)`);
     await goCash(pg, 'days');
     B = await holds(pg, `${name}, «Касса · По дням»`, 'cash');
-    same([await there(pg, GONE), await texts(pg, '#cs-scope [data-cs-h]'), await pg.$eval('#cs-scope [data-cs-h][aria-pressed="true"]', (b) => b.textContent), !!(await pg.$('#cs-cal')), !!(await pg.$('#cs-stmt')), !!(await pg.$('#cs-covd'))],
+    same([await there(pg, GONE), await texts(pg, '#cs-scope [data-cs-h]'), await pg.$eval('#cs-scope [data-cs-h][aria-pressed="true"]', (b) => b.textContent), !!(await pg.$('#cs-cal')), !!(await pg.$('#cs-day')), !!(await pg.$('#cs-covd'))],
       [[], ['30 дней', '60 дней'], '60 дней', true, true, true],
-      `… «По дням» is the calendar, the statement by days and «Покрытие по банкам», with «30 дней / 60 дней» beside the choice of an account — the one view that choice changes; no sentence of all the accounts, no chart`);
+      `… «По дням» is the calendar, the day chosen in it beside it (since 12 November 2026 - the statement by days until then) and «Покрытие по банкам», with «30 дней / 60 дней» beside the choice of an account — the one view that choice changes; no sentence of all the accounts, no chart`);
     // Of all the accounts together the sentence is the one «Сегодня» opens with, and is not said here; of one bank it is this view's own.
     const card = async () => ((await pg.$('#cs-answer')) ? plain(await text(pg, '#cs-answer h2')).replace(/на \d+ дней.*/, '') : '');
     const all = await card();
@@ -3002,12 +3017,14 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   // under its own day in «По дням», toggle still working
   await pg.click('#view-cash [data-cs-view="days"]');
   await openDay(pg, '2026-10-07');
-  same([await dayLine(pg, '2026-10-07'), await dayRows(pg, '2026-10-07')], [['ср 7 окт', '£9,000', '—', '—', '£9,000', 'оплачено 1'], [`${g} | cs-ispaid cs-done | none | оплачено ✓|true | no date | no фикс | отмечено · ждёт выписку | −£1,000`]], 'in «По дням» it stands under its own day, 7 Oct, struck through and counted in nothing: the day\'s line has no money and says «оплачено 1»');
-  await pg.click(`#cs-stmt li[data-cs-li="${g}"] [data-ed-do="unpaid"]`);
+  same([await dayLine(pg, '2026-10-07'), await dayRows(pg, '2026-10-07')], [['ср 7 окт', '£9,000', '—', '—', '£9,000', 'оплачено 1'], [`${g} | done | none | ticked | no фикс | отмечено · ждёт выписку | −£1,000`]], 'in «По дням» it stands under its own day, 7 Oct, ticked and counted in nothing: the day has no money and says «оплачено 1»');
+  await dayCard(pg, '2026-10-07', g);
+  await rowPress(pg, 'unpaid');
   S = await holds(pg, 'the mark taken back', 'cash');
-  shows(S, { now: 10000, out: 7120 }, 'pressed again there: back in the plan');
-  same(['paid' in stored(S, g), JSON.stringify(S.P.banks) === banks, await dayLine(pg, '2026-10-07'), (await dayRows(pg, '2026-10-07'))[0]], [false, true, ['ср 7 окт', '£10,000', '—', '−£1,000', '£9,000', '1'], `${g} | typed | none | ✓ оплачено|false | date | фикс |  | −£1,000`], '… the mark is gone, the balances as they were, the day counts its £1,000 again');
-  await pg.click(`#cs-stmt li[data-cs-li="${g}"] [data-ed-do="paid"]`);
+  shows(S, { now: 10000, out: 7120 }, '«Вернуть в план» in its card there: back in the plan');
+  same(['paid' in stored(S, g), JSON.stringify(S.P.banks) === banks, await dayLine(pg, '2026-10-07'), (await dayRows(pg, '2026-10-07'))[0]], [false, true, ['ср 7 окт', '£10,000', '—', '−£1,000', '£9,000', '1'], `${g} | typed | none | circle | фикс |  | −£1,000`], '… the mark is gone, the balances as they were, the day counts its £1,000 again');
+  await shutRow(pg);
+  await pg.click(`#cs-day [data-cs-li="${g}"] button.td-ck`);
   // the statement that shows the payment takes the mark's place: the row is then closed by the bank's own row, under the bank's date
   await pg.clock.fastForward(60000);
   same(await feed(pg, wiseCsv([['TRANSFER-9', T, -1000, 'Sent money to somebody', '', 'Somebody']])), ['Wise', 1], 'a statement uploaded after the tap brings 6 Oct −1,000');
@@ -3016,7 +3033,7 @@ await run('mark', '«Оплачено» in «Касса» is a founder\'s word: 
   shows(S, { now: 9000, out: 6120 }, 'the row, still unrecognised in «Разбор», replaces the mark');
   same([S.M.END, S.M.now, S.M.marksGbp, item(S.M, g).done.by, item(S.M, g).done.day], [10880, 9000, 0, 'row', T], '… NOW 9,000 with nothing of it a mark any more, END where it was; the line is closed by the row');
   await openDay(pg, T);
-  same((await dayRows(pg, T)).filter((x) => x.startsWith(g)), [`${g} | cs-ispaid cs-done | none | по выписке 6 окт | no date | no фикс |  | −£1,000`], '… and now stands under the day of the statement\'s row, 6 Oct — «по выписке», with nothing left to press');
+  same((await dayRows(pg, T)).filter((x) => x.startsWith(g)), [`${g} | done | none | ticked | no фикс | по выписке 6 окт | −£1,000`], '… and now stands under the day of the statement\'s row, 6 Oct — «по выписке», with nothing left to press');
   await pg.click('#view-cash [data-cs-view="plan"]');
   await rowCard(pg, 'team', g);
   // (layout 1, 1 November 2026: how the line stands is said on the line of its month in «Сведения»)
@@ -3157,7 +3174,7 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
     await pg.click('#view-today .td-sd.on');
     await pg.click('#view-today .td-verdict [data-td-days]');
     await pg.waitForSelector('#cs-answer');
-    const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-stmt tr.cs-sel') || { dataset: {} }).dataset.csRow, view: window.__cash.at().view }; });
+    const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-day') || { dataset: {} }).dataset.csDay, view: window.__cash.at().view }; });
     ok(r.view === 'days' && r.sel === '2026-10-12' && r.top >= 0 && r.inView, `${w}px: «Как закрыть» opens «По дням» on the first day short, with what to do about it in view under the bar`, r);
     same([plain(await text(pg, '#cs-answer h2')).replace(/на \d+ дней.*/, ''), await pg.$('#cs-answer .cs-hl')], ['Как закрыть', null], `${w}px: … and the card there is «Как закрыть» — the stretch itself is said once, by the sentence of «Сегодня»`);
     await pg.context().close();
@@ -3298,6 +3315,44 @@ await run('cash-closed', 'a list of the running month is its open rows; the clos
   same((await sec()).folded, true, '… and October, the running month, is as it was left');
   await pg.context().close();
 });
+await run('cash-day', '«Касса · По дням»: a day pressed in the calendar is read in the panel beside it - what was, what came, what went, what is left, and its rows, each a circle and a name', async () => {
+  // 12 November 2026, the seventh part of the owner's prototype: the statement by days - one row to a day, each
+  // unfolding into lines with a mark, a date box, «фикс» and a tick - is gone. A made-up studio on 6 Oct with £1,000 on
+  // Wise: Person T is paid 1,200 on the 10th, Client Z pays 3,000 on the 20th, and Client U owes 900 with no date.
+  const P = plan3({ banks: [bal('Wise', 'GBP', 1000, T)], team: [row('t1', 'Person T', 1200, '2026-10-10')],
+    inflows: [row('z1', 'Client Z', 3000, '2026-10-20', { vat: false }), row('u1', 'Client U', 900, '', { mon: '2026-10', vat: false })] });
+  const pg = await scene('cash-day', ledger([]), P, { H: 30 });
+  await goCash(pg, 'days');
+  let S = await holds(pg, 'the days of the made-up studio', 'cash');
+  const when = () => text(pg, '#cs-dwhen'), pressed = () => pg.$$eval('#cs-cal [data-cs-cal][aria-pressed="true"]', (l) => l.map((e) => e.dataset.csCal));
+  same([await pg.$eval('#cs-day', (e) => e.dataset.csDay), await when(), await pressed(), await dayLine(pg, T), await text(pg, '#cs-dnone'), await pg.$('#cs-stmt thead'), await pg.$(`#cs-stmt tr[data-cs-row="2026-10-10"]`)],
+    [T, 'сегодня', [T], ['вт 6 окт', '£1,000', '—', '—', '£1,000меньше запаса £5,000', ''], 'В этот день движений нет — остаток не меняется.', null, null],
+    'as it opens the panel is today: £1,000 was and is - less than the cushion of £5,000 - and nothing moves; and no day is a row of a table any more');
+  ok(await pg.evaluate(() => { const a = document.querySelector('#cs-cal').getBoundingClientRect(), b = document.querySelector('#cs-day').getBoundingClientRect(); return b.left > a.right - 1 && Math.abs(b.top - document.querySelector('#cs-dgrid').getBoundingClientRect().top) < 2; }), 'the panel stands to the right of the calendar, at its head');
+  same([await dayLine(pg, '2026-10-10'), await dayRows(pg, '2026-10-10'), await when(), await pressed()], [['сб 10 окт', '£1,000', '—', '−£1,200', '−£200не хватает £200', '1'], ['t1 | typed | none | circle | фикс |  | −£1,200'], 'через 4 дня', ['2026-10-10']],
+    '10 Oct pressed: the panel is that day - 1,200 goes and £200 is missing - with Person T\'s row, a circle before its name');
+  same([await dayRows(pg, '2026-10-20'), await dayLine(pg, '2026-10-20')], [['z1 | typed | none | circle | фикс |  | +£3,000'], ['вт 20 окт', '−£200', '+£3,000', '—', '£2,800меньше запаса £5,000', '1']], '20 Oct: Client Z\'s 3,000 brings the account to £2,800');
+  // The name opens the row's card under it, in the panel; the circle is «Оплачено» in one press, with no card.
+  await dayCard(pg, '2026-10-10', 't1');
+  same(await pg.$$eval('[data-ed-card="row"]', (l) => l.map((c) => !!c.closest('#cs-day'))), [true], 'a press on the name opens the row\'s card under it in the panel, and nowhere else');
+  await shutRow(pg);
+  await pg.click('#cs-day [data-cs-li="t1"] button.td-ck');
+  await pg.waitForSelector('#cs-day [data-cs-li="t1"] .td-ck.on');
+  S = await holds(pg, 'Person T marked by the circle', 'cash');
+  same([item(S.M, 't1').state, !!stored(S, 't1').paid, await dayRows(pg, '2026-10-10'), await pg.$('#cs-day [data-ed-card="row"]')], ['done', true, ['t1 | done | none | ticked | no фикс | отмечено · ждёт выписку | −£1,200'], null],
+    'the circle pressed: the plan holds the mark, the row is ticked and stays in its day - and no card was opened for it');
+  // What stands on no day of the calendar is listed under it.
+  same([await text(pg, '#cs-offcal h2'), await dayLine(pg, '__undated')], ['Вне календарястроки без даты, то, что не пришло и не оплачено, и уже закрытое · нажмите на строку списка, чтобы раскрыть · серым — налог по правилу', ['Без даты — не в расчёте · 1 строка']],
+    'under the calendar, «Вне календаря»: the row without a date is there');
+  await pg.context().close();
+  // On a phone the panel stands under the calendar, and nothing runs off the screen.
+  const ph = await scene('cash-day, phone', ledger([]), P, { w: 375, h: 812, H: 30 });
+  await goCash(ph, 'days');
+  await openDay(ph, '2026-10-10');
+  same(await ph.evaluate(() => { const a = document.querySelector('#cs-cal').closest('section').getBoundingClientRect(), b = document.querySelector('#cs-day').getBoundingClientRect(); return [document.documentElement.scrollWidth <= window.innerWidth, b.top >= a.bottom - 1, [...document.querySelectorAll('#cs-day .cs-pr *')].every((e) => { const r = e.getBoundingClientRect(); return !r.width || r.right <= window.innerWidth + 0.5; })]; }), [true, true, true],
+    'at 375 px the day stands under the calendar, and every part of its row ends inside the screen');
+  await ph.context().close();
+});
 await run('tax-parts', 'a tax paid in parts: «Сумма по декларации» is the whole bill in the form, and the row\'s box in «Касса» is what is left of it', async () => {
   // 12 November 2026. A quarter's tax split into dated parts leaves a computed row for what the parts do not cover.
   // Its form offered that remainder under «Сумма по декларации» and stored whatever was typed as the WHOLE bill; the
@@ -3407,10 +3462,10 @@ const signed = (v) => (v > 0 ? '+' : '') + money0(v);
 // mark, date and bank end inside the screen. Returns how many lines were looked at, and what was off.
 const linesInSight = (pg, w) => pg.evaluate((w) => {
   const out = [];
-  const t = document.querySelector('#cs-stmt').closest('.tbl');
-  if (t.scrollWidth > t.clientWidth + 1) out.push('the statement scrolls inside its card: ' + t.scrollWidth + ' > ' + t.clientWidth);
-  const lis = [...document.querySelectorAll('#cs-stmt li[data-cs-li]')];
-  lis.forEach((li) => { for (const s of ['.cs-nmt', '.cs-am', '.cs-ctl button', '.cs-mv input', '.cs-bkn']) { const e = li.querySelector(s); if (!e) continue; const r = e.getBoundingClientRect(); if (r.width && (r.right > w + 0.5 || r.left < -0.5)) out.push(li.dataset.csLi + ': ' + s + ' ends at ' + Math.round(r.right)); } });
+  const st = document.querySelector('#cs-stmt'), t = st && st.closest('.tbl');
+  if (t && t.scrollWidth > t.clientWidth + 1) out.push('the statement scrolls inside its card: ' + t.scrollWidth + ' > ' + t.clientWidth);
+  const lis = [...document.querySelectorAll('#cs-stmt li[data-cs-li], #cs-day .cs-pr')];
+  lis.forEach((li) => { for (const s of ['.cs-nmt', '.cs-am', '.cs-ctl button', '.cs-mv input', '.cs-bkn', '.td-ck', '[data-cs-fix]']) { const e = li.querySelector(s); if (!e) continue; const r = e.getBoundingClientRect(); if (r.width && (r.right > w + 0.5 || r.left < -0.5)) out.push(li.dataset.csLi + ': ' + s + ' ends at ' + Math.round(r.right)); } });
   return [lis.length, out];
 }, w);
 
@@ -3667,15 +3722,15 @@ await run('repeat', '«каждый месяц» is a plain control on every kin
   await pg.click('#cs-sec-team tr.cs-line [data-cs-onward]');
   S = await holds(pg, '[И дальше так же]', 'cash');
   same([S.P.team[0].amt, S.P.team[0].rec, await pg.$('#cs-sec-team tr.cs-line')], [6100, { day: 20, from: '2026-10' }, null], '[И дальше так же]: the row is 6,100 from October on, and the line is gone');
-  // «Касса · По дням»: the same tick at the right edge of every written line.
+  // «Касса · По дням»: a written line's tick is in its card - the panel of a day lists its rows, each a circle and a
+  // name (until 12 November 2026 the tick stood at the right edge of every line of the statement by days).
   await pg.click('#view-cash [data-cs-view="days"]');
-  await openDay(pg, '2026-10-12');
-  const inDay = await pg.$$eval('#cs-stmt tr[data-cs-row="2026-10-12"] + tr.cs-items li[data-cs-li]', (l) => l.map((li) => { const e = li.querySelector('[data-cs-lrec]'); return [li.dataset.csLi, e ? (e.checked ? 'ticked' : 'unticked') : 'none', e ? e.closest('label').textContent.trim() : ''].join(' '); }).sort());
-  same(inDay, ['d1 unticked каждый месяц', 'i1 unticked каждый месяц', 'o1@2026-10 ticked каждый месяц', 't1 unticked каждый месяц', 'x1 unticked каждый месяц'], '«Касса · По дням», 12 Oct: every written line carries the tick — the one that repeats, ticked');
-  await openDay(pg, '2026-10-28');
-  same(await pg.$eval(`#cs-stmt li[data-cs-li="${TAX}"]`, (li) => [!!li.querySelector('[data-cs-lrec]'), li.className]), [false, 'cs-hist'], '… and the tax worked out by a rule, in muted ink, has none');
-  await pg.click('#cs-stmt [data-cs-lrec="d1"]');
-  S = await holds(pg, 'a withdrawal ticked in the day list', 'cash');
+  same((await dayRows(pg, '2026-10-12')).map((r) => r.split(' | ').slice(0, 2).join(' ')).sort(), ['d1 typed', 'i1 typed', 'o1@2026-10 typed', 't1 typed', 'x1 typed'], '«Касса · По дням», 12 Oct: the five written lines of the day stand in the panel');
+  same((await dayRows(pg, '2026-10-28')).filter((r) => r.startsWith(TAX)).map((r) => r.split(' | ')[1]), ['by rule'], '… and the tax worked out by a rule, on its own day, in muted ink');
+  await dayCard(pg, '2026-10-12', 'd1');
+  await fill(pg, 'row', { monthly: true });
+  await saveRow(pg);
+  S = await holds(pg, 'a withdrawal ticked in its card in the day', 'cash');
   same(stored(S, 'd1').rec, { day: 12, from: '2026-10' }, 'ticked there on the withdrawal: it repeats on the 12th — a dividend every month is a row like any other');
   await calm(pg, '«Касса · По дням» with its ticks', 'cash');
   await finish(pg);
@@ -3934,9 +3989,9 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
     '… and November holds the rest as a row of its own, dated the 12th, above November\'s own month of the 20th: 6,600 expected');
   // «По дням»: under its day.
   await pg.click('#view-cash [data-cs-view="days"]');
-  await pg.waitForSelector('#cs-stmt');
+  await pg.waitForSelector('#cs-days');
   await openDay(pg, '2026-11-12');
-  same([await dayLine(pg, '2026-11-12'), await dayRows(pg, '2026-11-12'), await pg.$('#cs-stmt tr[data-cs-row="__carry"]')], [['чт 12 ноя', '£32,420', '—', '−£600', '£31,820', '1'], [`${debt.id} | typed | none | ✓ оплачено|false | date | фикс |  | −£600`], null],
+  same([await dayLine(pg, '2026-11-12'), await dayRows(pg, '2026-11-12'), await pg.$('#cs-stmt tr[data-cs-row="__carry"]')], [['чт 12 ноя', '£32,420', '—', '−£600', '£31,820', '1'], [`${debt.id} | typed | none | circle | фикс |  | −£600`], null],
     'in «По дням» it stands under 12 Nov, and the day takes its 600 off the balance — a line with its mark, its date to move and «фикс», like any other; there is no group «Долги без даты»');
   await holds(pg, '«По дням» with the rest', 'cash');
   // «Частично…» in the card of a row of the month asks the same question.
@@ -4013,13 +4068,14 @@ await run('partly, other days', '«Частично» with the rest in the same 
   await toMonth(pg, '2026-11');
   same(await listed(pg, 'team'), ['rB@2026-11'], '… and November holds only its own month');
   await pg.click('#view-cash [data-cs-view="days"]');
-  await pg.waitForSelector('#cs-stmt');
+  await pg.waitForSelector('#cs-days');
   await openDay(pg, '2026-10-30');
-  same([await dayLine(pg, '2026-10-30'), await dayRows(pg, '2026-10-30')], [['пт 30 окт', '£37,840', '—', '−£600', '£37,240', '1'], [`${debt.id} | typed | none | ✓ оплачено|false | date | фикс |  | −£600`]], 'in «По дням» it stands under 30 Oct');
+  same([await dayLine(pg, '2026-10-30'), await dayRows(pg, '2026-10-30')], [['пт 30 окт', '£37,840', '—', '−£600', '£37,240', '1'], [`${debt.id} | typed | none | circle | фикс |  | −£600`]], 'in «По дням» it stands under 30 Oct');
   // A second «Частично…», on the rest itself, two months on. Its card is that of an open row, and Enter in the day of
   // the QUESTION answers the question. (layout 1, 1 November 2026: the row's own «Дата» and «Сохранить» stood beside
   // it; now the row's day is said in «Сведения», and the band holds the question alone)
-  await pg.click(`#cs-stmt li[data-cs-li="${debt.id}"] [data-ed-ask="part"]`);
+  await dayCard(pg, '2026-10-30', debt.id);
+  await rowPress(pg, 'part');
   await pg.waitForSelector(ASK);
   same([await text(pg, K('row') + '[data-ed-partnote]'), await monthOf(pg), await texts(pg, K('row') + '[data-ed-save]'), await pg.$$eval(K('row') + 'input[type=date]', (l) => l.map((e) => [e.id, e.value].join(' ').trim()))], ['из £600', 'к оплате 30 окт', [], ['ed-partdate']],
     '«частично» on the rest\'s own line: its card says the row\'s own day, 30 Oct, and holds one date — the empty day of the question — and nothing else that saves');
@@ -4040,7 +4096,7 @@ await run('partly, other days', '«Частично» with the rest in the same 
   S = await holds(pg, 'December with the second rest', 'cash');
   same([await listed(pg, 'team'), S.fig('mon.team.exp'), await csRow(pg, 'team', next.id)], [[next.id, 'rB@2026-12'], 6400, 'typed | none | on | Person B — остаток с октября | 400 | GBP | 2026-12-15 | Wise | '], 'in the constructor it is a row of December, above December\'s own month: 6,400 expected');
   await pg.click('#view-cash [data-cs-view="days"]');
-  await pg.waitForSelector('#cs-stmt');
+  await pg.waitForSelector('#cs-days');
   same(await dayLine(pg, '2026-12-15'), ['вт 15 дек', '£37,200', '+£2,000', '−£400', '£38,800', '2'], '… and in «По дням» the 15th of December takes its 400 beside Client R\'s 2,000');
   // The editor has its own list of «the later months that already hold a row of this name» — for a row made «каждый
   // месяц» in «Добавить» or by the tick in its card. A rest is not in it either: a row typed by hand under the very
@@ -4151,10 +4207,10 @@ await run('partly, from before', 'a plan that still holds a rest carried WITHOUT
   await holds(pg, 'November with the debt', 'cash');
   same([await csRow(pg, 'team', 'debt'), await listed(pg, 'team')], ['typed | none | on | Person B — остаток с октября | 600 | GBP |  | Wise | без даты · в расчёте с 1 ноября', ['rB@2026-11', 'debt']], '… the debt a row of November, its date still to be given, after November\'s own month');
   await pg.click('#view-cash [data-cs-view="days"]');
-  await pg.waitForSelector('#cs-stmt');
+  await pg.waitForSelector('#cs-days');
   await openDay(pg, '2026-11-01');
   same([await dayLine(pg, '2026-11-01'), await dayRows(pg, '2026-11-01'), await dayLine(pg, '__carry'), await dayLine(pg, '__undated'), plain(await text(pg, '#cs-answer .cs-warn'))],
-    [['вс 1 ноя', '£37,840', '—', '−£600', '£37,240', '1'], ['debt | typed | none | ✓ оплачено|false | date | фикс | без даты · в расчёте с 1 ноября | −£600'], ['Долги без даты — в расчёте с первого дня своего месяца · 1 строка'], ['Без даты — не в расчёте · 1 строка'], '1 строка без даты в расчёт по дням не идёт: поступления £1,200, платежи £0. Даты можно поставить в выписке внизу.'],
+    [['вс 1 ноя', '£37,840', '—', '−£600', '£37,240', '1'], ['debt | typed | none | circle | фикс | без даты · в расчёте с 1 ноября | −£600'], ['Долги без даты — в расчёте с первого дня своего месяца · 1 строка'], ['Без даты — не в расчёте · 1 строка'], '1 строка без даты в расчёт по дням не идёт: поступления £1,200, платежи £0. Даты можно поставить ниже, в «Вне календаря».'],
     'in «По дням» it stands under 1 Nov; the debt of December, past the thirty days, is in the group «Долги без даты — в расчёте с первого дня своего месяца»; what the client owes in «Без даты — не в расчёте»');
   await sleep(700);
   same([store.cash.puts, S.P.v, stored(S, 'debt').date, stored(S, 'debt').mon, stored(S, 'debt').carry], [0, 3, '', '2026-11', { ym: '2026-10' }], 'looking at all of it wrote nothing: the plan is version 3 as it was, and no row was given a date by the page');
@@ -4395,7 +4451,7 @@ await run('saving', 'the plan\'s own save: one PUT per change with the revision 
   const h1 = await open('#cash', undefined, { hash: '#cash' });
   await h1.waitForSelector('#cs-plan');
   const h2 = await open('#cash-days', undefined, { hash: '#cash-days' });
-  await h2.waitForSelector('#cs-stmt');
+  await h2.waitForSelector('#cs-days');
   same([await h1.evaluate(() => [document.querySelector('.nav .active').dataset.tab, !!document.querySelector('#cs-plan')]), await h2.evaluate(() => [document.querySelector('.nav .active').dataset.tab, document.querySelector('#cs-cal').children.length > 7, location.hash])], [['cash', true], ['cash', true, '#cash-days']], '#cash in the address opens the tab on the month, #cash-days on the days');
   await h1.context().close();
   await h2.context().close();
@@ -5793,14 +5849,11 @@ await run('rv-chain', 'a line changed from a later month - its name, bank, curre
   const months = () => pg.evaluate(() => window.__money.model({ H: 60 }).items.filter((x) => x.row === 'rB' || (x.src === 'occ' && x.occ.chain === 'rB')).map((x) => [x.occ ? x.occ.ym : String(x.date).slice(0, 7), x.name, x.bank, x.amt, !!x.mark]).filter((m) => m[0] <= '2027-02').sort((a, b) => (a[0] < b[0] ? -1 : 1)));
   const k0 = await kept(), m0 = await months(), M0 = [['2026-10', 'Person B', 'Wise', 6000, false], ['2026-11', 'Person BB', 'Wise', 6000, false], ['2026-12', 'Person BB', 'Wise', 6000, true], ['2027-01', 'Person BB', 'Barclays', 6000, true], ['2027-02', 'Person BB', 'Barclays', 6600, false]];
   await goCash(pg, 'days');
-  const lrec = '#cs-stmt [data-cs-lrec="rB@2026-11"]';
-  if (!(await pg.isVisible(lrec))) await pg.click('#cs-stmt [data-cs-row="2026-11-20"]');
-  await pg.click(lrec);
-  await saved(pg);
+  // (the tick is in the row's card, opened in the panel of its day - until 12 November 2026 it stood in the line itself)
+  const tickDay = async (on) => { await dayCard(pg, '2026-11-20', 'rB@2026-11'); await fill(pg, 'row', { monthly: on }); await saveRow(pg); await saved(pg); await shutRow(pg); };
+  await tickDay(false);
   const cut = [JSON.parse(await kept()).length, await months()];
-  if (!(await pg.isVisible(lrec))) await pg.click('#cs-stmt [data-cs-row="2026-11-20"]');
-  await pg.click(lrec);
-  await saved(pg);
+  await tickDay(true);
   same([m0, cut, await kept() === k0], [M0,
     [1, [['2026-10', 'Person B', 'Wise', 6000, false], ['2026-11', 'Person BB', 'Wise', 6000, false]]], true],
   'stored as one row renamed from November and on Barclays from January: each month is called and paid from as it was said of it; the tick taken off November in «По дням» ends the line with November; put back, the row is back to the letter - the rename, the bank, the marks, February\'s £6,600');
@@ -6566,17 +6619,12 @@ await run('rv-motion', 'what unfolds, unfolds with one motion — a row\'s card,
   await pg.waitForFunction(() => { const f = document.querySelector('#cs-subs-fold'); return !!f && !f.hidden; });
   ok(await pg.$eval('#cs-sec-subs .tbl', (e) => e.hidden), '«Свернуть» folds them back into it');
   await pg.click('#view-cash [data-cs-view="days"]');
-  await pg.waitForSelector('#cs-stmt');
+  await pg.waitForSelector('#cs-days');
   const day = '2026-10-20'; // Person B's day
-  same(await pg.$eval(`#cs-stmt tr[data-cs-row="${day}"]`, (tr) => tr.getAttribute('aria-expanded')), 'false', '(the day of Person B\'s payment stands shut)');
-  await pg.click(`#cs-stmt tr[data-cs-row="${day}"] td:first-child`);
-  const lines = `#cs-stmt tr[data-cs-row="${day}"] + tr.cs-items ul`;
-  const d0 = await moving(lines);
-  await still(lines);
-  ok(d0[0] === 1 && (await moving(lines))[1] > 10, 'a day of «По дням» pressed open: its lines grow under it', d0);
-  await pg.click(`#cs-stmt tr[data-cs-row="${day}"] td:first-child`);
-  await pg.waitForSelector(lines, { state: 'detached' });
-  same(await pg.$eval(`#cs-stmt tr[data-cs-row="${day}"]`, (tr) => tr.getAttribute('aria-expanded')), 'false', '… and fold away when it is pressed again');
+  // (until 12 November 2026 a day of the statement unfolded into its lines, and that was what moved here)
+  await pg.click(`#cs-cal [data-cs-cal="${day}"]`);
+  same([await pg.$eval('#cs-day', (e) => e.dataset.csDay), await pg.$eval(`#cs-cal [data-cs-cal="${day}"]`, (e) => e.getAttribute('aria-pressed')), (await pg.$$('#cs-day .cs-pr')).length > 0, await pg.evaluate(() => (document.activeElement.dataset || {}).csCal)], [day, 'true', true, day],
+    'a day pressed in the calendar is the day the panel beside it shows, with its rows - and the cursor stays on the day');
   await pg.context().close();
   // … and for a reader who asked for less motion nothing moves and nothing waits
   const calm = await open('no motion');
@@ -6679,7 +6727,7 @@ await run('looks', 'the pictures: «Сегодня», «Касса» and the tax
     }
     if (tag === 'd') { await toMonth(pg, '2026-11'); await shot(pg, 'live-d-plan-nov'); }
     await pg.click('#view-cash [data-cs-view="days"]');
-    await pg.waitForSelector('#cs-stmt');
+    await pg.waitForSelector('#cs-days');
     await openDay(pg, T);
     await calm(pg, `«Касса · По дням», ${w}px`, 'cash');
     if (tag !== 's') await shot(pg, `live-${tag}-days`);
