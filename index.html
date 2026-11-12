@@ -3631,6 +3631,9 @@ const Cash=(()=>{
   const v={name:it.name,amt:f==="amt"?shown(it):it.amt,cur:it.cur,bank:it.bank,date:it.date,vat:it.vat},ch={};
   if(v[f]===val)return;
   v[f]=val;ch[f]=true;
+  // (the box of a computed tax shows what is left of its period's bill, and the period stores the whole of it: the
+  // figure typed is the new remainder, so what is written is that and what the period's parts already cover)
+  if(f==="amt"&&it.src==="tax")v.amt=round2(val+Ed.taxPart(it));
   // (… and the journal one entry for the row's whole typing, against the plan as it was before its first keystroke.)
   const say=`${it.name||"строка"}: правка`,now=Date.now();
   if(cu.edit!==it.id){cu.seen=Plan.see(plan);pushUndo(say);cu.was=JSON.parse(undoStack[undoStack.length-1].data);cu.note=null;}
@@ -4342,7 +4345,10 @@ const Cash=(()=>{
 //    whose                         for a withdrawal: the founder whose it is, "" when it is everybody's
 //    ptax, of, guess               a personal tax · a tax row's `of` as read (null where a pre-v3 row was not
 //                                  recognised) · "name" | "size" | "" — how a pre-v3 tax row was read (card 13)
-//    tax                           for a computed tax: {rule, per, key}
+//    tax                           for a computed tax: {rule, per, key, bill}. bill — the period's WHOLE bill, native:
+//                                  «Сумма по декларации» where one was typed, else what the page worked out. `amt`
+//                                  is what is left of it once the period's part rows and payments are taken off, so
+//                                  the two differ only for a period paid in parts
 //    payer                         for a month of an unlinked chain that an amount closed: {sk, label, id} — whom to
 //                                  ask about («{label} в таблице — это «{name}»?»)
 //    twins[]                       for a one-off row: [{ym, id, amt, cur}] — the later months that already hold a
@@ -5821,7 +5827,7 @@ const Live=(()=>{
     // is owed for it is still ahead, and follows today's rate like every line that is.)
     const shut=(g,d)=>cur==="GBP"?g:gbpOn(nat(g,cur),cur,isD(d)?d:T);
    const mk=(amt,o)=>{const it=add(Object.assign({id:"t|"+X.key,src:"tax",kind:"tax",list:"taxes",blk:"tax",grp:"tax",name:rule.name+" за "+perName(X.per),key:"",cur,vat:false,vk:1,dir:-1,bank,mon:"",sk:"",lk:"",how:"rule",label:"",c0:0,fixed:false,row:"",wd:false,whose:"",ptax:false,
-     of:false,guess:"",who:"",chain:"",ym0:"",carry:null,moved:isD(st.date),exc:st.amt!=null,rec:null,tax:{rule:rule.id,per:X.per,key:X.key},amt,date:X.d0,on:true,paid:p,tx:arr(st.tx),notx:arr(st.notx),closed:!!st.closed,rem:amt,got:0,gotG:0,done:null,hint:null,match:ids,last:"",g:10,cov:cov(bank),ck:"",lab:"tax#"+X.key},o));
+     of:false,guess:"",who:"",chain:"",ym0:"",carry:null,moved:isD(st.date),exc:st.amt!=null,rec:null,tax:{rule:rule.id,per:X.per,key:X.key,bill:st.amt!=null&&isFinite(+st.amt)?+st.amt:amtOf(X.owed)},amt,date:X.d0,on:true,paid:p,tx:arr(st.tx),notx:arr(st.notx),closed:!!st.closed,rem:amt,got:0,gotG:0,done:null,hint:null,match:ids,last:"",g:10,cov:cov(bank),ck:"",lab:"tax#"+X.key},o));
     it.fullG=gbp(it.amt,cur);X.item=it;stand(it);settle(it);return it;};
    if(X.state==="none")return void(X.owed-X.PT-X.LP>=1&&mk(amtOf(X.owed-X.PT-X.LP),{on:false}));
    if(X.state==="open"){if(X.left<1)return;const it=mk(amtOf(X.left));
@@ -7598,7 +7604,8 @@ const Ed=(()=>{
   let amt;
   // A tax is in the currency of the account it is paid from - roubles for a tax paid from Tochka - and, like every
   // line in another currency, says the pounds beside it. A period closed by the statement shows what was paid.
-  if(tax)amt=`${mono(nat(Math.round(it.amt),it.cur)+(SYM[it.cur]?"":" "+it.cur))}${it.cur!=="GBP"?` · ${mono(fmt(Math.round(lineG(it))))}`:""} · ${it.done&&it.done.by==="row"?"по выписке":p&&!p.approx?"по декларации":"посчитано по правилу"}`;
+  // (in a period paid in parts the row's sum is what is left of the bill, and the card says of what)
+  if(tax)amt=`${mono(natS(Math.round(it.amt),it.cur))}${it.cur!=="GBP"?` · ${mono(fmt(Math.round(lineG(it))))}`:""} · ${it.done&&it.done.by==="row"?"по выписке":(!it.done&&taxPart(it)>=1?`остаток от ${mono(natS(Math.round(taxWhole(it)),it.cur))} · `:"")+(p&&!p.approx?"по декларации":"посчитано по правилу")}`;
   else if(!(it.amt>0))amt="не вписана";
   else{amt=mono(nat(it.amt,it.cur)+(SYM[it.cur]?"":" "+it.cur));
    if(inn&&it.vat&&it.factor>1)amt+=` + VAT ${+((it.factor-1)*100).toFixed(2)}% = ${mono(nat(round2(it.amt*it.factor),it.cur))}`;
@@ -7811,6 +7818,16 @@ const Ed=(()=>{
  }
  // A line whose form there is: every line not closed, and of a closed one what is still the founder's to say.
  const editable=it=>it.state!=="done"||(it.list==="taxes"&&it.src!=="tax"&&!it.ptax)||!!it.wd;
+ // A tax the page worked out, in a period that is paid in parts. Its row holds what is LEFT of the period's bill -
+ // the part rows and the payments found are taken off - while «Сумма по декларации» is the WHOLE bill, and the whole
+ // is what the period stores (tax.per[key].amt). So the form shows the whole and takes the whole, and a box that
+ // shows the remainder (the row's own, in «Касса») writes the whole as well: what was typed and what the parts
+ // already cover. (12 November 2026: with a quarter split into parts the form offered the remainder under «Сумма по
+ // декларации», and whatever was typed over it became the bill of the whole quarter.)
+ const taxWhole=it=>it.tax&&it.tax.bill!=null?it.tax.bill:it.amt;
+ const taxPart=it=>it.src==="tax"?Math.max(0,round2(taxWhole(it)-it.amt)):0;
+ const taxBill=it=>{const p=M&&M.taxes.periods.find(x=>x.key===it.tax.key);return p&&!p.approx?taxWhole(it):Math.round(taxWhole(it));};
+ const natS=(a,cur)=>nat(a,cur)+(SYM[cur]?"":" "+cur);
  // «Изменить строку»: the form in the place of «Сведения».
  function form(it){
   const tax=it.src==="tax",occ=it.src==="occ";
@@ -7822,11 +7839,11 @@ const Ed=(()=>{
   if(it.state==="done")return it.wd?`<div class="ed-grid">${whoseSelect(it.whose||"")}</div>${occ?'<span class="note">«чей вывод» — для всех месяцев этой строки</span>':""}`:`<div class="ed-grid">${ofSelect(ofValue(it))}</div>`;
   const o={list:it.list,lockName:tax,lockCur:tax,lockBank:tax,occ:it.occ};
   if(it.list==="inflows")o.vat=it.vat;
-  if(tax)o.amtLabel="Сумма по декларации";
+  if(tax){o.amtLabel="Сумма по декларации";const part=taxPart(it);if(part>=1)o.note=`весь налог за период: ${natS(part,it.cur)} из него уже стоит частями или оплачено, в этой строке остаток — ${natS(Math.round(it.amt),it.cur)}`;}
   else{o.monthly=ticked(it);if(it.list==="other")o.sub=!!it.sub;if(occ)o.note=occNote(it);}
   if(it.list==="taxes"&&!tax&&!it.ptax)o.of=ofValue(it);
   if(it.wd)o.whose=it.whose||"";
-  return fields({name:it.name,amt:tax?Math.round(it.amt):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
+  return fields({name:it.name,amt:tax?taxBill(it):it.amt,cur:it.cur,bank:it.bank,date:it.date},o);
  }
  // «Действия». A reader has no band but «Что если…», where there is one; «Что если…» turns the band over into the
  // trial (Trial, above), with nothing that writes beside it and no «Сохранить» for Enter to press - a trial changes
@@ -7862,7 +7879,7 @@ const Ed=(()=>{
  // everybody's - and whose:"" is written only where «общий» was chosen. The toast says whose the row now is
  // whenever that changed, by the choice or by the name.)
  function readCard(card,it){
-  const f=k=>q(card,`[data-ed-f="${k}"]`),tick0=ticked(it),tax=it.src==="tax",amt0=tax?Math.round(it.amt):it.amt,of0=f("of")?ofValue(it):"";
+  const f=k=>q(card,`[data-ed-f="${k}"]`),tick0=ticked(it),tax=it.src==="tax",amt0=tax?taxBill(it):it.amt,of0=f("of")?ofValue(it):"";
   const v={name:f("name")?f("name").value.trim():it.name,amt:f("amt")?+f("amt").value:amt0,cur:f("cur")?f("cur").value:it.cur,bank:f("bank")?f("bank").value:it.bank,date:f("date")?f("date").value:it.date||"",vat:f("vat")?f("vat").checked:it.vat,mon:f("monthly")?f("monthly").checked:tick0,of:f("of")?f("of").value:"",sub:f("sub")?f("sub").checked:!!it.sub,whose:f("whose")?f("whose").value:it.whose||""};
   const ch={name:v.name!==it.name,amt:v.amt!==amt0,cur:v.cur!==it.cur,bank:v.bank!==it.bank,date:v.date!==(it.date||""),vat:v.vat!==it.vat,mon:v.mon!==tick0,of:!!f("of")&&(v.of!==of0||it.of===null),sub:v.sub!==!!it.sub,whose:!!f("whose")&&v.whose!==(it.wd?whoseUnder(it,v.name):it.whose||"")};
   const whose1=!!f("whose")&&(FOUNDERS.includes(v.whose)?v.whose:"")!==(it.whose||""),ofd=!!f("of")&&v.of!==of0;
@@ -8422,7 +8439,7 @@ const Ed=(()=>{
    if((cur.ask||cur.wi)&&cur.ret){Object.assign(cur,{ask:"",wi:false,focus:""});return show(cur);}
    return shut(card);}
  });
- return{use,under,sheet,after,sum,remark,vatWords,names,apply,forecast,NOZERO,does:(verb,id)=>act(verb,{dataset:{edId:id}},true),
+ return{use,under,sheet,after,sum,remark,vatWords,names,apply,taxPart,forecast,NOZERO,does:(verb,id)=>act(verb,{dataset:{edId:id}},true),
   // A row's card opened where the row stands - and shut by the same press on the row it is open under.
   row(id,at){if(cur&&cur.k==="row"&&cur.id===id&&(cur.at||"")===(at||""))return closeRow();show({k:"row",id,at:at||"",focus:"",ask:""});},settings,taxes,settingsDraw,
   // Whatever card is open goes. `ask`: a row's card whose form holds what has not been saved asks first, and stays
