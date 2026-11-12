@@ -533,8 +533,9 @@ button.cs-link:active{transform:none}
 .cs-ico{width:28px;height:28px;display:grid;place-items:center;font:500 13px var(--mono);background:var(--accent-dim)}
 .cs-ico svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5}
 .cs-eff{font-size:12px;color:var(--text-muted);margin-top:2px}
-.cs-auto{border:1px dashed var(--text-primary);padding:12px 14px;margin-top:10px;display:flex;flex-direction:column;gap:8px;font-size:13.5px}
-.cs-auto ol{margin:0;padding-left:20px;font-size:13px;display:flex;flex-direction:column;gap:2px}
+/* «Как закрыть» opened in the top block of «Сегодня» (12 November 2026): the same list «По дням» holds */
+.td-fix{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.td-fix .note{margin:0}
 @media (max-width:620px){.cs-sugg li{grid-template-columns:28px minmax(0,1fr)}.cs-sugg li>button{grid-column:2;justify-self:start}}
 .cs-chart .hit{cursor:pointer}
 /* «По дням» (12 November 2026): the calendar on the left and the day chosen in it on the right - what the account
@@ -3510,10 +3511,10 @@ const Cash=(()=>{
  // alone. A tax worked out by a rule is never moved by advice: its date is the law's. Nor is a row marked «фикс»:
  // that is a date the studio has promised. Only a one-off row is ever split in two.
  function advise(V){
-  const out={base:null,list:[],auto:null,floor:0};if(M.v0)return out;
+  const out={base:null,list:[],floor:0,short:false};if(M.v0)return out;
   const D=M.days,n=D.length,start=M.now,net=D.map(x=>x.in-x.out),floor=out.floor=M.LOW<0?0:M.cushion,zero=r=>r.need<0.005;
   const ev=dl=>{let b=start,min=Infinity,mi=0,first=-1;for(let i=0;i<n;i++){b+=net[i]+((dl&&dl[i])||0);if(b<min-1e-9){min=b;mi=i;}if(first<0&&b<floor-0.005)first=i;}return{need:Math.max(0,floor-min),min,mi,first};};
-  const base=out.base=ev(null);
+  const base=out.base=ev(null);out.short=!zero(base);
   const mv=M.items.filter(it=>it.src!=="tax"&&it.day&&V.ix[it.day]!=null&&it.cash).map(it=>({it,i:V.ix[it.day],v:it.cash}));
   const to=(m,j)=>{const d={};d[m.i]=-m.v;d[j]=(d[j]||0)+m.v;return d;};
   if(!zero(base)&&base.first>=0){
@@ -3543,19 +3544,28 @@ const Cash=(()=>{
    V.banks.forEach(o=>{const lo=V.L[o];if(o===b||!lo.known)return;const arr=lo.cells.slice(Math.max(0,i0-1)).map(c=>c.e);if(i0===0)arr.push(lo.open);const c=Math.min(...arr);if(c>cap){cap=c;donor=o;}});
    if(donor&&cap>=need)out.list.push({type:"transfer",bank:b,donor,need,amt:Math.min(need,cap),from:p.from,full:cap>=need});
   });});
-  // автоплан: one payment at a time, the move that helps most and delays least, until nothing helps
-  if(!zero(base)){
-   const at=mv.map(m=>m.i),dl=()=>{const d={};mv.forEach((m,k)=>{if(at[k]!==m.i){d[m.i]=(d[m.i]||0)-m.v;d[at[k]]=(d[at[k]]||0)+m.v;}});return d;};
-   for(let turn=0;turn<20;turn++){
-    const b0=ev(dl());if(zero(b0))break;let best=null;
-    mv.forEach((m,k)=>{if(m.v>=0||m.it.fixed||at[k]>b0.mi)return;const keep=at[k];
-     for(let j=keep+1;j<n;j++){at[k]=j;const r=ev(dl()),delay=j-keep;if(!best||r.need<best.need-0.5||(Math.abs(r.need-best.need)<0.5&&delay<best.delay))best={k,j,need:r.need,delay};if(zero(r))break;}
-     at[k]=keep;});
-    if(!best||best.need>=b0.need-0.5)break;at[best.k]=best.j;
-   }
-   out.auto={steps:mv.map((m,k)=>({m,from:D[m.i].d,to:D[at[k]].d})).filter(s=>s.from!==s.to),final:ev(dl())};
-  }
   return out;
+ }
+ // «Как закрыть» / «Как подстраховаться»: what can be done about a stretch below zero, or below the cushion - move a
+ // payment a founder wrote, bring a receipt forward, split a payment, move money between accounts - each with what it
+ // would leave, and «Применить». One list, the same in «По дням» and in the top block of «Сегодня». (Until 12 November
+ // 2026 «Автоплан» stood under it: a chain of the same moves applied in one press. It repeated the list's first
+ // answers, and the owner's prototype dropped it.) Where no move helps, the list says so in a line.
+ function adviceOf(V){
+  const SG=advise(V),base=SG.base,word=SG.floor?"до запаса не хватит":"не хватать будет";cu.sugg=SG.list;
+  const eff=s=>s.full?`<span class="cs-good">${SG.floor?"запас сохранён":"минус закрыт полностью"}</span>`:`${word} ${fmt(s.r.need)} вместо ${fmt(base.need)}`;
+  // Drawn rather than typed: an arrow typed as a character is whatever the reader's fonts happen to hold.
+  const svg=d=>`<svg viewBox="0 0 14 14" aria-hidden="true"><path d="${d}"/></svg>`,ICO={shift:svg("M2 7h10M8 3l4 4-4 4"),pull:svg("M12 7H2M6 3 2 7l4 4"),split:"½",transfer:svg("M2 4.5h10M9 1.5l3 3-3 3M12 9.5H2M5 6.5l-3 3 3 3")};
+  const sum=m=>nat(Math.round(m.it.amt*(m.it.factor||1)),m.it.cur);
+  const li=SG.list.map((s,i)=>{let t,e,btn=`<button class="sm" data-cs-sugg="${i}">Применить</button>`;
+   if(s.type==="shift"){t=`Перенести <b>${esc(s.m.it.name)}</b> ${sum(s.m)} с ${dRuW(s.m.it.day)} на <b>${dRuW(s.to)}</b>`;e=eff(s);}
+   if(s.type==="pull"){t=`Получить <b>${esc(s.m.it.name)}</b> ${sum(s.m)} к <b>${dRuW(s.to)}</b> — сейчас стоит ${dRuW(s.m.it.day)}`;e=eff(s)+" · это зависит от клиента";btn=`<button class="sm" data-cs-sugg="${i}">Поставить дату</button>`;}
+   if(s.type==="split"){t=`Разделить <b>${esc(s.m.it.name)}</b>: ${nat(s.nowNat,s.m.it.cur)} ${dRuW(s.m.it.day)}, остаток ${nat(s.restNat,s.m.it.cur)} — <b>${dRuW(s.to)}</b>`;e=eff(s);}
+   if(s.type==="transfer"){t=`Перевести <b>${fmt(s.amt)}</b> с ${s.donor} на ${s.bank} до ${s.from===M.T?"конца сегодняшнего дня":dRuW(s.from)}`;e=`<span class="cs-good">минус на ${s.bank} закрыт</span> · общий остаток не меняется`;btn="";}
+   return `<li data-cs-type="${s.type}"><span class="cs-ico">${ICO[s.type]}</span><div><div>${t}</div><div class="cs-eff">${e}</div></div>${btn}</li>`;}).join("");
+  // (what «Автоплан» said when it had nothing to move, kept: with no move that helps, the founder is told why)
+  const none=SG.short&&!SG.list.some(s=>s.m)?`<p class="note cs-nomove">Сдвигом платежей это не закрыть: вписанные платежи уже позже самой глубокой точки или отмечены «фикс», а налоги, посчитанные по правилам, советы не двигают. Нужны деньги или более ранние поступления.</p>`:"";
+  return{how:SG.floor?"Как подстраховаться":"Как закрыть",html:(li?`<ul class="cs-sugg">${li}</ul>`:"")+none,n:SG.list.length};
  }
  function answer(V){
   const H=M.H,who=V.all?"":`${esc(cu.scope)}: `,day=d=>`<span class="mono">${dRuW(d)}</span>`,money=v=>`<span class="mono">${fmt(v)}</span>`;let head;
@@ -3578,23 +3588,7 @@ const Cash=(()=>{
   const U=M.undated.ids.map(id=>by[id]).filter(Boolean);let warn="";
   if(U.length){const s=d=>U.filter(it=>it.dir===d).reduce((a,it)=>a+Math.abs(it.cash),0);
    warn=`<div class="cs-sub cs-warn">${count(U.length,"строка","строки","строк")} без даты в расчёт по дням не ${U.length===1?"идёт":"идут"}: поступления ${fmt(s(1))}, платежи ${fmt(s(-1))}. Даты можно поставить ниже, в «Вне календаря».</div>`;}
-  const SG=advise(V),base=SG.base,word=SG.floor?"до запаса не хватит":"не хватать будет";cu.sugg=SG.list;cu.auto=SG.auto;
-  const eff=s=>s.full?`<span class="cs-good">${SG.floor?"запас сохранён":"минус закрыт полностью"}</span>`:`${word} ${fmt(s.r.need)} вместо ${fmt(base.need)}`;
-  // Drawn rather than typed: an arrow typed as a character is whatever the reader's fonts happen to hold.
-  const svg=d=>`<svg viewBox="0 0 14 14" aria-hidden="true"><path d="${d}"/></svg>`,ICO={shift:svg("M2 7h10M8 3l4 4-4 4"),pull:svg("M12 7H2M6 3 2 7l4 4"),split:"½",transfer:svg("M2 4.5h10M9 1.5l3 3-3 3M12 9.5H2M5 6.5l-3 3 3 3")};
-  const sum=m=>nat(Math.round(m.it.amt*(m.it.factor||1)),m.it.cur);
-  const li=SG.list.map((s,i)=>{let t,e,btn=`<button class="sm" data-cs-sugg="${i}">Применить</button>`;
-   if(s.type==="shift"){t=`Перенести <b>${esc(s.m.it.name)}</b> ${sum(s.m)} с ${dRuW(s.m.it.day)} на <b>${dRuW(s.to)}</b>`;e=eff(s);}
-   if(s.type==="pull"){t=`Получить <b>${esc(s.m.it.name)}</b> ${sum(s.m)} к <b>${dRuW(s.to)}</b> — сейчас стоит ${dRuW(s.m.it.day)}`;e=eff(s)+" · это зависит от клиента";btn=`<button class="sm" data-cs-sugg="${i}">Поставить дату</button>`;}
-   if(s.type==="split"){t=`Разделить <b>${esc(s.m.it.name)}</b>: ${nat(s.nowNat,s.m.it.cur)} ${dRuW(s.m.it.day)}, остаток ${nat(s.restNat,s.m.it.cur)} — <b>${dRuW(s.to)}</b>`;e=eff(s);}
-   if(s.type==="transfer"){t=`Перевести <b>${fmt(s.amt)}</b> с ${s.donor} на ${s.bank} до ${s.from===M.T?"конца сегодняшнего дня":dRuW(s.from)}`;e=`<span class="cs-good">минус на ${s.bank} закрыт</span> · общий остаток не меняется`;btn="";}
-   return `<li data-cs-type="${s.type}"><span class="cs-ico">${ICO[s.type]}</span><div><div>${t}</div><div class="cs-eff">${e}</div></div>${btn}</li>`;}).join("");
-  let auto="";
-  if(SG.auto){const A=SG.auto;
-   auto=`<div class="cs-auto"><div class="bar"><b>Автоплан: как сдвинуть платежи, чтобы ${SG.floor?"сохранить запас":"не уйти в минус"}</b>${A.steps.length?'<button class="primary sm" data-cs-auto>Применить автоплан</button>':""}</div>
-    ${A.steps.length?`<ol>${A.steps.map(s=>`<li>${esc(s.m.it.name)} ${sum(s.m)}: ${dRuW(s.from)} → <b>${dRuW(s.to)}</b></li>`).join("")}</ol><div class="note">${A.final.need<0.005?`<span class="cs-good">${SG.floor?"После этого остаток не опускается ниже запаса.":"После этого минуса нет."}</span>`:`Даже так ${word} ${fmt(A.final.need)} — нужны деньги или более ранние поступления.`} Двигаются только строки, которые вписали вы, и только внутри этих ${H} дней; с отметкой «фикс» — не двигаются; налоги по правилам — тоже.</div>`
-    :`<div class="note">Сдвигом платежей это не закрыть: вписанные платежи уже позже самой глубокой точки или отмечены «фикс», а налоги, посчитанные по правилам, советы не двигают.</div>`}</div>`;}
-  const adv=li||auto?`<ul class="cs-sugg">${li}</ul>${auto}`:"",how=SG.floor?"Как подстраховаться":"Как закрыть";
+  const A=adviceOf(V),adv=A.html,how=A.how;
   // Of all the accounts together the sentence is the one «Сегодня» opens with, and it is not said twice: what stands
   // here is what only this view knows — the rows without a date, and what to do about an account that goes below
   // zero. Of one bank the sentence is this view's own, and stays. Nothing to say: no card.
@@ -3638,7 +3632,7 @@ const Cash=(()=>{
   // line has no room for it, it is in the card the line's name opens.
   const rec=it.src==="tax"?"<span></span>":`<label class="cs-lrec"><input type="checkbox" class="cs-chk" data-cs-lrec="${esc(it.id)}"${it.src==="occ"&&!it.occ.last?" checked":""}${it.src==="row"&&!it.date?" disabled":""} aria-label="${esc(it.name||"строка")}: каждый месяц"><span class="cs-note">каждый месяц</span></label>`;
   const card=Ed.under(it.id,"days");
-  return `<li class="${done?"cs-ispaid cs-done":it.kind!=="typed"?"cs-hist":""}" data-cs-li="${esc(it.id)}"><span class="cs-ctl">${status(it,"days")}</span>${done?"":mover(it)+(it.src==="row"&&it.kind==="typed"?`<button class="chip${it.fixed?" active":""}" data-cs-fix="${esc(it.id)}" aria-pressed="${!!it.fixed}" title="Фиксированная дата: советы и автоплан её не двигают">фикс</button>`:"<span></span>")}<span class="cs-bkn">${dot(it.bank)}${esc(it.bank)}</span><span class="cs-nw"><button class="cs-nmt cs-nmb" data-ed-open="${esc(it.id)}" data-ed-at="days" title="Открыть строку">${esc(it.name||"(без названия)")}</button>${rm?` <span class="cs-rm">${esc(rm)}</span>`:""}</span><span class="cs-am">${Ed.sum(it)}${it.cur!=="GBP"&&it.state!=="done"?` <span class="note">(${nat(round2(it.amt*(it.factor||1)),it.cur)})</span>`:""}${it.state!=="done"&&Ed.vatWords(it)?` <span class="note">(${Ed.vatWords(it)})</span>`:""}</span>${rec}</li>${card?`<li class="cs-edli">${card}</li>`:""}`;
+  return `<li class="${done?"cs-ispaid cs-done":it.kind!=="typed"?"cs-hist":""}" data-cs-li="${esc(it.id)}"><span class="cs-ctl">${status(it,"days")}</span>${done?"":mover(it)+(it.src==="row"&&it.kind==="typed"?`<button class="chip${it.fixed?" active":""}" data-cs-fix="${esc(it.id)}" aria-pressed="${!!it.fixed}" title="Фиксированная дата: советы её не двигают">фикс</button>`:"<span></span>")}<span class="cs-bkn">${dot(it.bank)}${esc(it.bank)}</span><span class="cs-nw"><button class="cs-nmt cs-nmb" data-ed-open="${esc(it.id)}" data-ed-at="days" title="Открыть строку">${esc(it.name||"(без названия)")}</button>${rm?` <span class="cs-rm">${esc(rm)}</span>`:""}</span><span class="cs-am">${Ed.sum(it)}${it.cur!=="GBP"&&it.state!=="done"?` <span class="note">(${nat(round2(it.amt*(it.factor||1)),it.cur)})</span>`:""}${it.state!=="done"&&Ed.vatWords(it)?` <span class="note">(${Ed.vatWords(it)})</span>`:""}</span>${rec}</li>${card?`<li class="cs-edli">${card}</li>`:""}`;
  }
  // Under its own day a row that is done stays listed, struck through — a mark under the row's date, a row closed
  // by a statement under the date of the statement's row — and is summed nowhere: its money is in the balance. The
@@ -3818,12 +3812,15 @@ const Cash=(()=>{
  }
  function applySugg(s){
   const it=s.m.it;
+  // The day the row goes to is the day the panel of «По дням» then shows - chosen before the plan is redrawn.
+  // (pressed on «Сегодня», «По дням» may never have been opened: there is no set of open days yet)
+  cu.sel=s.to;if(cu.open)cu.open.add(s.to);
   if(s.type==="shift"||s.type==="pull")Plan.edit(`${it.name}: ${dRuW(it.day)} → ${dRuW(s.to)}`,(P,now,who)=>{Live.write.set(P,it,{date:s.to},now,who);});
   // The second half is a row of its own, typed now: none of what tied the first to a statement or a month goes with it.
   if(s.type==="split")Plan.edit(`${it.name}: разделён на две части`,(P,now,who)=>{const l=P[it.list],r=l.find(x=>String(x.id)===it.id);if(!r)return;
    const z=Object.assign({},r,{id:uid(),name:r.name+" (остаток)",amt:s.restNat,date:s.to,tag:"",info:false,c0:now,m:{t:now,by:who}});["tx","notx","closed","sk","skBy","paid","mon","fixed"].forEach(f=>delete z[f]);
    r.amt=s.nowNat;r.m={t:now,by:who};l.splice(l.indexOf(r)+1,0,z);});
-  cu.open.add(s.to);cu.sel=s.to;toast("Готово — можно отменить",()=>popUndo());
+  toast("Готово — можно отменить",()=>popUndo());
  }
  // Which half is in view is in the address, so a reload — or a link — comes back to it.
  const address=()=>{try{history.replaceState(null,"",cu.view==="days"?"#cash-days":"#cash");}catch(e){}};
@@ -3934,7 +3931,7 @@ const Cash=(()=>{
    return;}
   if((x=c("[data-cs-h]")))return Plan.setH(+x.dataset.csH);
   // Everything below this line that changes the plan is refused, in words, on a page that can no longer save.
-  if(c("[data-cs-shift],[data-cs-fix],[data-cs-sugg],[data-cs-auto],[data-cs-imp],[data-cs-impyes]")&&Plan.lost())return;
+  if(c("[data-cs-shift],[data-cs-fix],[data-cs-sugg],[data-cs-imp],[data-cs-impyes]")&&Plan.lost())return;
   if((x=c("[data-cs-mon]"))){const L=M.months.list,k=x.dataset.csMon;cu.month=k==="now"?M.T.slice(0,7):L.includes(k)?k:L[Math.max(0,Math.min(L.length-1,L.indexOf(cu.month)+(+k)))];if(Ed.open())Ed.close();else draw();
    const b=q(`[data-cs-mon="${k}"]:not([disabled])`)||q("[data-cs-mon]:not([disabled])");if(b)b.focus({preventScroll:true});return;}
   if(c("[data-cs-undo]"))return popUndo();
@@ -3947,8 +3944,6 @@ const Cash=(()=>{
   if((x=c("[data-cs-cal]")))return pickDay(x.dataset.csCal);
   if((x=c("[data-cs-fix]"))){it=by[x.dataset.csFix];if(!it)return;const on=!it.fixed;Plan.edit(`${it.name}: ${on?"дата зафиксирована":"дату снова можно двигать"}`,P=>{const r=P[it.list].find(z=>String(z.id)===it.id);if(r){if(on)r.fixed=true;else delete r.fixed;}})&&toast(on?"Дата зафиксирована — советы и автоплан её не тронут":"Можно двигать",()=>popUndo());return;}
   if((x=c("[data-cs-sugg]"))){const s=cu.sugg[+x.dataset.csSugg];if(s&&s.m)applySugg(s);return;}
-  if(c("[data-cs-auto]")&&cu.auto&&cu.auto.steps.length){const steps=cu.auto.steps;
-   Plan.edit(`автоплан: сдвинуто ${count(steps.length,"платёж","платежа","платежей")}`,(P,now,who)=>{steps.forEach(s=>{Live.write.set(P,s.m.it,{date:s.to},now,who);});})&&toast("Автоплан применён — можно отменить",()=>popUndo());return;}
   if(c("input,button,select,textarea,label,a,summary"))return;
   // A press on a row of a month, anywhere but in its sum, opens the row's card under it - and shuts it again.
   // (The second press of a double click is not a second answer: it would shut what the first has just opened.)
@@ -3968,6 +3963,10 @@ const Cash=(()=>{
  return{load:fetchPlan,show,resize,draw,view:setView,test,
   plan:()=>ready?plan:null,status:()=>!ready?(failed?"bad":"wait"):stale?"stale":"ok",changed(){if(ready)save();},snap:pushUndo,undo(){popUndo();},top:()=>undoStack.length?undoStack[undoStack.length-1].n:0,
   day(d,why){cu.view="days";cu.why=!!why;if(d){cu.sel=d;if(cu.open)cu.open.add(d);}},
+  // «Как закрыть» in the top block of «Сегодня»: the list as «По дням» would draw it for all the accounts together,
+  // and its «Применить» - the same press, on the same list (cu.sugg), wherever the list stands.
+  advice(){if(!ready)return{how:"",html:"",n:0};compute();const was=cu.scope;cu.scope="__all";const A=adviceOf(scope());cu.scope=was;return A;},
+  sugg(i){const s=cu.sugg[i];if(ready&&s&&s.m&&!Plan.lost())applySugg(s);},
   // «Заполнить {октябрь}» and «Подставить по прошлым месяцам» on «Сегодня»: the month to type into, and the helper open.
   // Each lands on what it promised (show): on a phone the month and the helper lie more than a screen below the
   // six figures, and a button that only changed the tab looked as if it had done nothing.
@@ -8659,7 +8658,7 @@ const Today=(()=>{
  const MONP=["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"];
  // `wk` holds the weeks a founder opened or shut by hand (the week's Monday → open); `anl` is «Аналитика», and is
  // remembered in this browser like the choice of 30 or 60 days: whoever reads the chart every morning opens it once.
- const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false,wi:false,sd:"",plot:false};
+ const ANL="selfstudio-money-analytics",st={all:false,past:false,more:false,day:"",undated:false,wk:{},anl:false,wi:false,sd:"",plot:false,fix:false};
  try{st.anl=localStorage.getItem(ANL)==="1";}catch(e){}
  let M=null,by={},chartW=0,plotW=0;
  const num=v=>typeof v==="number"?v.toFixed(2):esc(v==null?"":v);
@@ -8677,7 +8676,12 @@ const Today=(()=>{
  function verdict(){
   // When the newest balance or statement is older than yesterday the sentence says as of which day it speaks.
   const acc=k=>M.accounts.find(a=>a.key===k)||null;
-  const v=M.verdict,H=M.H,pre=v.asOf?`По остаткам на ${dRuF(v.asOf)}`:"",cap=(s,join)=>pre?pre+(join||": ")+s[0].toLowerCase()+s.slice(1):s;let s,btn="",hd="";
+  const v=M.verdict,H=M.H,pre=v.asOf?`По остаткам на ${dRuF(v.asOf)}`:"",cap=(s,join)=>pre?pre+(join||": ")+s[0].toLowerCase()+s.slice(1):s;let s,btn="",hd="",fixDay="";
+  // «Как закрыть» / «Как подстраховаться» (12 November 2026): the button opens the list right here, under the sentence,
+  // and shuts it again - until then it led to «Касса · По дням», where the list stood over the calendar. The list is
+  // Cash's own (Cash.advice), and so is its «Применить» (Cash.sugg); under it, the way to the day itself.
+  const fixBtn=l=>`<button data-td-fix aria-expanded="${st.fix}" aria-controls="td-fix">${l}</button>`;
+  const fixBox=d=>{const A=Cash.advice();return `<div class="td-fix" id="td-fix">${A.html||'<p class="note">Советов нет: двигать нечего.</p>'}<p class="note"><a href="#cash" data-td-days="${d}" data-td-why>Открыть ${dRuF(d)} в «Кассе · По дням»</a></p></div>`;};
   // The headline (12 November 2026, Mika's «давай что-то совсем простое»): a few words about the whole stretch of
   // days, never about one of them, and under it one sentence in which every figure names its day. The line «Своих
   // денег» already says what the accounts hold, so the sentence repeats it only where that line is not drawn; with
@@ -8703,14 +8707,14 @@ const Today=(()=>{
   else if(v.id==="v4"){const a=M.minusDay||M.LOWDAY,b=M.plusDay?dAdd(M.plusDay,-1):"",run=M.days.filter(x=>x.d>=a&&(!b||x.d<=b)).every(x=>x.e<0);
    hd=!run?`В ближайшие ${H} дней денег не хватит`:!b?`С ${dRuF(a)} денег не хватит`:b>a?`С ${a.slice(0,7)===b.slice(0,7)?+a.slice(8):dRuF(a)} по ${dRuF(b)} денег не хватит`:`${dRuF(a)} денег не хватит`;
    s=lead(`Глубже всего — ${dRuF(M.LOWDAY)}: ${fmt(M.LOW)}.${M.plusDay?"":" До конца периода в плюс не выходим."}`," ");
-   btn=`<button data-td-days="${M.minusDay||M.LOWDAY}" data-td-why>Как закрыть</button>`;}
-  else if(v.id==="v3"){hd=`Денег хватает, но ${dRuF(M.LOWDAY)} будет тесно`;s=lead(`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`);btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
+   btn=fixBtn("Как закрыть");fixDay=M.minusDay||M.LOWDAY;}
+  else if(v.id==="v3"){hd=`Денег хватает, но ${dRuF(M.LOWDAY)} будет тесно`;s=lead(`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`);btn=fixBtn("Как подстраховаться");fixDay=M.LOWDAY;}
   // No money of the studio's own (vR, Mika's «16 да» of 31 October 2026): the plan stays above zero only on money the
   // taxes are owed, so the sentence says so and never «хватает». In the place of v3 it still names the day under the
   // cushion, with its button.
   else if(v.id==="vR"){const low=v.base==="v3";hd="Минуса нет, но своих денег нет";
    s=cap(`Под налоги нужно больше, чем лежит на счетах. ${low?`${dRuF(M.LOWDAY)} останется ${fmt(M.LOW)} — меньше запаса ${fmt(M.cushion)}.`:`Нижняя точка — ${fmt(M.LOW)}, ${dRuF(M.LOWDAY)}.`}`);
-   if(low)btn=`<button data-td-days="${M.LOWDAY}" data-td-why>Как подстраховаться</button>`;}
+   if(low){btn=fixBtn("Как подстраховаться");fixDay=M.LOWDAY;}}
   else if(v.id==="vi"){hd="Сначала разберите поступления";s=`Сначала разберите ${count(M.inbox.inN,"поступление","поступления","поступлений")} на ${fmt(M.inbox.inGbp)}: часть ожидаемых денег, возможно, уже пришла.`;btn='<button class="primary" data-tabgo="inbox">Разобрать</button>';}
   // A plan with less than half a usual month of costs written is not one to say «денег хватает» about.
   else if(v.id==="vT"){const t=M.free.thin;hd="План не дописан";
@@ -8729,7 +8733,7 @@ const Today=(()=>{
   // it is read: the model's `own` is to the penny, and each part is printed to the pound, as everywhere else.
   const pd=x=>(x<0?-1:1)*Math.round(Math.abs(x)),ownP=M.v0?0:pd(M.now)-pd(M.taxes.reserve);
   const own=M.v0||v.id==="vE"||!(M.taxes.reserve>0.5)?"":`<p class="td-own">Своих денег${M.nowIsToday||!M.nowDate?"":" на "+dRu(M.nowDate)} <b${ownP<0?' class="neg"':""}>${lv("own",M.own,fmt(ownP))}</b>: на счетах ${lv("own.now",M.now,fmt(M.now))}, под налоги ${lv("own.res",M.taxes.reserve,fmt(M.taxes.reserve))}</p>`;
-  return `<section class="card td-verdict td-${v.id}" aria-label="Итог"><p class="td-hd" role="heading" aria-level="2">${esc(hd)}</p><p class="td-say" data-live="verdict" data-v="${v.id}">${esc(s)}</p>${own}${subs.map(x=>`<p class="note">${esc(x)}</p>`).join("")}${btn?`<div class="row">${btn}</div>`:""}${strip()}</section>`;
+  return `<section class="card td-verdict td-${v.id}" aria-label="Итог"><p class="td-hd" role="heading" aria-level="2">${esc(hd)}</p><p class="td-say" data-live="verdict" data-v="${v.id}">${esc(s)}</p>${own}${subs.map(x=>`<p class="note">${esc(x)}</p>`).join("")}${btn?`<div class="row">${btn}</div>`:""}${fixDay&&st.fix?fixBox(fixDay):""}${strip()}</section>`;
  }
  // ---- the days ahead, a cell to a day ----
  // What the chart says, at a glance and without opening it: a day under the cushion is amber, a day below zero is
@@ -9113,6 +9117,9 @@ const Today=(()=>{
   // A day of the strip: its line under the strip, and away on a second press.
   if((x=c("[data-td-sd]"))){st.sd=st.sd===x.dataset.tdSd?"":x.dataset.tdSd;const d=st.sd;render();const b=d&&root.querySelector(`[data-td-sd="${d}"]`);if(b)b.focus({preventScroll:true});return;}
   // «График»: the balance by day opens under the strip, and shuts on a second press.
+  if(c("[data-td-fix]")){st.fix=!st.fix;render();const b=root.querySelector("[data-td-fix]");if(b)b.focus({preventScroll:true});if(st.fix&&!CALM())unfold(root.querySelector("#td-fix"));return;}
+  // («Применить» shuts the list: what the page says next is the new sentence, with «Отменить» in the toast)
+  if((x=c("#td-fix [data-cs-sugg]"))){st.fix=false;Cash.sugg(+x.dataset.csSugg);return;}
   if(c("[data-td-graph]")){e.preventDefault();st.plot=!st.plot;render();const b=root.querySelector("[data-td-graph]");if(b)b.focus({preventScroll:true});if(st.plot&&!CALM())unfold(root.querySelector(".td-plot"));return;}
   if((x=c("[data-td-days]"))){e.preventDefault();Cash.day(x.dataset.tdDays,x.hasAttribute("data-td-why"));return setTab("cash");}
   // The two things to do about an empty plan: open the month to type it in, or the list of who is paid every month.
@@ -9149,7 +9156,7 @@ Plan.watch(()=>{if(S.loaded&&!$("#view-dashboard").hidden)renderDash();});
 // KEEP are the buttons that also say something - which block a row is in, whether a client pays VAT: they stay.
 // «Что если» (data-wi-*) is in neither list on purpose: a trial changes no document, and a reader may ask too.
 const ACT=["[data-ed-add]","[data-ed-bal]","[data-ed-do]","[data-ed-tax]","[data-ed-save]","[data-ed-go]","[data-ed-payrow]","[data-ed-shift]","[data-ed-set]","[data-ed-rv]","[data-ed-rset]","[data-ed-rfrom]","[data-ed-rdel]","[data-ed-radd]","[data-ed-cl]","[data-ed-drop]","[data-ed-what]","[data-ed-kind]","[data-ed-f]","[data-ed-pass]","[data-ed-ask]","[data-ed-pick]","[data-ed-undo]","[data-ed-mvall]",'button[data-ed-at="need"]',
- "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]","[data-cs-auto]",
+ "[data-cs-f]","[data-cs-twin]","[data-cs-resume]","[data-cs-onward]","[data-cs-dup]","[data-cs-helper]","[data-cs-ht]","[data-cs-ha]","[data-cs-hd]","[data-cs-hs]","[data-cs-hall]","[data-cs-hadd]","[data-cs-imp]","[data-cs-impfile]","[data-cs-impyes]","[data-cs-undo]","#cs-old",".cs-paid",".cs-partb","[data-cs-shift]","[data-cs-ldate]","[data-cs-fix]","[data-cs-lrec]","[data-cs-sugg]",
  "[data-clearinbox]","[data-acceptauto]","[data-setc]","[data-taxowner]","[data-taxsplit]","[data-spf]","[data-sprest]","[data-spok]","[data-spx]","[data-spedit]","[data-spnone]","input.lab","input.vat","[data-accept]","[data-behalf-back]","[data-ippart]","[data-ipgo]","[data-ipx]","[data-ippk]","[data-ipdate]","[data-drop]","[data-nottwin]","[data-istr]","[data-unpair]","[data-editrow]",
  "[data-fx]","[data-fxo]","[data-fxdo]","[data-owndel]","#ownIn","[data-ownadd]","[data-holderdel]","[data-imp]","#impIn","[data-impyes]","[data-rule]","label.drop","#fileIn","[data-fbank]","[data-fcur]","[data-up-bamt]","[data-up-bsave]","[data-reset]","[data-esave]","[data-edel]","[data-untr]",
  "[data-demo]","#toastUndo","[data-td-fill]","[data-td-helper]",'[data-tabgo="upload"]',"[data-mc-open]","[data-mc-do]","[data-mc-x]","[data-mc-go]"].join(",");

@@ -91,7 +91,7 @@
 // tests 9 and 16), «tax cards» (cards 13 and 15), «tax settings» (the rules, the clients' marks, how old the
 // balances may be, a thin plan), «partly» («оплачено» means paid, «частично» is
 // its own answer — with «partly, other days» and «partly, from before», see
-// below), «advice» (the advice and «Автоплан» on rows that repeat),
+// below), «advice» (the advice on rows that repeat),
 // «phone» (375 and 390 wide) and «looks» (the pictures, with SHOTS). After every press each figure on the screen is held against the
 // model, the model against §5, and both tabs against three rules of their
 // own: no «≈» anywhere, no word of history, an average or a cautious
@@ -160,7 +160,7 @@
 // «odd ledger», and «earlier months» (what «small words» said of a month gone
 // by). NOT BROUGHT ALONG: «constructor» and «kassa looks» (held now by
 // «repeat», «phone» and «looks»), «days» (its day lists are in «repeat» and
-// «mark», its advice and «Автоплан» in «advice»; the calendar is not walked),
+// «mark», its advice in «advice»; the calendar is not walked),
 // «word», «today marks», «early» and the rest of «small words».
 //
 // HOW THE DESIGNS' FIXTURES WERE ADAPTED. Both designs read a balance off a
@@ -2191,7 +2191,7 @@ const look = (pg, tab = 'today') => pg.evaluate((tab) => {
   // laid out «Стопкой» (1 November 2026) those stand in «Сведения» - its title, the values of its list (Чей; the month,
   // with the words of what was just done under it) - and in the questions of its band (whose payment a label is).
   const founder = /(^|[^a-zа-яё])(mika|misha|vanya|мика|миша|ваня)([^a-zа-яё]|$)/i;
-  const typed = '.td-nm, .cs-nmt, .cs-nt, .cs-hn, .op-name, .ed-why, .ed-rc-h, .ed-rc-dl dd, .ed-rc-q, .cs-act, .td-accs, .td-fwhy, .td-fsay, .kpi .hint, .td-steps, .cs-note, .cs-rm, .cs-sugg, .cs-auto, .cs-undo, .ed-ask, .ed-an, .ed-passed, #cs-have, .td-tax .td-meta, option';
+  const typed = '.td-nm, .cs-nmt, .cs-nt, .cs-hn, .op-name, .ed-why, .ed-rc-h, .ed-rc-dl dd, .ed-rc-q, .cs-act, .td-accs, .td-fwhy, .td-fsay, .kpi .hint, .td-steps, .cs-note, .cs-rm, .cs-sugg, .cs-undo, .ed-ask, .ed-an, .ed-passed, #cs-have, .td-tax .td-meta, option';
   const invented = [...root.querySelectorAll('*')].filter((e) => !e.closest('svg') && ([...e.childNodes].some((x) => x.nodeType === 3 && (x.textContent.includes('≈') || (founder.test(x.textContent) && !e.closest(typed)))) || /≈/.test((e.getAttribute('aria-label') || '') + (e.getAttribute('title') || '') + (e.getAttribute('placeholder') || ''))))
     .map((e) => `<${e.tagName.toLowerCase()} class="${e.getAttribute('class') || ''}"> ${e.textContent.trim().slice(0, 60)}`);
   const said = [...root.querySelectorAll('*')].filter((e) => !e.closest('svg') && ([...e.childNodes].some((x) => x.nodeType === 3 && word.test(x.textContent)) || word.test((e.getAttribute('aria-label') || '') + (e.getAttribute('title') || ''))))
@@ -3152,8 +3152,8 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
   for (const w of [1320, 375]) {
     const pg = await scene('first minus ' + w, ledA(), P, { w, h: 812 });
     const S = await holds(pg, `${w}px, a minus`);
-    same([plain(await text(pg, '#view-today .td-hd')), plain(await text(pg, '#view-today .td-say')), plain(S.live.minusday.t), await pg.$eval('#view-today .td-verdict [data-td-days]', (b) => b.dataset.tdDays + ' ' + b.textContent)],
-      ['С 12 по 27 октября денег не хватит', 'Сейчас на счетах £10,000. Глубже всего — 20 октября: −£6,500.', '12 окт', '2026-10-12 Как закрыть'], `${w}px: the headline says from which day to which the money is short - the first day is the day to act by - and the sentence names the deepest; «Нижняя точка» says «первый минус 12 окт»`);
+    same([plain(await text(pg, '#view-today .td-hd')), plain(await text(pg, '#view-today .td-say')), plain(S.live.minusday.t), await pg.$eval('#view-today .td-verdict [data-td-fix]', (b) => b.getAttribute('aria-expanded') + ' ' + b.textContent)],
+      ['С 12 по 27 октября денег не хватит', 'Сейчас на счетах £10,000. Глубже всего — 20 октября: −£6,500.', '12 окт', 'false Как закрыть'], `${w}px: the headline says from which day to which the money is short - the first day is the day to act by - and the sentence names the deepest; «Нижняя точка» says «первый минус 12 окт»`);
     // The days ahead, a cell to a day (12 November 2026): the days below zero are the stretch the headline names, and a press on one says what is left on it.
     const cells = await pg.$$eval('#view-today .td-sd', (l) => l.map((e) => [e.dataset.tdSd, e.classList.contains('ng'), e.classList.contains('t')]));
     same([cells.length, cells.filter((c) => c[1]).map((c) => c[0]).filter((d, i, l) => !i || i === l.length - 1), cells.filter((c) => c[2]).map((c) => c[0]), await pg.$('#view-today .td-sdr')], [S.M.days.length, ['2026-10-12', '2026-10-27'], [S.M.T], null], `${w}px: the strip has a cell for each day of the plan; the cells below zero run from the 12th to the 27th, today is framed, and no day is spoken of until one is pressed`);
@@ -3172,10 +3172,16 @@ await run('first minus', 'a minus ahead: the sentence names the day the money ru
     await pg.click('#view-today [data-td-graph]');
     same([await pg.$('#td-plot'), await pg.$eval('#view-today .td-sd.on', (e) => e.dataset.tdSd)], [null, '2026-10-20'], `${w}px: «Скрыть график» takes the chart away and leaves the day chosen`);
     await pg.click('#view-today .td-sd.on');
-    await pg.click('#view-today .td-verdict [data-td-days]');
+    // «Как закрыть» opens the list where it stands, under the sentence (12 November 2026); the way to the day itself
+    // is the line under the list.
+    await pg.click('#view-today .td-verdict [data-td-fix]');
+    await pg.waitForSelector('#td-fix');
+    same([await pg.$eval('#view-today .td-verdict [data-td-fix]', (b) => b.getAttribute('aria-expanded')), (await pg.$$('#td-fix .cs-sugg li')).length > 0, await pg.evaluate(() => { const f = document.querySelector('#td-fix'), s = document.querySelector('#view-today .td-sbox'); return !!f.closest('.td-verdict') && f.getBoundingClientRect().bottom <= s.getBoundingClientRect().top + 1; }), plain(await text(pg, '#td-fix [data-td-days]'))],
+      ['true', true, true, 'Открыть 12 октября в «Кассе · По дням»'], `${w}px: «Как закрыть» opens the list of what can be done right there - in the top block, between the sentence and the strip of days - with the way to the day under it`);
+    await pg.click('#td-fix [data-td-days]');
     await pg.waitForSelector('#cs-answer');
     const r = await pg.evaluate(() => { const a = document.querySelector('#cs-answer').getBoundingClientRect(); const bar = document.querySelector('.topbar').getBoundingClientRect(); const stuck = bar.bottom; return { top: Math.round(a.top - stuck), inView: a.top < window.innerHeight / 2, y: Math.round(window.scrollY), sel: (document.querySelector('#cs-day') || { dataset: {} }).dataset.csDay, view: window.__cash.at().view }; });
-    ok(r.view === 'days' && r.sel === '2026-10-12' && r.top >= 0 && r.inView, `${w}px: «Как закрыть» opens «По дням» on the first day short, with what to do about it in view under the bar`, r);
+    ok(r.view === 'days' && r.sel === '2026-10-12' && r.top >= 0 && r.inView, `${w}px: the line under the list opens «По дням» on the first day short, with what to do about it in view under the bar`, r);
     same([plain(await text(pg, '#cs-answer h2')).replace(/на \d+ дней.*/, ''), await pg.$('#cs-answer .cs-hl')], ['Как закрыть', null], `${w}px: … and the card there is «Как закрыть» — the stretch itself is said once, by the sentence of «Сегодня»`);
     await pg.context().close();
   }
@@ -4280,40 +4286,43 @@ await run('phone', 'a phone, 375 and 390 wide: nothing scrolls sideways, and the
   }
 });
 
-await run('advice', '«Касса · По дням»: the advice and «Автоплан» move rows a founder wrote — a one-off row by its date, a month of a row that repeats for that month alone — and never a tax worked out by a rule', async () => {
+await run('advice', '«Как закрыть»: the advice moves rows a founder wrote — a one-off row by its date, a month of a row that repeats for that month alone — and never a tax worked out by a rule; from the top block of «Сегодня» and from «Касса · По дням» alike, and there is no «Автоплан»', async () => {
   // The plan of test 2 and a purchase that takes the line below zero on 22 Oct, six days before Client A pays.
   const P = await plan2();
   P.other.push(row('big', 'Equipment', 30000, '2026-10-22'));
   const pg = await scene('advice', ledP(), P);
   let S = await holds(pg, 'a purchase of 30,000 on 22 Oct');
-  same([S.M.verdict.id, S.M.minusDay, S.M.minus, await text(pg, '#view-today .td-verdict button')], ['v4', '2026-10-22', -2000, 'Как закрыть'], 'the line goes below zero on 22 Oct by 2,000: verdict v4, and the sentence carries «Как закрыть»');
-  await pg.click('#view-today .td-verdict button');
-  await pg.waitForSelector('#cs-answer .cs-sugg');
-  const sugg = () => pg.$$eval('#cs-answer .cs-sugg li', (l) => l.map((li) => [li.dataset.csType, li.textContent.replace(/ /g, ' ').replace(/\s+/g, ' ').trim()]));
-  const list = await sugg();
+  same([S.M.verdict.id, S.M.minusDay, S.M.minus, await text(pg, '#view-today .td-verdict button'), await pg.$('#td-fix')], ['v4', '2026-10-22', -2000, 'Как закрыть', null], 'the line goes below zero on 22 Oct by 2,000: verdict v4, and the sentence carries «Как закрыть» - shut until it is pressed');
+  // The list opens under the sentence (12 November 2026; until then the button led to «Касса · По дням»).
+  await pg.click('#view-today .td-verdict [data-td-fix]');
+  await pg.waitForSelector('#td-fix .cs-sugg');
+  const sugg = (at) => pg.$$eval(at + ' .cs-sugg li', (l) => l.map((li) => [li.dataset.csType, li.textContent.replace(/ /g, ' ').replace(/\s+/g, ' ').trim()]));
+  const list = await sugg('#td-fix');
   const taxes0 = S.M.items.filter((it) => it.src === 'tax').map((it) => [it.id, it.date].join(' '));
-  ok(list.some((s) => s[0] === 'shift' && /Equipment/.test(s[1])) && list.some((s) => s[0] === 'shift' && /Person B/.test(s[1])) && !list.some((s) => /УСН по Точке за|UK VAT за/.test(s[1])) && !!(await pg.$('#cs-answer [data-cs-auto]')),
-    'the advice offers to move the purchase, or Person B\'s October — rows a founder wrote — and «Автоплан»; it never offers to move the tax worked out by a rule', list);
-  // A month of a row that repeats is moved for that month alone.
+  ok(list.some((s) => s[0] === 'shift' && /Equipment/.test(s[1])) && list.some((s) => s[0] === 'shift' && /Person B/.test(s[1])) && !list.some((s) => /УСН по Точке за|UK VAT за/.test(s[1])) && !(await pg.$('[data-cs-auto], .cs-auto')),
+    'the advice offers to move the purchase, or Person B\'s October — rows a founder wrote; it never offers to move the tax worked out by a rule, and there is no «Автоплан» (the owner\'s prototype dropped it on 12 November 2026)', list);
+  // A month of a row that repeats is moved for that month alone - by «Применить» in the top block of «Сегодня».
   const iB = list.findIndex((s) => s[0] === 'shift' && /Person B/.test(s[1]));
-  await pg.click(`#cs-answer [data-cs-sugg="${iB}"]`);
-  S = await holds(pg, 'Person B\'s October moved by the advice', 'cash');
+  await pg.click(`#td-fix [data-cs-sugg="${iB}"]`);
+  await pg.waitForFunction(() => !document.querySelector('#view-today .td-verdict.td-v4'));
+  S = await holds(pg, 'Person B\'s October moved by the advice');
   const x = S.P.team[0].rec.x || {};
-  same([Object.keys(x), /^2026-1[01]-\d\d$/.test((x['2026-10'] || {}).date || ''), S.P.team[0].rec.day, item(S.M, 'rB@2026-11').date, item(S.M, 'rB@2026-10').occ.moved, S.M.minusDay], [['2026-10'], true, 20, '2026-11-20', true, ''],
-    '«Применить» on Person B: October\'s month alone gets a new date — the row still repeats on the 20th, November stays — and the minus is closed');
-  await pg.click('#cs-undo [data-cs-undo]');
-  // A one-off row is moved by its own date.
-  const iE = (await sugg()).findIndex((s) => s[0] === 'shift' && /Equipment/.test(s[1]));
+  same([Object.keys(x), /^2026-1[01]-\d\d$/.test((x['2026-10'] || {}).date || ''), S.P.team[0].rec.day, item(S.M, 'rB@2026-11').date, item(S.M, 'rB@2026-10').occ.moved, S.M.minusDay, await pg.$('#td-fix'), await toastText(pg)], [['2026-10'], true, 20, '2026-11-20', true, '', null, 'Готово — можно отменить'],
+    '«Применить» on Person B, pressed on «Сегодня»: October\'s month alone gets a new date — the row still repeats on the 20th, November stays — the minus is closed, and with it the list is gone');
+  await pg.click('#toastUndo');
+  await pg.waitForSelector('#view-today .td-verdict.td-v4');
+  // A one-off row is moved by its own date - from the same list in «Касса · По дням», where the line under the list leads.
+  same(await pg.$('#td-fix'), null, '«Отменить» in the toast: the minus is back, and the list stays shut until it is asked for again');
+  await pg.click('#view-today .td-verdict [data-td-fix]');
+  await pg.click('#td-fix [data-td-days]');
+  await pg.waitForSelector('#cs-answer .cs-sugg');
+  same(await sugg('#cs-answer'), list, '«Касса · По дням» holds the same list, answer for answer');
+  const iE = list.findIndex((s) => s[0] === 'shift' && /Equipment/.test(s[1]));
   await pg.click(`#cs-answer [data-cs-sugg="${iE}"]`);
   S = await holds(pg, 'the purchase moved by the advice', 'cash');
-  same([stored(S, 'big').date > '2026-10-22', 'x' in S.P.team[0].rec, S.M.minusDay], [true, false, ''], '«Применить» on the purchase: the row\'s own date moves, nothing else does, and the minus is closed');
+  same([stored(S, 'big').date > '2026-10-22', 'x' in S.P.team[0].rec, S.M.minusDay, S.M.items.filter((it) => it.src === 'tax').map((it) => [it.id, it.date].join(' ')), await pg.$eval('#cs-day', (e) => e.dataset.csDay) === stored(S, 'big').date],
+    [true, false, '', taxes0, true], '«Применить» on the purchase: the row\'s own date moves, nothing else does - no tax among them - the minus is closed, and the panel shows the day the purchase went to');
   await pg.click('#cs-undo [data-cs-undo]');
-  // «Автоплан».
-  const per0 = JSON.stringify((await look(pg, 'cash')).P.tax.per);
-  await pg.click('#cs-answer [data-cs-auto]');
-  S = await holds(pg, '«Автоплан»', 'cash');
-  same([S.M.LOW >= 0, JSON.stringify(S.P.tax.per) === per0, S.M.items.filter((it) => it.src === 'tax').map((it) => [it.id, it.date].join(' ')), LISTS.flatMap((k) => S.P[k]).filter((r) => r.rec).map((r) => r.rec.day), await toastText(pg)], [true, true, taxes0, [28, 15, 20, 3, 5], 'Автоплан применён — можно отменить'],
-    '«Применить автоплан»: no day below zero any more; no tax was moved or answered for, and every row that repeats keeps its day — only single months and one-off rows were moved');
   await finish(pg);
 });
 
