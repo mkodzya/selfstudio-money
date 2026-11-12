@@ -531,8 +531,19 @@ a deploy:
 - **A row's card keeps what is known apart from what can be done** (the
   owner's choice of 1 November 2026, layout 1 «Стопкой»). At rest «Сведения»
   (`.ed-rc-info`) hold no control, for an editor or a reader; every control
-  is in the band «Действия» (`.ed-rc-act`) or under its «Ещё…», and the × in
-  the corner (`data-ed-x`) closes. The one exception is the line's form:
+  is in the band «Действия» (`.ed-rc-act`), and the × in
+  the corner (`data-ed-x`) closes. **Since 12 November 2026 the card at rest
+  is a list of answers, each with what a press will do beside it, and nothing
+  of it is folded** (the owner's answer of 11 November to a prototype, after
+  two comments «не понимаю, что происходит при нажатии»): an answer is
+  `.ed-rc-a` - its button and a caption `.ed-rc-cap` outside the button;
+  «Изменить строку» and what «Ещё…» held («Выбрать платёж из выписки…»,
+  «Что если…», «Удалить строку») stand open under the answers - there is no
+  «Ещё…» button, and `[data-ed-menu]` is never hidden; and the band stands
+  above «Сведения», which are a quiet list at the card's foot
+  (`.ed-rc-rest`, by the style sheet alone - a step, the form, «Что если…»
+  and «Отменить» keep the old order). A new answer gets a caption in `CAP`
+  (`answers`). Where this paragraph says «Ещё…» below, read that list. The one exception is the line's form:
   «Изменить строку» - or «Вписать сумму» / «Выбрать…», the answers of a
   question the band asks first - puts it in the place of «Сведения», inside
   `.ed-rc-info`, with «Сохранить» and «Отмена» alone in the band. A new
@@ -550,8 +561,9 @@ a deploy:
   «Правки не сохранены» first (`guard`, `show`). A change of month or tab,
   and a `data-ed-do` pressed outside the card (an answer of «Нужно решить»,
   «✓ оплачено» on a row of «Касса»), still drop it without a word.
-  «Удалить строку» is under «Ещё…» on every tab: three presses (this
-  supersedes the two of 8 October 2026 in «Касса · По месяцам»). **On a
+  «Удалить строку» is the last of that list on every tab: two presses since
+  12 November 2026 (three, under «Ещё…», from 1 November; two in «Касса · По
+  месяцам» from 8 October), and it still acts at once with «Отменить». **On a
   month of a repeat, what the line is - its name, bank, currency, VAT and
   «это подписка» - changes from that month on, without a question, and the
   months before keep theirs** (the same day: «кейс, платят 6 месяцев на

@@ -2342,7 +2342,7 @@ async function shutRow(pg) {
 // the form, «Ещё…» shut.
 const atRest = (pg, id, where) => pg.evaluate(([id, where]) => {
   const c = document.querySelector(where + ' [data-ed-card="row"]');
-  return !!c && c.dataset.edId === id && !c.querySelector('[data-ed-undo], [data-ed-askbox], [data-ed-saves], [data-ed-menu]:not([hidden])');
+  return !!c && c.dataset.edId === id && !c.querySelector('[data-ed-undo], [data-ed-askbox], [data-ed-saves]');
 }, [id, where]);
 // A verb of the card: a button of its band - or of «Ещё…» («Выбрать платёж…», «Удалить строку»), opened first.
 async function rowPress(pg, verb) {
@@ -2737,7 +2737,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   // answers, «Изменить строку» and «Ещё…» - «Выбрать платёж…» and «Что если…» are in «Ещё…», «Убрать» of a month is
   // «Не придёт…»; the tick is in the form, and the two ways to save are asked once the sum or the day is changed)
   same([await text(pg, K('row') + '.ed-rc-h'), await texts(pg, K('row') + '.ed-rc-dl dt'), await texts(pg, K('row') + '.ed-rc-dl dd'), await text(pg, K('row') + '.ed-why'), await bandOf(pg), await menuOf(pg), await pg.$$(K('row') + '[data-ed-f], ' + K('row') + '[data-ed-save]').then((l) => l.length)],
-    ['Client A', ['Сумма', 'Повтор', 'Банк', 'Октябрь'], ['£8,000', 'каждый месяц, 28-го числа, с октября', 'Wise · GBP', 'ждём 28 окт'], 'В плане: вписал Mika 6 окт · в таблице это Client A.', ['Получено', 'Частично…', 'Перенести…', 'Не придёт…', 'Изменить строку', 'Ещё…'], ['Выбрать платёж из выписки…', 'Что если…'], 0], 'the card of October\'s month of Client A: what the line is and whose — that it repeats, on the 28th — how October stands, and what can be done with it; no field and no «Сохранить» until «Изменить строку»');
+    ['Client A', ['Сумма', 'Повтор', 'Банк', 'Октябрь'], ['£8,000', 'каждый месяц, 28-го числа, с октября', 'Wise · GBP', 'ждём 28 окт'], 'В плане: вписал Mika 6 окт · в таблице это Client A.', ['Получено', 'Частично…', 'Перенести…', 'Не придёт…', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Что если…'], 0], 'the card of October\'s month of Client A: what the line is and whose — that it repeats, on the 28th — how October stands, and what can be done with it; no field and no «Сохранить» until «Изменить строку»');
   await rowForm(pg);
   same([await pg.$eval(K('row') + '[data-ed-f="monthly"]', (e) => e.checked), await pg.$eval('#ed-name', (e) => e.disabled), await text(pg, K('row') + '[data-ed-n="monthly"]'), await bandOf(pg)], [true, false, '28-го числа, с октября', ['Сохранить', 'Отмена']], '«Изменить строку»: the form in the place of «Сведения» — the tick «каждый месяц» says on which day and since when — and the band holds «Сохранить» and «Отмена» alone');
   await fill(pg, 'row', { amt: 8500 });
@@ -2789,8 +2789,7 @@ await run('cards', 'the rest of what the row\'s card and «Нужно решит
   // (layout 1, 1 November 2026: «Удалить» stood in the card and asked «Точно удалить?» once more; now it is in «Ещё…»,
   // a press away, and acts at once — the owner's decision)
   await openRow(pg, wd);
-  same([await bandOf(pg), await menuOf(pg), await pg.isVisible(K('row') + '[data-ed-do="del"]'), !!stored(await look(pg), wd)], [['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку', 'Ещё…'], ['Удалить строку'], false, true], '«Удалить строку» is not in the band: it is in «Ещё…», shut until it is opened');
-  await pg.click(K('row') + '[data-ed-more]');
+  same([await bandOf(pg), await menuOf(pg), await pg.isVisible(K('row') + '[data-ed-do="del"]'), !!stored(await look(pg), wd)], [['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку'], ['Удалить строку'], true, true], '«Удалить строку» is not among the answers: it is the last of the list under them, in sight (it was behind «Ещё…» until 12 November 2026)');
   same([await pg.isVisible(K('row') + '[data-ed-do="del"]'), !!stored(await look(pg), wd)], [true, true], '«Ещё…» opened: «Удалить строку» is there, and nothing is deleted yet');
   await pg.click(K('row') + '[data-ed-do="del"]');
   S = await holds(pg, '«Удалить строку»');
@@ -3179,6 +3178,7 @@ await run('todo', '«Сделать сегодня»: the rows of today with a c
   await pg.click('#view-today .td-todo .td-trow[data-ed-open="z1"] .td-nm');
   await pg.waitForSelector('#view-today .td-todo [data-ed-card="row"]');
   same(await pg.$$eval('#view-today [data-ed-card="row"]', (l) => l.map((c) => !!c.closest('.td-todo'))), [true], 'a press on a row opens its card under it in the block, and nowhere else');
+  if (process.env.SHOTS) await pg.screenshot({ path: `${process.env.SHOTS}/todo-card.png`, fullPage: true });
   await pg.context().close();
   // A day with no rows has no block.
   const p2 = await scene('todo, none', ledA(), planW());
@@ -3723,7 +3723,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   await pg.click(inDays(oct));
   // (layout 1, 1 November 2026: the band of a closed month - its answers, and «Ещё…» with «Выбрать платёж…»; no
   // «Изменить строку», there is nothing of a closed month left to change; × in the corner)
-  same([await bandOf(pg), await menuOf(pg)], [['И дальше так же', 'Частично…', 'Ещё…'], ['Выбрать платёж из выписки…']], 'its card offers the two things that can follow: «И дальше так же», and «Частично…» for a debt that really remains');
+  same([await bandOf(pg), await menuOf(pg)], [['И дальше так же', 'Частично…'], ['Выбрать платёж из выписки…']], 'its card offers the two things that can follow: «И дальше так же», and «Частично…» for a debt that really remains');
   await pg.click(K('row') + '[data-ed-do="part"]');
   // The question asks two things in one box.
   same([await pg.inputValue(PART), await text(pg, K('row') + 'label[for="ed-part"] span'), await text(pg, K('row') + '[data-ed-partnote]'), await pg.$eval(REST, (e) => [e.type, e.value, e.min, e.max, e.id, 'edF' in e.dataset]), await text(pg, K('row') + 'label[for="ed-partdate"] span'), await texts(pg, ASK + ' button'), await pg.evaluate(() => document.activeElement.id)],
@@ -3771,7 +3771,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   // line of its month; the answers in the band, «Удалить строку» in «Ещё…»; «Перенести…» opens on its date)
   const what = [await text(pg, K('row') + '.ed-why'), await infoOf(pg), await bandOf(pg), await menuOf(pg)];
   await pg.click(K('row') + '[data-ed-do="move"]');
-  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£600', Повтор: 'один раз · остаток с октября', Банк: 'Wise · GBP', Ноябрь: 'к оплате 12 ноя' }, ['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку', 'Ещё…'], ['Выбрать платёж из выписки…', 'Удалить строку'], '2026-11-12'],
+  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£600', Повтор: 'один раз · остаток с октября', Банк: 'Wise · GBP', Ноябрь: 'к оплате 12 ноя' }, ['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Удалить строку'], '2026-11-12'],
     'its card says where it came from and offers what any written payout has: «Оплачено», «Частично…» again, «Перенести…» with its date, «Удалить строку»');
   await pg.click(K('row') + '[data-ed-x]');
   // The constructor: the month it left is closed at what was paid; the rest is a row of the month of its day.
@@ -3836,7 +3836,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   await mk.click(inDays('g'));
   // (layout 1, 1 November 2026: where the line came from at the foot of «Сведения», how it stands under its month; the
   // band of a closed line: «Вернуть в план», «Повторять каждый месяц», and «Ещё…»)
-  same([await text(mk, K('row') + '.ed-why'), await monthOf(mk), await bandOf(mk), await menuOf(mk)], ['В плане: вписал Mika 6 окт · такого названия в таблице нет — закрою по сумме.', 'отмечено вручную Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.', ['Вернуть в план', 'Повторять каждый месяц', 'Ещё…'], ['Выбрать платёж из выписки…']], 'its card says so; what is left to do is «Вернуть в план» — or to make the paid row repeat');
+  same([await text(mk, K('row') + '.ed-why'), await monthOf(mk), await bandOf(mk), await menuOf(mk)], ['В плане: вписал Mika 6 окт · такого названия в таблице нет — закрою по сумме.', 'отмечено вручную Закрыто по вашему слову: в выписках такого платежа не видно, и снова его не жду.', ['Вернуть в план', 'Повторять каждый месяц'], ['Выбрать платёж из выписки…']], 'its card says so; what is left to do is «Вернуть в план» — or to make the paid row repeat');
   await finish(mk);
 });
 
@@ -3941,7 +3941,7 @@ await run('partly, other days', '«Частично» with the rest in the same 
   await openRow(pg, 'pb');
   // (layout 1, 1 November 2026: the card answered in stands open on what was done until it is shut and opened again;
   // the band of the closed line holds «Вернуть в план», «Повторять каждый месяц», and «Ещё…»)
-  same([await bandOf(pg), await menuOf(pg)], [['Вернуть в план', 'Повторять каждый месяц', 'Ещё…'], ['Выбрать платёж из выписки…']], 'the card of the row that was paid in part offers «Повторять каждый месяц»');
+  same([await bandOf(pg), await menuOf(pg)], [['Вернуть в план', 'Повторять каждый месяц'], ['Выбрать платёж из выписки…']], 'the card of the row that was paid in part offers «Повторять каждый месяц»');
   await pg.click(K('row') + '[data-ed-do="tick"]');
   S = await holds(pg, '«Повторять каждый месяц» beside a rest');
   same([await toastText(pg), Object.keys(S.P.team[0].rec.x), S.P.team[0].rec.day, states(S.M, ['pb@2026-10', 'pb@2026-11', r2.id]), item(S.M, 'pb@2026-11').cash, S.M.months.by['2026-11'].team],
@@ -3993,7 +3993,7 @@ await run('partly, from before', 'a plan that still holds a rest carried WITHOUT
   // the same under «Дата»; «Поставить дату…» opens on an empty date; «Удалить строку» is in «Ещё…»)
   const what = [await text(pg, K('row') + '.ed-why'), await infoOf(pg), await bandOf(pg), await menuOf(pg)];
   await pg.click(K('row') + '[data-ed-do="move"]');
-  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£600', Повтор: 'один раз · остаток с октября', Банк: 'Wise · GBP', Дата: 'без даты · в расчёте с 1 ноября Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.' }, ['Оплачено', 'Частично…', 'Поставить дату…', 'Не платим', 'Изменить строку', 'Ещё…'], ['Выбрать платёж из выписки…', 'Удалить строку'], ''],
+  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£600', Повтор: 'один раз · остаток с октября', Банк: 'Wise · GBP', Дата: 'без даты · в расчёте с 1 ноября Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.' }, ['Оплачено', 'Частично…', 'Поставить дату…', 'Не платим', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Удалить строку'], ''],
     'its card says it has no date and is counted all the same, and offers «Оплачено», «Частично…», a date, and «Удалить строку»');
   await pg.click(K('row') + '[data-ed-x]');
   await goCash(pg);
@@ -4552,7 +4552,7 @@ await run('typing', 'a row\'s sum is typed where it stands — the box stays und
   await pg.click(cs('inflows', 'k') + ' .cs-mo [data-ed-open]');
   // (layout 1, 1 November 2026: the band holds the answers, «Изменить строку» and «Ещё…» - «Удалить строку» in it;
   // «+ VAT» and «каждый месяц» are in the form)
-  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await bandOf(pg), await menuOf(pg)], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Перенести…', 'Не придёт', 'Изменить строку', 'Ещё…'], ['Выбрать платёж из выписки…', 'Удалить строку']], 'the arrow at the end of the row opens the same card right under it: where it came from, «Частично…», «Удалить строку»');
+  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await bandOf(pg), await menuOf(pg)], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Перенести…', 'Не придёт', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Удалить строку']], 'the arrow at the end of the row opens the same card right under it: where it came from, «Частично…», «Удалить строку»');
   await calm(pg, 'with a row\'s card open', 'cash');
   await rowForm(pg);
   same(await pg.$$eval(K('row') + '.ed-chks [data-ed-f]', (l) => l.map((e) => e.dataset.edF)), ['vat', 'monthly'], '… and «Изменить строку» opens its form: «+ VAT», «каждый месяц»');
@@ -5293,8 +5293,7 @@ await run('rv-x', 'a row of the plan is taken away in three presses — the row,
     'the card of a row of its own has «Удалить строку» behind «Ещё…», and nothing that deletes in its band; a month of a repeat has «Не платим…» and no «Удалить» at all; a tax the page works out, where the month holds one, has none — it is not a row to take away');
   // a row of its own: gone at once
   await rowCard(pg, 'team', 'g');
-  same(await pg.isVisible(K('row') + '[data-ed-do="del"]'), false, '(the card at rest does not show «Удалить строку»)');
-  await pg.click(K('row') + '[data-ed-more]');
+  same(await pg.isVisible(K('row') + '[data-ed-do="del"]'), true, '(the card at rest shows «Удалить строку», the last of its list: nothing of it is folded since 12 November 2026)');
   await pg.click(K('row') + '[data-ed-menu] [data-ed-do="del"]');
   await saved(pg);
   same([await team(), await toastText(pg), await pg.$('[data-ed-card="row"]')], [['rB ', 'rL '], 'Удалено: Person G', null], 'a row of its own goes with the third press, on «Удалить строку» — no «Точно удалить?» — the card goes with its row, and the page says «Удалено: Person G», with «Отменить»');
@@ -5383,7 +5382,7 @@ await run('row-card', 'a row\'s card «Стопкой»: «Сведения» ho
   // held «no control» there.)
   const shape = () => pg.$eval(K('row').trim(), (c) => { const x = c.querySelectorAll('[data-ed-x]');
     return [c.querySelectorAll(':is(button, input, select, textarea, a[href], [tabindex], [contenteditable]):not(.ed-rc-act *):not([data-ed-x])').length, [...c.querySelectorAll('.ed-rc-act button')].filter((b) => b.getClientRects().length > 0).length, x.length === 1 && !x[0].closest('.ed-rc-act') && x[0].getAttribute('aria-label') === 'Закрыть',
-      c.querySelectorAll('.ed-rc-info').length === 1 && c.querySelectorAll('.ed-rc-act').length === 1 && !c.querySelector('.ed-rc-info .ed-rc-act, .ed-rc-act .ed-rc-info'), c.querySelectorAll('.ed-rc-act .ed-rc-blk').length > 1 ? 8 : 6];
+      c.querySelectorAll('.ed-rc-info').length === 1 && c.querySelectorAll('.ed-rc-act').length === 1 && !c.querySelector('.ed-rc-info .ed-rc-act, .ed-rc-act .ed-rc-info'), c.querySelectorAll('.ed-rc-act .ed-rc-blk').length > 1 ? 10 : 8];
   });
   // At rest, on every line of October.
   const bad = [];
@@ -5395,11 +5394,15 @@ await run('row-card', 'a row\'s card «Стопкой»: «Сведения» ho
     if (ctl || band < 1 || band > most || !x || !two) bad.push([k, id, ctl, band, x, two]);
     await shutRow(pg);
   }
-  ok(n >= 8 && !bad.length, `at rest, on each of the ${n} lines of October: one «Сведения» and one band; nothing to press outside the band but ×; the band one to six buttons - up to eight where the card asks a question of its own; and the card one ×, in its corner and not in the band`, bad);
+  ok(n >= 8 && !bad.length, `at rest, on each of the ${n} lines of October: one «Сведения» and one band; nothing to press outside the band but ×; the band one to eight buttons, what was under «Ещё…» among them - up to ten where the card asks a question of its own; and the card one ×, in its corner and not in the band`, bad);
   // «Удалить строку» is behind «Ещё…».
   await rowCard(pg, 'team', 'g');
-  same([await bandOf(pg), await menuOf(pg), await pg.isVisible(K('row') + '[data-ed-do="del"]')], [['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку', 'Ещё…'], ['Выбрать платёж из выписки…', 'Удалить строку'], false],
-    'a cost of its own, not yet due: four answers, «Изменить строку» and «Ещё…» in its band; «Удалить строку» is behind «Ещё…», not in sight');
+  same([await bandOf(pg), await menuOf(pg), await pg.isVisible(K('row') + '[data-ed-do="del"]')], [['Оплачено', 'Частично…', 'Перенести…', 'Не платим', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Удалить строку'], true],
+    'a cost of its own, not yet due: four answers and «Изменить строку» in its band, and under them, in sight, «Выбрать платёж из выписки…» and «Удалить строку»');
+  // Each of them says beside it what a press will do (12 November 2026), and nothing of the card is folded away.
+  same([await pg.$$eval(K('row') + '.ed-rc-a', (l) => l.map((a) => [a.querySelector('button').textContent, (a.querySelector('.ed-rc-cap') || {}).textContent || ''])), await pg.$$eval(K('row') + '[data-ed-menu] button', (l) => l.every((b) => b.getClientRects().length && !!b.querySelector('small').textContent)), await pg.$(K('row') + '[data-ed-more]'), await pg.$eval(K('row').trim(), (c) => c.classList.contains('ed-rc-rest') && c.querySelector('.ed-rc-act').getBoundingClientRect().top < c.querySelector('.ed-rc-info').getBoundingClientRect().top)],
+    [[['Оплачено', 'платёж уже ушёл — закрою строку'], ['Частично…', 'спрошу, сколько уже ушло и на какой день остаток'], ['Перенести…', 'спрошу новый день'], ['Не платим', 'уберу из расчёта, строка останется в плане'], ['Изменить строку', 'название, сумма, банк, день, повтор']], true, null, true],
+    'every answer has its caption; the list under them is open, each item with its own; there is no «Ещё…»; and at rest the answers stand above what is known of the line');
   // An answer: the card stays, says what was done, and offers «Отменить» for it - for it alone.
   const bare = (p) => canon({ ...p, log: null });
   const before = bare(await plan());
@@ -5520,7 +5523,7 @@ await run('row-card', 'a row\'s card «Стопкой»: «Сведения» ho
   await openRow(pg, 'rB@2026-10');
   const ph = await pg.evaluate(() => { const a = document.querySelector('[data-ed-card="row"] .ed-rc-ans'), b = [...a.querySelectorAll('button')], tops = new Set(b.map((x) => Math.round(x.getBoundingClientRect().top)));
     return [b.length, tops.size, getComputedStyle(a).gridTemplateColumns.trim().split(/\s+/).length, document.documentElement.scrollWidth <= 375]; });
-  same(ph, [4, 2, 2, true], '375px: the four answers stand two by two, and the page does not scroll sideways');
+  same(ph, [4, 4, 1, true], '375px: each of the four answers stands on a line of its own, what it does beside it, and the page does not scroll sideways');
   await finish(pg);
 });
 
@@ -5830,8 +5833,8 @@ await run('rv-band', 'the rest of the review of the row\'s card: a tax in rouble
   narrow.push(await fit('«Касса», September\'s Person X'));
   await shutRow(pg);
   const fine = [[], true];
-  same(narrow, [['«Сегодня», Person M', ['Вернуть в план', 'Повторять каждый месяц', 'Ещё…'], fine, true], ['«Касса», Person M', ['Вернуть в план', 'Повторять каждый месяц', 'Ещё…'], fine, true],
-    ['«Касса», September\'s Person X', ['Это оно', 'Нет, это другой платёж', 'Изменить строку', 'Ещё…'], fine, true]],
+  same(narrow, [['«Сегодня», Person M', ['Вернуть в план', 'Повторять каждый месяц'], fine, true], ['«Касса», Person M', ['Вернуть в план', 'Повторять каждый месяц'], fine, true],
+    ['«Касса», September\'s Person X', ['Это оно', 'Нет, это другой платёж', 'Изменить строку'], fine, true]],
   '375px: «Повторять каждый месяц» and «Нет, это другой платёж» stay inside their buttons - in «Сегодня» and in «Касса» -, every answer inside the card, the two of a row of answers of one height, and the page does not scroll sideways');
   await finish(pg);
   // A card that opens at rest puts the cursor on its ×: the row pressed is drawn afresh and gone, and the cursor was
@@ -6005,11 +6008,11 @@ await run('rv-card3', 'the third review of the row\'s card: what the line is, ch
   const hint = [await bandOf(pg), (await texts(pg, K('row') + '.ed-rc-q'))[0].replace(/:.*/, '')];
   await pg.click(BAND + '[data-ed-do="notx"]');
   await saved(pg);
-  same([hint, await bandOf(pg), await focus(pg), /Person X: жду дальше/.test(await monthOf(pg))], [[['Это оно', 'Нет, это другой платёж', 'Изменить строку', 'Ещё…'], 'Похоже, уже оплачено'], ['Оплачено', 'Частично…', 'Перенести…', 'Не платим…', 'Изменить строку', 'Ещё…'], '×', true],
+  same([hint, await bandOf(pg), await focus(pg), /Person X: жду дальше/.test(await monthOf(pg))], [[['Это оно', 'Нет, это другой платёж', 'Изменить строку'], 'Похоже, уже оплачено'], ['Оплачено', 'Частично…', 'Перенести…', 'Не платим…', 'Изменить строку'], '×', true],
     'September\'s Person X: «Похоже, уже оплачено» with «Это оно» and «Нет, это другой платёж» in the answers\' place; «Нет»: the four answers are back at once, the cursor on ×, and the month says what was done');
   await pg.click('#toastUndo');
   await saved(pg);
-  same(await bandOf(pg), ['Это оно', 'Нет, это другой платёж', 'Изменить строку', 'Ещё…'], '… the toast\'s «Отменить» brings the question back');
+  same(await bandOf(pg), ['Это оно', 'Нет, это другой платёж', 'Изменить строку'], '… the toast\'s «Отменить» brings the question back');
   await finish(pg);
 
   // 3. The cursor. After an answer it is on ×: on «Отменить», which writes, the Enter that answered, pressed again,
@@ -6063,16 +6066,12 @@ await run('rv-card3', 'the third review of the row\'s card: what the line is, ch
   await pg.keyboard.press('Escape');
   esc.push(await gone(pg), await focus(pg));
   await rowCard(pg, 'team', 'g');
-  await pg.click(K('row') + '[data-ed-more]');
   await pg.click(K('row') + '.ed-rc-dl dd');
   esc.push(await focus(pg));
   await pg.keyboard.press('Escape');
-  esc.push(await pg.isVisible(K('row') + '[data-ed-menu]'), !!(await pg.$(K('row'))));
-  await pg.click(K('row') + '.ed-rc-h');
-  await pg.keyboard.press('Escape');
   esc.push(await gone(pg));
-  same(esc, ['nothing', true, 'the opener of g', 'nothing', false, true, true],
-    'a press on the card\'s name leaves the cursor nowhere: Escape still shuts the card, and the cursor goes back to the row; with «Ещё…» open, Escape from there shuts «Ещё…» first, then the card');
+  same(esc, ['nothing', true, 'the opener of g', 'nothing', true],
+    'a press on the card\'s name leaves the cursor nowhere: Escape still shuts the card, and the cursor goes back to the row; the list that stood under «Ещё…» is open and asks no Escape of its own (12 November 2026), so one Escape shuts the card from there too');
   await toToday(pg);
   await allDays(pg);
   await pg.focus(inDays('rB@2026-10'));
@@ -6120,7 +6119,7 @@ await run('rv-card3', 'the third review of the row\'s card: what the line is, ch
   // question of the card's own stands above the answers, where «Похоже, уже …» stands in their place.
   await toMonth(pg, '2026-10');
   await rowCard(pg, 'team', 'rX@2026-10');
-  same(await bandOf(pg), ['Да', 'Нет, другой', 'Оплачено', 'Частично…', 'Перенести…', 'Не платим…', 'Изменить строку', 'Ещё…'], 'October\'s Person X: «Person Y в таблице — это «Person X»?» above the four answers - eight buttons, the most a band shows');
+  same(await bandOf(pg), ['Да', 'Нет, другой', 'Оплачено', 'Частично…', 'Перенести…', 'Не платим…', 'Изменить строку'], 'October\'s Person X: «Person Y в таблице — это «Person X»?» above the four answers - eight buttons, the most a band shows');
   await finish(pg);
   // A computed tax says «Сумму по декларации и дату можно поправить» only where they can be: not once the statement
   // has closed it, and not to a reader, whose card has no band.
@@ -6164,10 +6163,10 @@ await run('rv-card3', 'the third review of the row\'s card: what the line is, ch
     await pg.setViewportSize({ width: w, height: w > 500 ? 900 : 812 });
     await rowCard(pg, 'team', 'g');
     edge.push([w, await pg.$eval(K('row').trim(), (c) => { const r = c.getBoundingClientRect();
-      return [...c.querySelectorAll('.ed-rc-more > button')].map((b) => { const o = b.getBoundingClientRect(); return [b.textContent.trim(), Math.max(0, Math.round((r.left - o.left) * 10) / 10, Math.round((o.right - r.right) * 10) / 10)]; }); })]);
+      const l = [...c.querySelectorAll('.ed-rc-more button')]; return [l.length > 1, Math.max(...l.map((b) => { const o = b.getBoundingClientRect(); return Math.max(0, Math.round((r.left - o.left) * 10) / 10, Math.round((o.right - r.right) * 10) / 10); }))]; })]);
     await shutRow(pg);
   }
-  same(edge, [[1320, [['Изменить строку', 0], ['Ещё…', 0]]], [375, [['Изменить строку', 0], ['Ещё…', 0]]]], '«Касса», Person G\'s card on a desk and at 375px: «Изменить строку» and «Ещё…» stand inside the card, not a pixel past it');
+  same(edge, [[1320, [true, 0]], [375, [true, 0]]], '«Касса», Person G\'s card on a desk and at 375px: «Изменить строку» and the list under it stand inside the card, not a pixel past it');
   await finish(pg);
 });
 
@@ -6193,7 +6192,7 @@ await run('rv-small', 'the rest of the review: a save the server did not take, t
   // A paid one-off row can be made to repeat from its card; a name the table knows brings its bank.
   pg = await scene('a paid row', ledP(), planP({ team: [row('g', 'Person G', 1000, '2026-10-07', { paid: paid(T) })] }), { H: 60 });
   await pg.click(inDays('g'));
-  same([await bandOf(pg), await menuOf(pg)], [['Вернуть в план', 'Повторять каждый месяц', 'Ещё…'], ['Выбрать платёж из выписки…']], 'a row marked paid offers «Повторять каждый месяц» in its card\'s band, beside «Вернуть в план»; «Выбрать платёж из выписки…» is behind «Ещё…»');
+  same([await bandOf(pg), await menuOf(pg)], [['Вернуть в план', 'Повторять каждый месяц'], ['Выбрать платёж из выписки…']], 'a row marked paid offers «Повторять каждый месяц» in its card\'s band, beside «Вернуть в план»; «Выбрать платёж из выписки…» is behind «Ещё…»');
   await pg.click(K('row') + '[data-ed-do="tick"]');
   let S = await holds(pg, 'the paid row made to repeat');
   same([S.P.team[0].rec, await toastText(pg), item(S.M, 'g@2026-10').state, item(S.M, 'g@2026-11').cash], [{ day: 7, from: '2026-10', x: { '2026-10': { paid: paid(T) } } }, 'Person G: каждый месяц, с октября', 'done', -1000], 'pressed: the row repeats on the 7th from October, its mark stays with October, November is in the plan');
@@ -7916,7 +7915,6 @@ await run('rv-whatif', '«Что если» answers with the engine\'s own figur
   const oct = ahead[0].id;
   await openRow(pg, oct);
   ok((await menuOf(pg)).includes('Что если…') && !(await bandOf(pg)).includes('Что если…'), 'the card of a row offers «Что если…» behind «Ещё…»', [await bandOf(pg), await menuOf(pg)]);
-  await pg.click(K('row') + '[data-ed-more]');
   await pg.click(K('row') + '[data-wi-open]');
   await pg.waitForSelector(K('row') + '[data-wi-panel]');
   const sel = (f) => pg.$eval(K('row') + `[data-wi-f="${f}"]`, (e) => (e.tagName === 'SELECT' ? e.selectedOptions[0].textContent.replace(/ /g, ' ') : e.value));
@@ -8394,7 +8392,6 @@ await run('wi-owed', '«Что если» takes an overdue receipt: «не за�
   // The card of Acme Ltd's overdue payment, which stands under today.
   await openRow(pg, 'q1');
   ok((await menuOf(pg)).includes('Что если…'), 'the card of an overdue receipt offers «Что если…», behind «Ещё…»', [await bandOf(pg), await menuOf(pg)]);
-  await pg.click(K('row') + '[data-ed-more]');
   await pg.click(K('row') + '[data-wi-open]');
   await pg.waitForSelector(K('row') + '[data-wi-panel]');
   const R = K('row'), F = '#view-today .td-wi ';
