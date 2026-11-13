@@ -4290,7 +4290,9 @@ await run('phone', 'a phone, 375 and 390 wide: nothing scrolls sideways, and the
     await ph.click(K('row') + '[data-ed-do="part"]');
     const a = await ph.evaluate(() => document.documentElement.scrollWidth);
     // … and of that question nothing is off the screen: the sum, the day of the rest, the two buttons.
-    const q = await ph.evaluate((w) => [...document.querySelectorAll('[data-ed-askbox="part"] input, [data-ed-askbox="part"] button')].map((e) => { const r = e.getBoundingClientRect(); return (e.id || e.textContent.trim()) + (r.width > 0 && r.left >= 0 && r.right <= w + 0.5 ? '' : ` is off the screen: ${Math.round(r.left)}…${Math.round(r.right)}`); }), w);
+    // (13 November 2026: the sum in another account's currency is drawn hidden until such an account is chosen - what is
+    // not shown is not asked about; the choice of the account itself is, where the step has one.)
+    const q = await ph.evaluate((w) => [...document.querySelectorAll('[data-ed-askbox="part"] input, [data-ed-askbox="part"] button, [data-ed-askbox="part"] select')].filter((e) => !e.closest('[hidden]') && e.id !== 'ed-partacc' && e.id !== 'ed-partrest' || (e.matches('select') && e.getBoundingClientRect().right > w + 0.5)).map((e) => { const r = e.getBoundingClientRect(); return (e.id || e.textContent.trim()) + (r.width > 0 && r.left >= 0 && r.right <= w + 0.5 ? '' : ` is off the screen: ${Math.round(r.left)}…${Math.round(r.right)}`); }), w);
     same(q, ['ed-part', 'ed-partdate', 'Готово', 'Отмена'], `${w}px: the question «Частично…» is whole on the screen — how much has been paid, the day of the rest, «Готово» and «Отмена»`);
     await goCash(ph);
     const b = await ph.evaluate(() => { const rows = [...document.querySelectorAll('#cs-sec-team tr.cs-r')], top = (e) => Math.round(e.getBoundingClientRect().top);
