@@ -540,6 +540,29 @@ a deploy:
   and on its account. Nothing new is stored and the engine is untouched;
   the card's «Оплаты» read off the table's rows what left which account
   («… · ушло £850 с Wise»). The check `inbox-part-fx` holds it.
+- **A mark may name the account its money left** (the same word of
+  13 November 2026). «Частично…» in a row's card asks, where the plan holds
+  another account than the line's, «С какого счёта заплатили» («На какой
+  счёт пришло» of a receipt). An account in another currency asks the sum
+  in ITS currency and puts what that is in the line's, by today's rate,
+  into the line's own figure, free to be typed over; and where another
+  account holds the line's currency the step asks «С какого счёта остаток»,
+  which is the bank of the rest's row. The mark keeps the account -
+  `paid.from: {bank, cur, out}`, `out` what left it in its own currency -
+  and **this is the one thing here the engine reads**: while such a mark
+  stands in for its payment it is counted in «Денег сейчас» on that
+  account, at `out`, and not on the line's; the statements that end it are
+  that bank's (`markCov`); and the row that takes its place is looked for
+  on that account, at `out` (E6) - a row of the line's label is still taken
+  by the label first, whatever its bank. The model says it back as
+  `mark.from`, on such a mark alone. Never on a withdrawal or a computed
+  tax. **A plan without `paid.from` is read to the penny as before**:
+  `checks/withdrawals/same.mjs` gives the very figures `develop` gives.
+  The debt stays in the line's currency: the line, its rest and every
+  word of «оплачено X из Y» are the line's own, and the tie that draws
+  the pair as one row still asks one currency of both. Not built: a rest
+  on an account in another currency, and «Оплачено» said of a whole line
+  from another account. The check `part-acct` holds it.
 - **A line paid in part is one line on the screen, and two rows in the
   plan** (the owner's word of 12 November 2026, to a prototype: «Да,
   делаем»). «Частично…» writes what it always wrote - the mark at what was
