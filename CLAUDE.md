@@ -555,6 +555,18 @@ a deploy:
   The check `part-one` holds it, and `partly`, `partly, other days`,
   `partly, from before` and `inbox-part` hold the same answers read as one
   line.
+  **A rest kept by hand is tied by a press** (the owner's word of
+  13 November 2026: «я хочу чтобы все частичные оплаты до этого сделанные
+  теперь были в новом виде»). Before the one row, a rest was a plain row
+  typed beside a line closed «частью» (`closed`, at what its payment
+  brought); nothing in the plan says the two are one. The card of such a
+  row offers «Это остаток строки «…» за {октябрь}» where a line of its
+  list, name and currency is closed so and the two sums add up to the
+  line's (`restOf`), and `Live.write.tie` writes what «Часть строки плана…»
+  would have: the line holds its rows by hand (`tx`, `closed`) and is
+  marked «Частично» at what they brought - `paid.at` the typed row's `c0`,
+  which is the tie - and the row gets `carry`. The line stays done by its
+  rows, so «Денег сейчас» does not move. The check `rest-tie` holds it.
 - **A row's card keeps what is known apart from what can be done** (the
   owner's choice of 1 November 2026, layout 1 «Стопкой»). At rest «Сведения»
   (`.ed-rc-info`) hold no control, for an editor or a reader; every control

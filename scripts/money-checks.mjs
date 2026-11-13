@@ -11308,6 +11308,51 @@ await run('part-one', 'a line paid in part is ONE row wherever it is listed - «
   await finish(pg);
 });
 
+// =====================================================================================================================
+// 13 NOVEMBER 2026: «ЭТО ОСТАТОК СТРОКИ …» (the owner's word: «я хочу чтобы все частичные оплаты до этого сделанные
+// теперь были в новом виде»). Before a line paid in part was one row, a rest was kept by hand: the line closed at
+// what its payment brought - «закрыто частью» - and a plain row typed beside it for what was left. Nothing in the
+// plan ties the two, so the page of 12 November still draws them as two. The card of the typed row now offers to say
+// so, and writes what «Часть строки плана…» would have written: the line holds its payment by hand and is marked
+// «Частично» at it, at the moment the rest was made; the typed row becomes its rest. Against the page before, the
+// item is not in the card and the press below finds nothing.
+await run('rest-tie', '«Это остаток строки …»: a line closed «частью» and the row typed by hand for what was left become one line - as «Часть строки плана…» would have written them - and «Денег сейчас» does not move', async () => {
+  const AT = ms('2026-10-22T08:00:00Z');
+  const L = ledP({ tx: [filed('p1', '2026-10-20', -400, 'cogs', 'Person T', { at: AT })] });
+  const P = planP({ team: [row('t1', 'Person T', 1200, '2026-10-20', { closed: true }), row('t2', 'Person T', 800, '2026-11-05'), row('t3', 'Person U', 300, '2026-11-06')] });
+  const pg = await scene('rest-tie', L, P, { H: 60, at: '2026-10-22T12:00:00+01:00' });
+  const sp = (s) => s.replace(/ /g, ' ');
+  const rowsOf = async () => (await pg.$$eval('#view-cash #cs-sec-team tr.cs-r', (l) => l.map((r) => [r.querySelector('.cs-nt').textContent, r.classList.contains('cs-done'), r.querySelector('[data-cs-rm]').textContent, r.querySelector('input.cs-amt') ? 'typed' : r.querySelector('.cs-at').textContent]))).map((r) => r.map((x) => (typeof x === 'string' ? sp(x) : x))).filter((r) => /^Person [TU]/.test(r[0])).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const shutCard = async () => { if (await pg.$(K('row'))) { await pg.click(K('row') + '[data-ed-x]'); await pg.waitForSelector(K('row'), { state: 'detached' }); } };
+  const openIn = async (id) => { await shutCard(); await pg.click(`#view-cash [data-ed-open="${id}"]`); await pg.waitForSelector(K('row')); };
+  const kept = (S) => { const a = S.P.team.find((r) => r.id === 't1'), b = S.P.team.find((r) => r.id === 't2'); return [a.paid ? [a.paid.on, a.paid.at === b.c0, a.paid.amt, a.paid.tx] : null, a.tx || null, a.closed, b.carry || null, b.name]; };
+  await pg.click('.nav [data-tab="cash"]');
+  let S = await holds(pg, 'a line closed «частью» and a row typed for the rest', 'cash');
+  const now0 = S.M.now, t1 = item(S.M, 't1');
+  same([t1.done && [t1.done.by, t1.done.got, t1.done.rows], kept(S)], [['closed', 400, ['p1']], [null, null, true, null, 'Person T']],
+    'as the founders kept it: October\'s line closed by hand at the 400 its payment brought, and November\'s row of 800 a plain row - nothing in the plan ties them');
+  await pg.click('#view-cash [data-cs-mon="1"]');
+  same(await rowsOf(), [['Person T', false, '', 'typed'], ['Person U', false, '', 'typed']], '… and November shows the 800 as a row like any other');
+  await openIn('t3');
+  same(await pg.$(K('row') + '[data-ed-do="tie"]'), null, 'a row with no line closed «частью» of its name is offered nothing');
+  await openIn('t2');
+  same([await text(pg, K('row') + '[data-ed-do="tie"] > span'), await text(pg, K('row') + '[data-ed-do="tie"] > small')], ['Это остаток строки «Person T» за октябрь', 'сведу в одну строку: оплачено £400 из £1,200, остаток £800'],
+    'the card of the typed row names the line it may be the rest of, and what the one line will say');
+  await rowPress(pg, 'tie');
+  S = await holds(pg, 'the two said to be one line', 'cash');
+  same([await toastText(pg), kept(S), S.M.now === now0], ['Person T: сведено в одну строку', [['2026-10-20', true, 400, ['p1']], ['p1'], true, { ym: '2026-10' }, 'Person T'], true],
+    'pressed: the line holds its payment by hand and is marked «Частично» at the 400, on the payment\'s day and at the moment the rest was made; the typed row is its rest - and «Денег сейчас» is what it was, the payment counted once');
+  same(await rowsOf(), [['Person T — остаток за октябрь', false, 'оплачено £400 из £1,200, остаток £800', '800'], ['Person U', false, '', 'typed']], 'November reads it as the line\'s rest: «оплачено £400 из £1,200, остаток £800»');
+  await shutCard();
+  await pg.click('#view-cash [data-cs-mon="-1"]');
+  await allShut(pg);
+  same(await rowsOf(), [['Person T', true, 'оплачено £400 из £1,200, остаток £800 — в ноябре, 5 ноя', '400']], '… and October says where what is left stands, in place of «закрыто частью»');
+  await pg.click('#toastUndo');
+  S = await holds(pg, 'the tie taken back', 'cash');
+  same(kept(S), [null, null, true, null, 'Person T'], '«Отменить» leaves the plan as the founders kept it');
+  await finish(pg);
+});
+
 console.log('\n' + (errs.length ? 'PAGE ERRORS:\n  ' + errs.join('\n  ') : 'no page errors, no console errors'));
 console.log(`${n - failed} of ${n} checks passed` + (failed ? ` — ${failed} FAILED` : '') + (SHARD ? ` (part ${SHARD.k} of ${SHARD.of})` : ''));
 await browser.close();

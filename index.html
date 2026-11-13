@@ -6771,6 +6771,20 @@ const Live=(()=>{
   part(P,it,ids,got,id,now,by,on,date){if(it.wd||it.src==="tax")return null;const z=write.partial(P,it,got,id,now,by,on,date),s=slot(P,it,true);if(!s||!obj(s.paid))return z;
    const t=[...new Set(arr(ids).map(String))];if(!t.length)return z;s.tx=t;s.closed=true;s.paid.tx=t.slice();
    if(Array.isArray(s.notx)){s.notx=s.notx.filter(x=>!t.includes(String(x)));if(!s.notx.length)delete s.notx;}return z;},
+  // «Это остаток строки …» (the owner's word of 13 November 2026: «я хочу чтобы все частичные оплаты до этого
+  // сделанные теперь были в новом виде»). Before a line paid in part was one row, the founders kept a rest by hand:
+  // the line closed at what its payment brought («закрыто частью» - `closed`, its rows found by the page or picked),
+  // and a plain row typed beside it for what was left. Nothing in the plan says the two are one line. This writes
+  // what «Часть строки плана…» would have written had it been pressed when the rest was typed, and nothing else:
+  // the line holds the rows that closed it by hand (tx, closed) and is marked «Частично» at what they brought - on
+  // their day, and at the moment the rest was made (its c0), which is the tie the page reads; the typed row becomes
+  // that line's rest (carry). The line stays done by its rows, never by the mark, so «Денег сейчас» does not move.
+  // `it` - the closed line, `rest` - the typed row. False where there is nothing to tie.
+  tie(P,it,rest,by){const s=slot(P,it,true),h=rowIn(P,rest.row||rest.id),d=it.done;if(!s||!h||!d||it.wd||it.src==="tax"||rest.src!=="row")return false;
+   const t=[...new Set(arr(d.rows).map(String))],at=+h.r.c0||0;if(!t.length||!(d.got>0)||!at)return false;
+   s.paid={on:isD(d.on)?d.on:it.date,at,by,amt:r2(d.got),tx:t.slice()};s.tx=t;s.closed=true;
+   if(Array.isArray(s.notx)){s.notx=s.notx.filter(x=>!t.includes(String(x)));if(!s.notx.length)delete s.notx;}
+   h.r.carry={ym:it.occ?it.occ.ym:it.ym};return true;},
   // A change to one line. A one-off row: its own fields. A month of a repeating row («Только {октябрь}», R3): the
   // amount and the date go into that month's exception. A name, a bank, a currency, the VAT tick or «это подписка»
   // cannot differ for one month: they are what the line IS, and they hold from that month on (the owner's decision of
@@ -7523,6 +7537,15 @@ const Ed=(()=>{
  const nm=it=>{const g=grp(it);return !g?it.name:it===g.root||ymOf(it)===ymOf(g.root)?g.root.name:`${g.root.name} — остаток за ${mon(ymOf(g.root))}`;};
  const one=l=>{const top=new Map();l.forEach(x=>{const g=grp(x);if(g)top.set(g,Math.max(top.has(g)?top.get(g):-1,g.l.indexOf(x)));});return l.filter(x=>{const g=grp(x);return !g||g.l.indexOf(x)===top.get(g);});};
  const isShut=it=>{const g=grp(it);return it.state==="done"||!!(g&&g.off&&it===g.last);};
+ // The line a row typed by hand may be the rest of («Это остаток строки …», 13 November 2026): a line of its list
+ // and its name, in its currency, closed by hand at less than its sum («закрыто частью») and not said «Частично»
+ // of, whose payment and this row add up to its sum - within a hundredth of it, for sums typed in round figures -
+ // and that stands no later than the row. The nearest such line before it; null where there is none, and for
+ // anything but a plain row a founder wrote - a month of a repeat, a rest already, a withdrawal, a tax.
+ const restOf=it=>{if(!it||!M||it.src!=="row"||it.carry||it.wd||!it.c0||!(it.amt>0)||grp(it))return null;
+  const z=round2(it.amt*(it.factor||1)),l=M.items.filter(x=>x.id!==it.id&&x.list===it.list&&x.key===it.key&&x.cur===it.cur&&x.dir===it.dir&&!x.wd&&x.src!=="tax"&&x.done&&x.done.by==="closed"&&x.done.rows.length&&x.done.got>0&&!(x.mark&&x.mark.amt!=null)&&!grp(x)&&(!it.date||!x.date||x.date<=it.date));
+  const fit=l.filter(x=>{const f=round2(x.amt*(x.factor||1));return x.done.got<f&&Math.abs(f-x.done.got-z)<=Math.max(1,f/100);});
+  return fit.sort((a,b)=>(a.date||"")<(b.date||"")?1:-1)[0]||null;};
  // What such a line says of itself, wherever it is listed: on the rest - what is paid, of how much, and what is left
  // (and then whatever the rest says of its own day: «просрочено 3 дн.»); on a part that stands apart from the rest -
  // in another month, under another day - the same, and where the rest is; once nothing is awaited - in how many
@@ -7665,6 +7688,7 @@ const Ed=(()=>{
   unpaid:[it=>`Вернул в план: ${it.name}`,(P,it)=>{W.unmark(P,it);}],
   // «Убрать оплату …» (12 November 2026), on the rest of a line paid in part: the mark that wrote this rest goes, and
   // the rest with it - the line, or the rest before this one, stands in the plan again as it stood before the press.
+  tie:[it=>`${it.name}: сведено в одну строку`,(P,it,now,by)=>{const w=restOf(it);if(w)W.tie(P,w,it,by);}],
   unpart:[it=>`${grp(it)?grp(it).root.name:it.name}: оплата снята`,(P,it)=>{const g=grp(it),p=g&&g.l[g.l.length-2];if(!p)return;W.unmark(P,p);W.del(P,it);}],
   // («Не придёт» / «Не платим» say what they did in their own words: «выключено» was the page's, not the founder's)
   skip:[it=>`${it.name}: ${grp(it)?"остаток ":""}${skipped(it)}`,(P,it)=>{W.off(P,it);}],
@@ -7699,7 +7723,7 @@ const Ed=(()=>{
   const it=item(x.dataset.edId),V=VERBS[verb];if(!it)return;
   const a=direct?"":asks(verb,it);
   if(a)return show({k:"row",id:it.id,at:x.dataset.edAt||(cur&&cur.k==="row"&&cur.id===it.id?cur.at:""),ask:a,ret:retOf(x)});
-  if(!V||(verb==="unpart"&&!(grp(it)&&grp(it).open===it&&it.src==="row"))||((verb==="tx"||verb==="notx")&&!it.hint)||((verb==="payer"||verb==="nopayer")&&!it.payer)||(verb==="same"&&!(it.occ&&it.done&&it.done.got))||(verb==="tick"&&!(it.src==="row"&&it.date)))return;
+  if(!V||(verb==="tie"&&!restOf(it))||(verb==="unpart"&&!(grp(it)&&grp(it).open===it&&it.src==="row"))||((verb==="tx"||verb==="notx")&&!it.hint)||((verb==="payer"||verb==="nopayer")&&!it.payer)||(verb==="same"&&!(it.occ&&it.done&&it.done.got))||(verb==="tick"&&!(it.src==="row"&&it.date)))return;
   // «Повторять каждый месяц» makes the row the first month of a repeat, a line of another id: the card goes with it.
   // «Удалить строку» leaves nothing for the card to stand under, and folds it at once.
   // («Убрать оплату …» takes the rest away: the card goes to the line that stands in the plan again.)
@@ -7931,6 +7955,9 @@ const Ed=(()=>{
   // mark had written; what it was said of stands in the plan again as it stood before, whole.
   if(rest&&!d&&st!=="off"){const p=g.l[g.l.length-2],x=g.pays.find(y=>y.id===p.id);
    if(p.done)menu.push(`<button type="button" data-ed-do="unpart" data-ed-id="${esc(it.id)}"><span>Убрать оплату${x&&x.on?" "+dRu(x.on):""}</span><small>${x?nat(x.amt,g.cur)+" ":""}${g.l.length>2?"вернутся в остаток":`вернутся в строку — она снова ждёт целиком${p.date?", на "+dRu(p.date):""}`}</small></button>`);}
+  // «Это остаток строки …» on a row typed by hand beside a line closed «частью»: the two become one line.
+  const whole=restOf(it);
+  if(whole){const f=round2(whole.amt*(whole.factor||1));menu.push(`<button type="button" data-ed-do="tie" data-ed-id="${esc(it.id)}"><span>Это остаток строки «${esc(whole.name)}»${ymOf(whole)?" за "+mon(ymOf(whole)):""}</span><small>сведу в одну строку: ${inn?"получено":"оплачено"} ${nat(whole.done.got,whole.cur)} из ${nat(f,whole.cur)}, остаток ${nat(round2(it.amt*(it.factor||1)),it.cur)}</small></button>`);}
   if(pickable(it))menu.push(`<button type="button" data-ed-do="pick" data-ed-id="${esc(it.id)}"><span>Выбрать платёж из выписки…</span><small>${d?"если строку закрыл не тот платёж":inn?"деньги пришли, а строка их не нашла":"платёж прошёл, а строка его не нашла"}</small></button>`);
   if(Trial.fits(M,it))menu.push('<button type="button" data-wi-open><span>Что если…</span><small>проба: в план ничего не записывается</small></button>');
   // (not on the rest of a line paid in part: there «Удалить строку» would read as the whole line's, and would
