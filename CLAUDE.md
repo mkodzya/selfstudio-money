@@ -511,8 +511,8 @@ a deploy:
   `pick-pay` holds it.
 - **A part of a line is said in «Разбор», as the payment is filed** (the
   owner's choice of 6 November 2026, «А»). A payment on a card of «Разбор»
-  that is less than an open line of the plan of its name - the same way and
-  currency, within 45 days of it - says so in plain words, with one button,
+  that is less than an open line of the plan of its name - the same way,
+  within 45 days of it - says so in plain words, with one button,
   «Часть строки плана…». The step lists the open lines near it, the line of
   its name first and chosen, and asks the day of the rest as «Частично…»
   does. «Готово» files the row as «В таблицу» does and writes
@@ -527,7 +527,19 @@ a deploy:
   both, and its «Отменить» takes back the table and the plan. Not offered on
   a founder's block, an own transfer, a bank's fee row, a possible repeat, a
   withdrawal or a computed tax, nor for a payment a line already holds by
-  hand. The check `inbox-part` holds it.
+  hand. The check `inbox-part` holds it. **Since 13 November 2026 the line
+  may stand in another currency than the payment** (the owner's «Да, на
+  тест» to a prototype, after «а что если я плачу частями но в разных
+  валютах и банках»): pounds from Wise to somebody whose line is in roubles
+  on Tochka. The card says «Этот платёж в другой валюте — около …», and the
+  step asks one thing more of such a line - «Сколько это закрыло в строке» -
+  with the payment's worth in the line's currency put in (its pounds by the
+  rate of its own day, as the engine reads a row a line holds by hand) and
+  free to be typed over: the line is marked at the founder's figure
+  (`paid.amt`), the rest is what is left of the line in the line's currency
+  and on its account. Nothing new is stored and the engine is untouched;
+  the card's «Оплаты» read off the table's rows what left which account
+  («… · ушло £850 с Wise»). The check `inbox-part-fx` holds it.
 - **A line paid in part is one line on the screen, and two rows in the
   plan** (the owner's word of 12 November 2026, to a prototype: «Да,
   делаем»). «Частично…» writes what it always wrote - the mark at what was
