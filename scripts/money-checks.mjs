@@ -10723,6 +10723,73 @@ await run('inbox-part', '«Часть строки плана…» in «Разб
 // shuts the other founders' pages»). Since then settle() runs only on a person's own act, and what it files is what it
 // filed: the same rows, the same pairs, the same figures.
 // =====================================================================================================================
+// A part in another currency than its line (13 November 2026, the owner: «а что если я плачу частями но в разных
+// валютах и банках», and «Да, на тест» to the prototype). Until then «Часть строки плана…» offered only lines of the
+// payment's own currency: pounds sent from Wise to somebody whose line stands in roubles on Tochka could be no part
+// of that line, and the founder closed it by a sum worked out by hand.
+await run('inbox-part-fx', '«Часть строки плана…» of a line in another currency: pounds paid to somebody whose line stands in roubles are filed as that line\'s part - at the day\'s rate, or at the figure the founder types - and the card says what left which account', async () => {
+  const UP = ms('2026-10-06T10:00:00Z');
+  const led = ledger([], [inbox('fx1', '2026-10-06', -850, 'cogs', 'Tessa', { at: UP, auto: false })]);
+  const P = planP({ team: [
+    row('tessa', 'Tessa', 236000, '2026-10-12', { blk: 'cogs', cur: 'RUB', bank: 'Tochka' }),
+    row('greta', 'Greta', 1350, '2026-10-13', { blk: 'cogs' }),
+  ] });
+  const pg = await scene('inbox part fx', led, P, { h: 1400 });
+  const now0 = await pg.evaluate(() => window.__money.model().now);
+  await pg.click('.nav [data-tab="inbox"]');
+  const card = '#view-inbox .op[data-id="fx1"]', box = `${card} .ip-ask`;
+  same(await text(pg, `${card} [data-ipsay]`), 'В плане: Tessa, ₽236,000 на 12 окт. Этот платёж в другой валюте — около ₽100,300, меньше строки.Часть строки плана…', 'the card of £850 to Tessa says her line stands in roubles, what the payment is about worth in them, and offers the one button');
+  const led0 = store.led.puts, cash0 = store.cash.puts;
+  await pg.click(`${card} [data-ippart]`);
+  await pg.waitForSelector(box);
+  same(await pg.$$eval(`${box} [data-ippk]`, (l) => l.map((e) => [e.value, e.checked, e.disabled])), [['tessa', true, false], ['greta', false, false]], 'the step offers the rouble line of her name first and chosen, and the pound line beside it');
+  same([await pg.inputValue(`${box} [data-ipamt]`), await text(pg, `${box} [data-ipfx]`)], ['100300', 'Строка в RUB, платёж в GBP. Подставлено по курсу на 6 окт: £1 = ₽118. Поправьте, если договорились о другой сумме.'],
+    'it asks what the payment closed of the line, in the line\'s own currency, with the rate of the payment\'s day put in and said');
+  same(await text(pg, `${box} [data-ipnote]`), 'В строке «Tessa» за октябрь будет оплачено ₽100,300 из ₽236,000. Остаток ₽135,700 останется в ней же — на день, который вы выберете. Платёж уйдёт в таблицу.', 'and says what will be done, in the line\'s currency');
+  // The question is asked of a line in another currency alone, and comes back with the rate's figure.
+  await pg.check(`${box} [data-ippk][value="greta"]`);
+  await pg.waitForFunction((s) => !document.querySelector(s), `${box} [data-ipamt]`);
+  same(await text(pg, `${box} [data-ipnote]`), 'В строке «Greta» за октябрь будет оплачено £850 из £1,350. Остаток £500 останется в ней же — на день, который вы выберете. Платёж уйдёт в таблицу.', 'a line of the payment\'s own currency is asked nothing more: the step is what it was');
+  await pg.check(`${box} [data-ippk][value="tessa"]`);
+  await pg.waitForSelector(`${box} [data-ipamt]`);
+  same(await pg.inputValue(`${box} [data-ipamt]`), '100300', 'chosen again, the rouble line has its figure back');
+  await pg.fill(`${box} [data-ipamt]`, '');
+  same(await text(pg, `${box} [data-ipnote]`), 'Впишите, сколько из строки закрыл этот платёж.', 'with the figure wiped the step asks for it');
+  await pg.click(`${box} [data-ipgo]`);
+  same(await toastText(pg), 'Впишите, сколько это закрыло в строке', '… and «Готово» is refused in words');
+  await pg.fill(`${box} [data-ipamt]`, '236000');
+  same(await text(pg, `${box} [data-ipnote]`), 'Это не меньше строки (₽236,000): тогда платёж закрывает её целиком, это не часть.', 'a figure that is the whole line is no part, and the step says so');
+  await pg.click(`${box} [data-ipgo]`);
+  same(await toastText(pg), 'Это не меньше строки — тогда это не часть: строку закроет платёж весь', '… and «Готово» is refused');
+  await sleep(700);
+  same([store.led.puts - led0, store.cash.puts - cash0], [0, 0], 'nothing has been written so far');
+  // The founder agreed a round figure with the person: the line is marked at what he says, not at the rate's.
+  await pg.fill(`${box} [data-ipamt]`, '100000');
+  await pg.fill(`${box} [data-ipdate]`, '2026-10-31');
+  same(await text(pg, `${box} [data-ipnote]`), 'В строке «Tessa» за октябрь будет оплачено ₽100,000 из ₽236,000. Остаток ₽136,000 останется в ней же — на сб 31 окт. Платёж уйдёт в таблицу.', 'the figure typed over the rate\'s is the one the step speaks of');
+  await shot(pg, 'inbox-part-fx');
+  await pg.click(`${box} [data-ipgo]`);
+  await puts('led', led0 + 1);
+  await puts('cash', cash0 + 1);
+  same(await toastText(pg), 'В таблицу: 1 · Tessa: оплачено ₽100,000 из ₽236,000, остаток — на сб 31 окт', 'one toast says both');
+  const filedRow = store.led.doc.tx.find((r) => r.id === 'fx1');
+  same(filedRow && [filedRow.c, filedRow.l, filedRow.b, filedRow.o.a, filedRow.o.cur], ['cogs', 'Tessa', 'Wise', -850, 'GBP'], 'the row is filed as it is: £850 from Wise, COGS · Tessa');
+  const doc = store.cash.doc, line = doc.team.find((r) => r.id === 'tessa'), rest = doc.team.find((r) => r.carry);
+  same([line.tx, line.closed, line.paid && [line.paid.amt, line.paid.on, line.paid.tx], [line.cur, line.bank]], [['fx1'], true, [100000, '2026-10-06', ['fx1']], ['RUB', 'Tochka']], 'the rouble line holds the pound payment by hand and is marked «Частично» at ₽100,000; what the line is has not changed');
+  same(rest && [rest.amt, rest.cur, rest.bank, rest.date, rest.carry], [136000, 'RUB', 'Tochka', '2026-10-31', { ym: '2026-10' }], 'the rest is ₽136,000 in the line\'s currency and on its account, on the founder\'s day');
+  await pg.click('.nav [data-tab="cash"]');
+  const S = await holds(pg, 'a part in another currency said in «Разбор»', 'cash');
+  const L = item(S.M, 'tessa'), R = S.M.items.find((it) => it.id === rest.id);
+  same([L.done && [L.done.note, L.done.got, L.done.rows], R && [R.state === 'done', R.amt, R.cur]], [['partial', 100000, ['fx1']], [false, 136000, 'RUB']], 'the engine reads it with no change of its own: the line done at the founder\'s figure by that row, the rest open');
+  same([S.M.months.by['2026-10'].off.by.team.rows.map((r) => r.id), S.M.now], [[], now0], 'nothing stands «вне плана», and «Денег сейчас» is what it was with the row still in «Разбор»: the pounds left Wise once');
+  same([await text(pg, `#view-cash [data-cs-id="${R.id}"] [data-cs-rm]`), await text(pg, `#view-cash [data-cs-id="${R.id}"] .cs-nt`), await pg.$('#view-cash [data-cs-id="tessa"]')], ['оплачено ₽100,000 из ₽236,000, остаток ₽136,000', 'Tessa', null], '«Касса» shows ONE row, in the line\'s currency');
+  await pg.click(`#view-cash [data-ed-open="${R.id}"]`);
+  await pg.waitForSelector(K('row'));
+  const info = await infoOf(pg);
+  same(info['Оплаты'], '6 окт — ₽100,000 · ушло £850 с Wise', 'the card says what the part closed of the line and what really left which account');
+  await finish(pg);
+});
+
 await run('open-pair', 'a page that opens over «Разбор» holding transfers between own accounts saves nothing - not a sure row, not a pair whose kind is known, not two of the table\'s own transfers that pair; a person\'s own act files them exactly as the page used to when it opened', async () => {
   // The table: two of its own transfers that make a pair and were never paired (Wise −500 on 2 Oct, Barclays +500 on
   // 3 Oct). «Разбор»: a row it is sure of (Wise −1,000 on 4 Oct, filed as a transfer between own accounts by itself), and
