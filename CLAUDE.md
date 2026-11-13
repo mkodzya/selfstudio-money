@@ -575,6 +575,31 @@ a deploy:
   said. What is not guessed: a payment with no name on it from another
   account than the mark knows - it waits «вне плана» until it is named.
   The check `split-seen` holds every case.
+  **The three things the prototype had and the first release did not**
+  (the owner, 13 November 2026: «Да, доделай»). *The rest on an account
+  in another currency*: «С какого счёта остаток» offers every account of
+  the plan; one in another currency makes the rest a row of THAT account,
+  in its currency, at the rate of the day it was said (free to be typed
+  over in the row's form), and `carry.of: {cur, amt}` keeps what it is of
+  the line's debt, in the line's currency. The engine counts the row as
+  the row it is - the days ahead take the money from where it will leave -
+  and only says `of` back; the page ties the pair by the DEBT's currency
+  (`dcur`, `debt` in `Ed`), so the line is still one row with its words
+  in its own currency: «оплачено ₽150,000 из ₽236,000, остаток ₽86,000 ·
+  со счёта Wise: около £729». Such a rest, paid, has paid what it was of
+  the debt; a part of it, its share; a rest brought back to the debt's
+  currency says no `of`. *«Оплачено с другого счёта…»* («Получено на
+  другой счёт…»), under the answers of a card where the plan holds another
+  account: asks the account and, in another currency, what left it, and
+  writes the whole mark with `paid.from` (`write.mark`'s sixth argument) -
+  the engine reads it as it reads a part's. One press of «Оплачено» is
+  what it was and asks nothing. *What really left* is said in the row
+  itself, so on «Сегодня» and in «По дням» too: «оплачено … из … (ушло
+  £850 с Wise)», «отмечено · ждёт выписку · с Wise: £495» - `away` of a
+  payment, read off the rows that paid it, else the mark, else the rest's
+  own account. Not decided by these: two marks waiting on one account for
+  near-equal sums take the bank's rows in the order of the marks, as
+  before. The checks `fx-rest` and `fx-rest-days` hold it.
 - **A line paid in part is one line on the screen, and two rows in the
   plan** (the owner's word of 12 November 2026, to a prototype: «Да,
   делаем»). «Частично…» writes what it always wrote - the mark at what was
@@ -591,7 +616,7 @@ a deploy:
   `c0` is the mark's `paid.at`, in one list - so pairs written before this
   are read the same way and nothing is rewritten (`Ed.grp`, `nm`, `one`,
   `shut`). Not tied, and drawn as before: a withdrawal, a computed tax, a
-  rest in another currency than its line, a rest ticked «каждый месяц», and
+  rest in another currency than its line that says no `carry.of`, a rest ticked «каждый месяц», and
   a rest somebody typed as a plain row. **A change that draws a row of the
   plan goes through `Ed.one` and `Ed.nm`** - a list that maps items to rows
   without them shows the pair again - **and nothing of it may reach

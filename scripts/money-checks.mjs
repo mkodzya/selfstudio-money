@@ -10784,7 +10784,7 @@ await run('inbox-part-fx', '«Часть строки плана…» of a line 
   const L = item(S.M, 'tessa'), R = S.M.items.find((it) => it.id === rest.id);
   same([L.done && [L.done.note, L.done.got, L.done.rows], R && [R.state === 'done', R.amt, R.cur]], [['partial', 100000, ['fx1']], [false, 136000, 'RUB']], 'the engine reads it with no change of its own: the line done at the founder\'s figure by that row, the rest open');
   same([S.M.months.by['2026-10'].off.by.team.rows.map((r) => r.id), S.M.now], [[], now0], 'nothing stands «вне плана», and «Денег сейчас» is what it was with the row still in «Разбор»: the pounds left Wise once');
-  same([await text(pg, `#view-cash [data-cs-id="${R.id}"] [data-cs-rm]`), await text(pg, `#view-cash [data-cs-id="${R.id}"] .cs-nt`), await pg.$('#view-cash [data-cs-id="tessa"]')], ['оплачено ₽100,000 из ₽236,000, остаток ₽136,000', 'Tessa', null], '«Касса» shows ONE row, in the line\'s currency');
+  same([await text(pg, `#view-cash [data-cs-id="${R.id}"] [data-cs-rm]`), await text(pg, `#view-cash [data-cs-id="${R.id}"] .cs-nt`), await pg.$('#view-cash [data-cs-id="tessa"]')], ['оплачено ₽100,000 из ₽236,000 (ушло £850 с Wise), остаток ₽136,000', 'Tessa', null], '«Касса» shows ONE row, in the line\'s currency');
   await pg.click(`#view-cash [data-ed-open="${R.id}"]`);
   await pg.waitForSelector(K('row'));
   const info = await infoOf(pg);
@@ -10812,8 +10812,8 @@ await run('part-acct', '«Частично…» names the account the part left:
   await pg.waitForSelector(box);
   same(await pg.$$eval(box + '[data-ed-partacc] option', (l) => l.map((o) => [o.value, o.textContent, o.selected])), [['Tochka|RUB', 'Tochka · RUB — счёт строки', true], ['Wise|GBP', 'Wise · GBP', false], ['Barclays|GBP', 'Barclays · GBP', false]],
     'the step asks which account the part left: the plan\'s accounts, the line\'s own first and chosen');
-  same([await pg.isHidden(box + '[data-ed-partfx]'), await text(pg, box + '[data-ed-partl]'), await pg.$(box + '[data-ed-partrest]')], [true, 'Сколько уже оплачено, ₽', null],
-    'on the line\'s own account the step is what it was: one sum, in the line\'s currency - and no question about the rest\'s account while no other holds roubles');
+  same([await pg.isHidden(box + '[data-ed-partfx]'), await text(pg, box + '[data-ed-partl]'), await pg.isHidden(box + '[data-ed-partrestn]')], [true, 'Сколько уже оплачено, ₽', true],
+    'on the line\'s own account the step is what it was: one sum, in the line\'s currency - and the rest stays on the line\'s account until another is chosen');
   await pg.selectOption(box + '[data-ed-partacc]', 'Wise|GBP');
   same([await pg.isHidden(box + '[data-ed-partfx]'), await text(pg, box + '[data-ed-partoutl]'), await text(pg, box + '[data-ed-partl]'), await text(pg, box + '[data-ed-partfxn]')],
     [false, 'Сколько ушло, £', 'Сколько это закрыло в строке, ₽', 'Строка в RUB, счёт в GBP. Подставляю по сегодняшнему курсу: £1 = ₽118. Поправьте, если договорились о другой сумме.'],
@@ -10840,7 +10840,7 @@ await run('part-acct', '«Частично…» names the account the part left:
   const L = item(S.M, 'tessa'), e1 = await ests();
   same([L.done && [L.done.by, L.done.note, L.done.got], L.mark.from, e1['Wise|GBP'] - e0['Wise|GBP'], e1['Tochka|RUB'] - e0['Tochka|RUB']], [['mark', 'partial', 120000], { bank: 'Wise', cur: 'GBP', out: 850 }, -850, 0],
     'the mark is counted on Wise, at £850 - and Tochka, where the line stands, has lost nothing');
-  same(await text(pg, `#view-cash [data-cs-id="${rest.id}"] [data-cs-rm]`), 'оплачено ₽120,000 из ₽236,000, остаток ₽116,000', 'the line is ONE row, in its own currency');
+  same(await text(pg, `#view-cash [data-cs-id="${rest.id}"] [data-cs-rm]`), 'оплачено ₽120,000 из ₽236,000 (ушло £850 с Wise), остаток ₽116,000', 'the line is ONE row, in its own currency, and says what really left');
   await openIn(rest.id);
   same((await infoOf(pg))['Оплаты'], '6 окт — ₽120,000 · ушло £850 с Wise', 'the card says what the part closed and what left which account');
   // The bank then shows it: £850 out of Wise, with no name on it - and at ₽120,000 it is no 6% from the day's rate,
@@ -10858,7 +10858,7 @@ await run('part-acct', '«Частично…» names the account the part left:
   await openIn('greta');
   await pg.click(K('row') + '[data-ed-do="part"]');
   await pg.waitForSelector(box);
-  same(await pg.$$eval(box + '[data-ed-partrest] option', (l) => l.map((o) => [o.value, o.selected])), [['Wise|GBP', true], ['Barclays|GBP', false]], 'a pound line is asked which pound account the rest will leave');
+  same(await pg.$$eval(box + '[data-ed-partrest] option', (l) => l.map((o) => [o.value, o.selected])), [['Wise|GBP', true], ['Barclays|GBP', false], ['Tochka|RUB', false]], 'a pound line is asked which account the rest will leave');
   await pg.selectOption(box + '[data-ed-partacc]', 'Barclays|GBP');
   same([await pg.isHidden(box + '[data-ed-partfx]'), await text(pg, box + '[data-ed-partl]')], [true, 'Сколько уже оплачено, £'], 'another bank in the line\'s currency asks one sum, as before');
   await pg.fill(box + '[data-ed-part]', '500');
@@ -10938,6 +10938,143 @@ await run('split-seen', 'a line paid in parts from other accounts and in other c
     'a part the founder said closed ₽120,000 - not the rate\'s ₽100,300 - is known by its account and what left it: the line reads ₽120,000 by that row, and its rest of ₽116,000 is closed by its own payment (the fault: the line read ₽100,300)');
   same([by['6'].items.tessa, by['6'].off], [['done', 'row:partial', 100300, ['w1']], []], '«Частично…» in roubles with no account named: the pounds under her name still take the mark\'s place');
   same([by['6b'].items.tessa, by['6b'].off], [['done', 'mark:partial', 100300, []], ['w1:850']], 'what is NOT guessed: a payment with no name on it, from another account than the mark knows - it waits «вне плана» until somebody names it');
+  await finish(pg);
+});
+
+// The three things the prototype of 13 November showed and «Частично…» did not yet do (the owner's «Да, доделай» of
+// 13 November 2026): the rest on an account in another currency, «Оплачено» said of a whole line - or a whole rest -
+// from another account, and the words of what really left on «Сегодня» and in «По дням».
+await run('fx-rest', 'the rest of a line may stand on an account in another currency and the line is still ONE row in its own; «Оплачено с другого счёта…» closes a whole line from another account; and what really left is said on «Сегодня» and in «По дням»', async () => {
+  const P = planP({ team: [
+    row('tessa', 'Tessa', 236000, T, { blk: 'cogs', cur: 'RUB', bank: 'Tochka' }),
+    row('greta', 'Greta', 1350, T, { blk: 'cogs' }),
+    row('olga', 'Olga', 59000, T, { blk: 'cogs', cur: 'RUB', bank: 'Tochka' }),
+    row('nora', 'Nora', 700, '2026-10-20', { blk: 'cogs' }),
+  ] });
+  const pg = await scene('fx-rest', ledger([]), P, { h: 1700 });
+  const ests = () => pg.evaluate(() => Object.fromEntries(window.__money.model().accounts.map((a) => [a.key, Math.round(a.est * 100) / 100])));
+  const e0 = await ests();
+  const box = K('row') + '[data-ed-askbox="part"] ', pay = K('row') + '[data-ed-askbox="payfrom"] ';
+  const openIn = async (id) => { if (await pg.$(K('row'))) { await pg.click(K('row') + '[data-ed-x]'); await pg.waitForSelector(K('row'), { state: 'detached' }); } await pg.click(`#cs-plan [data-cs-id="${id}"] [data-ed-open]`); await pg.waitForSelector(K('row')); };
+  const rm = (id) => text(pg, `#view-cash [data-cs-id="${id}"] [data-cs-rm]`);
+  await pg.click('.nav [data-tab="cash"]');
+
+  // 1. A part in roubles from the line's own account, and the rest from Wise, in pounds.
+  await openIn('tessa');
+  await pg.click(K('row') + '[data-ed-do="part"]');
+  await pg.waitForSelector(box);
+  same([await pg.$$eval(box + '[data-ed-partrest] option', (l) => l.map((o) => [o.value, o.selected])), await pg.isHidden(box + '[data-ed-partrestn]')], [[['Tochka|RUB', true], ['Wise|GBP', false], ['Barclays|GBP', false]], true],
+    'the step asks which account the rest will leave - any account of the plan, the line\'s own chosen - and says nothing more while it is the line\'s');
+  await pg.fill(box + '[data-ed-part]', '150000');
+  await pg.fill(box + '[data-ed-partdate]', '2026-10-31');
+  await pg.selectOption(box + '[data-ed-partrest]', 'Wise|GBP');
+  same([await pg.isHidden(box + '[data-ed-partrestn]'), await text(pg, box + '[data-ed-partrestn]')], [false, 'Счёт в GBP, строка в RUB: остаток уйдёт с Wise — около £728.81 по сегодняшнему курсу. Строка останется одной и в RUB.'],
+    'an account in pounds: the step says what will stand there, by today\'s rate, and that the line stays one, in roubles');
+  const cash0 = store.cash.puts;
+  await pg.click(box + '[data-ed-go="part"]');
+  await puts('cash', cash0 + 1);
+  let S = await holds(pg, 'a rest on an account in another currency', 'cash');
+  const line = S.P.team.find((r) => r.id === 'tessa'), rest = S.P.team.find((r) => r.carry);
+  same([line.paid.amt, line.paid.from, [rest.amt, rest.cur, rest.bank, rest.date], rest.carry], [150000, undefined, [728.81, 'GBP', 'Wise', '2026-10-31'], { ym: T.slice(0, 7), of: { cur: 'RUB', amt: 86000 } }],
+    'stored: the mark in roubles; the rest a row of Wise in pounds that says what it is of the line\'s debt');
+  same(store.cash.doc.team.find((r) => r.carry).carry, { ym: T.slice(0, 7), of: { cur: 'RUB', amt: 86000 } }, '… and the stand was sent it');
+  const e1 = await ests();
+  same([e1['Tochka|RUB'] - e0['Tochka|RUB'], e1['Wise|GBP'] - e0['Wise|GBP'], item(S.M, rest.id).acct, item(S.M, rest.id).carry.of], [-150000, 0, 'Wise|GBP', { cur: 'RUB', amt: 86000 }],
+    'the part is counted on Tochka, and the rest is a line of Wise: the days ahead take the pounds from where they will leave');
+  same([await rm(rest.id), await pg.$(`#view-cash [data-cs-id="tessa"]`)], ['оплачено ₽150,000 из ₽236,000, остаток ₽86,000 · со счёта Wise: около £729', null],
+    'the line is ONE row, its words in roubles - and the rest says which account it will leave and about how much that is there');
+  await openIn(rest.id);
+  const I = await infoOf(pg);
+  same([I['Оплаты'], I['Остаток']], ['6 окт — ₽150,000', '₽86,000 · £729 · к оплате 31 окт · со счёта Wise · GBP: около £728.81'], 'the card says the same');
+
+  // 2. «Оплачено» of that rest: the line is closed whole, and the pounds are counted on Wise.
+  await pg.click(K('row') + '[data-ed-do="paid"]');
+  await puts('cash', cash0 + 2);
+  S = await holds(pg, 'the rest in another currency is paid', 'cash');
+  const e2 = await ests();
+  same([Math.round((e2['Wise|GBP'] - e1['Wise|GBP']) * 100) / 100, e2['Tochka|RUB'] - e1['Tochka|RUB'], await rm(rest.id)], [-728.81, 0, 'оплачено двумя частями: ₽150,000 6 окт, ₽86,000 6 окт'],
+    'the rest left Wise in pounds, Tochka lost nothing more, and the line reads paid in two parts - in roubles, ₽236,000 in all');
+  same(await pg.$eval(`#view-cash [data-cs-id="${rest.id}"]`, (r) => [r.querySelector('.cs-at').textContent, r.querySelector('.cs-ct').textContent]), ['236,000', 'RUB'], 'the closed row shows what was paid in the line\'s currency');
+  if (await pg.$(K('row'))) { await pg.click(K('row') + '[data-ed-x]'); await pg.waitForSelector(K('row'), { state: 'detached' }); }
+  await pg.click('#view-cash tr.cs-shutr:not([hidden]) [data-cs-shut]');
+  await openIn(rest.id);
+  same((await infoOf(pg))['Оплаты'], '6 окт — ₽150,000 6 окт — ₽86,000 · ушло £728.81 с Wise', 'the card says what the second part closed and what left Wise');
+  // 3. «Оплачено с другого счёта…»: a whole rouble line paid in pounds from Wise.
+  await openIn('olga');
+  same(await text(pg, K('row') + '[data-ed-do="payfrom"]'), 'Оплачено с другого счёта…спрошу счёт и сколько с него ушло — закрою строку целиком', 'the card offers it under the answers, and says what a press will do');
+  await pg.click(K('row') + '[data-ed-do="payfrom"]');
+  await pg.waitForSelector(pay);
+  same([await pg.$$eval(pay + '[data-ed-payacc] option', (l) => l.map((o) => o.value)), await pg.isHidden(pay + '[data-ed-payfx]'), await text(pg, pay + '[data-ed-payoutl]'), await pg.inputValue(pay + '[data-ed-payout]'), await text(pg, pay + '[data-ed-payn]')],
+    [['Wise|GBP', 'Barclays|GBP'], false, 'Сколько ушло, £', '500', 'Строка в RUB, счёт в GBP. Подставляю по сегодняшнему курсу — впишите, сколько ушло на самом деле. Строка закроется целиком, на ₽59,000.'],
+    'the step asks the account - every one but the line\'s own - and, in another currency, what left it, with today\'s rate put in');
+  await pg.fill(pay + '[data-ed-payout]', '');
+  await pg.click(pay + '[data-ed-go="payfrom"]');
+  same(await toastText(pg), 'Впишите, сколько ушло с этого счёта', 'without the sum «Готово» is refused in words');
+  await pg.fill(pay + '[data-ed-payout]', '495');
+  await pg.click(pay + '[data-ed-go="payfrom"]');
+  await puts('cash', cash0 + 3);
+  same(await toastText(pg), 'Оплачено: Olga — с Wise, ушло £495', 'the toast says where it left and how much');
+  S = await holds(pg, 'a whole line paid from an account in another currency', 'cash');
+  const e3 = await ests(), O = item(S.M, 'olga');
+  same([S.P.team.find((r) => r.id === 'olga').paid.from, O.done && O.done.by, e3['Wise|GBP'] - e2['Wise|GBP'], e3['Tochka|RUB'] - e2['Tochka|RUB'], await rm('olga')], [{ bank: 'Wise', cur: 'GBP', out: 495 }, 'mark', -495, 0, 'отмечено · ждёт выписку · с Wise: £495'],
+    'the mark keeps the account, is counted on Wise at £495 - not on Tochka - and the row says so');
+  // The statements then show all three payments: the roubles of the part on Tochka and the pounds of the rest on
+  // Wise, each under her name, and Olga's pounds with no name on them. Every one finds its place: nothing stands
+  // «вне плана», each account has lost its own money once, and the line still reads paid in two parts.
+  const seen = await pg.evaluate(({ T, at, led0, P }) => {
+    const L = window.__money, led = JSON.parse(JSON.stringify(led0)), f = (id, a, cur, b, l) => ({ id, d: T, a: Math.round(Math.abs(a) / (cur === 'GBP' ? 1 : 118) * 100) / 100, c: 'cogs', b, l, v: 0, s: 'file', o: { a, cur, t: l || 'TRANSFER 2' }, key: 'k|' + id, at });
+    led.tx.push(f('t1', -150000, 'RUB', 'Tochka', 'Tessa'), f('w1', -735, 'GBP', 'Wise', 'Tessa'), f('w2', -495, 'GBP', 'Wise', ''));
+    const M = L.compute(led, P, T), r2 = (v) => Math.round(v * 100) / 100;
+    return { olga: M.items.filter((x) => x.id === 'olga').map((x) => x.done && [x.done.by, x.done.rows])[0], open: M.items.filter((x) => !x.done).length, est: Object.fromEntries(M.accounts.map((a) => [a.key, r2(a.est)])), off: M.months.by[T.slice(0, 7)].off.by.team.rows.length };
+  }, { T, at: S.P.team.find((r) => r.id === 'olga').paid.at + 60000, led0: store.led.doc, P: store.cash.doc });
+  same([seen.olga, seen.open, seen.off, Math.round((seen.est['Wise|GBP'] - e0['Wise|GBP']) * 100) / 100, seen.est['Tochka|RUB'] - e0['Tochka|RUB']], [['row', ['w2']], 2, 0, -1230, -150000],
+    'Olga\'s mark is replaced by the row of Wise at £495; nothing is «вне плана»; Wise is down the £735 and the £495 the bank shows, Tochka the ₽150,000 - each once (Greta and Nora alone are still open)');
+  // … and a pound line from another pound account: one question, no sum.
+  await openIn('greta');
+  await pg.click(K('row') + '[data-ed-do="payfrom"]');
+  await pg.waitForSelector(pay);
+  await pg.selectOption(pay + '[data-ed-payacc]', 'Barclays|GBP');
+  same([await pg.isHidden(pay + '[data-ed-payfx]'), await text(pg, pay + '[data-ed-payn]')], [true, 'Строка закроется целиком, на £1,350. Пока платежа нет в выписке, он считается на счёте Barclays.'], 'an account in the line\'s currency asks no sum');
+  await pg.click(pay + '[data-ed-go="payfrom"]');
+  await puts('cash', cash0 + 4);
+  same(await toastText(pg), 'Оплачено: Greta — с Barclays', 'the toast names the bank');
+  S = await holds(pg, 'a whole line paid from another bank', 'cash');
+  const e4 = await ests();
+  same([e4['Barclays|GBP'] - e3['Barclays|GBP'], e4['Wise|GBP'] - e3['Wise|GBP'], await rm('greta')], [-1350, 0, 'отмечено · ждёт выписку · с Barclays'], 'counted on Barclays, and the row says the bank');
+
+  // 4. «Сегодня» and «По дням» say what really left.
+  await pg.click('.nav [data-tab="today"]');
+  same(await pg.$$eval('#view-today .td-todo .td-trow', (l) => l.map((r) => [r.querySelector('.td-nm').textContent, r.querySelector('.td-meta').textContent.replace(/\u00a0/g, ' ')])),
+    [['Tessa', 'Tochka · оплачено двумя частями: ₽150,000 6 окт, ₽86,000 6 окт'], ['Greta', 'Wise · отмечено · ждёт выписку · с Barclays'], ['Olga', 'Tochka · отмечено · ждёт выписку · с Wise: £495']],
+    '«Сегодня» says of each line where its money left');
+  await finish(pg);
+});
+
+// … and the words of a part that left another currency, where the rest is still awaited.
+await run('fx-rest-days', 'a part that left an account in another currency says so in the row itself - on «Сегодня» and in «Касса · По дням», not in the card alone', async () => {
+  const P = planP({ team: [row('tessa', 'Tessa', 236000, T, { blk: 'cogs', cur: 'RUB', bank: 'Tochka' })] });
+  const pg = await scene('fx-rest-days', ledger([]), P, { h: 1500 });
+  const box = K('row') + '[data-ed-askbox="part"] ';
+  await pg.click('.nav [data-tab="cash"]');
+  await pg.click('#view-cash [data-ed-open="tessa"]');
+  await pg.waitForSelector(K('row'));
+  await pg.click(K('row') + '[data-ed-do="part"]');
+  await pg.waitForSelector(box);
+  await pg.selectOption(box + '[data-ed-partacc]', 'Wise|GBP');
+  await pg.fill(box + '[data-ed-partout]', '850');
+  await pg.fill(box + '[data-ed-part]', '120000');
+  await pg.fill(box + '[data-ed-partdate]', T);
+  const cash0 = store.cash.puts;
+  await pg.click(box + '[data-ed-go="part"]');
+  await puts('cash', cash0 + 1);
+  const S = await holds(pg, 'a part in pounds, the rest today', 'cash'), rest = S.P.team.find((r) => r.carry);
+  await pg.click('.nav [data-tab="today"]');
+  same(await pg.$$eval('#view-today .td-todo .td-trow', (l) => l.map((r) => [r.querySelector('.td-nm').textContent, r.querySelector('.td-meta').textContent.replace(/\u00a0/g, ' ')])),
+    [['Tessa', 'Tochka · оплачено ₽120,000 из ₽236,000 (ушло £850 с Wise), остаток ₽116,000']], '«Сегодня»: one row, and it says the pounds that left Wise');
+  await pg.click('.nav [data-tab="cash"]');
+  await pg.click('#view-cash .tabs2 button:has-text("По дням")');
+  await openDay(pg, T);
+  same(await text(pg, `#cs-day [data-cs-li="${rest.id}"] .cs-rm`), 'оплачено ₽120,000 из ₽236,000 (ушло £850 с Wise), остаток ₽116,000', '«По дням» says the same');
   await finish(pg);
 });
 
