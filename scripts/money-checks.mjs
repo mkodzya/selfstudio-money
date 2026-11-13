@@ -4012,7 +4012,7 @@ await run('partly', '«Оплачено» means paid, and «Частично» i
   // line of its month; the answers in the band, «Удалить строку» in «Ещё…»; «Перенести…» opens on its date)
   const what = [await text(pg, K('row') + '.ed-why'), await infoOf(pg), await bandOf(pg), await menuOf(pg)];
   await pg.click(K('row') + '[data-ed-do="move"]');
-  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£6,000', Повтор: 'каждый месяц, 20-го числа, с октября', Банк: 'Wise · GBP', Ноябрь: 'оплачено £5,400 из £6,000, остаток £600', Оплаты: '20 окт — £5,400', Остаток: '£600 · к оплате 12 ноя' }, ['Оплачено', 'Ещё часть…', 'Перенести остаток…', 'Остаток не платим', 'Изменить строку'], ['Убрать оплату 20 окт', 'Выбрать платёж из выписки…'], '2026-11-12'],
+  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£6,000', Повтор: 'каждый месяц, 20-го числа, с октября', Банк: 'Wise · GBP', Ноябрь: 'оплачено £5,400 из £6,000, остаток £600', Оплаты: '20 окт — £5,400', Остаток: '£600 · к оплате 12 ноя' }, ['Оплачено', 'Ещё часть…', 'Перенести остаток…', 'Остаток не платим', 'Изменить строку'], ['Убрать оплату 20 окт', 'Оплачено с другого счёта…', 'Выбрать платёж из выписки…'], '2026-11-12'],
     'its card says where it came from and offers what any written payout has: «Оплачено», «Частично…» again, «Перенести…» with its date, «Удалить строку»');
   await pg.click(K('row') + '[data-ed-x]');
   // The constructor: the month it left is closed at what was paid; the rest is a row of the month of its day.
@@ -4235,7 +4235,7 @@ await run('partly, from before', 'a plan that still holds a rest carried WITHOUT
   // the same under «Дата»; «Поставить дату…» opens on an empty date; «Удалить строку» is in «Ещё…»)
   const what = [await text(pg, K('row') + '.ed-why'), await infoOf(pg), await bandOf(pg), await menuOf(pg)];
   await pg.click(K('row') + '[data-ed-do="move"]');
-  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£6,000', Повтор: 'каждый месяц, 20-го числа, с октября', Банк: 'Wise · GBP', Ноябрь: 'оплачено £5,400 из £6,000, остаток £600 · без даты · в расчёте с 1 ноября Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.', Оплаты: '20 окт — £5,400', Остаток: '£600 · без даты' }, ['Оплачено', 'Ещё часть…', 'Поставить дату…', 'Остаток не платим', 'Изменить строку'], ['Убрать оплату 20 окт', 'Выбрать платёж из выписки…'], ''],
+  same(what.concat([await pg.inputValue(K('row') + '#ed-date')]), ['В плане: вписал Mika 22 окт · в таблице это Person B.', { Сумма: '£6,000', Повтор: 'каждый месяц, 20-го числа, с октября', Банк: 'Wise · GBP', Ноябрь: 'оплачено £5,400 из £6,000, остаток £600 · без даты · в расчёте с 1 ноября Даты нет, но в расчёт идёт: это долг студии. Поставьте дату, когда она станет известна.', Оплаты: '20 окт — £5,400', Остаток: '£600 · без даты' }, ['Оплачено', 'Ещё часть…', 'Поставить дату…', 'Остаток не платим', 'Изменить строку'], ['Убрать оплату 20 окт', 'Оплачено с другого счёта…', 'Выбрать платёж из выписки…'], ''],
     'its card says it has no date and is counted all the same, and offers «Оплачено», «Частично…», a date, and «Удалить строку»');
   await pg.click(K('row') + '[data-ed-x]');
   await goCash(pg);
@@ -4802,7 +4802,7 @@ await run('typing', 'a row\'s sum is typed where it stands — the box stays und
   await pg.click(cs('inflows', 'k') + ' .cs-mo [data-ed-open]');
   // (layout 1, 1 November 2026: the band holds the answers, «Изменить строку» and «Ещё…» - «Удалить строку» in it;
   // «+ VAT» and «каждый месяц» are in the form)
-  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await bandOf(pg), await menuOf(pg)], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Перенести…', 'Не придёт', 'Изменить строку'], ['Выбрать платёж из выписки…', 'Удалить строку']], 'the arrow at the end of the row opens the same card right under it: where it came from, «Частично…», «Удалить строку»');
+  same([await pg.$$eval('[data-ed-card]', (l) => l.length), await pg.$eval(cs('inflows', 'k') + ' + tr', (e) => [e.className, !!e.querySelector('[data-ed-card="row"]')].join(' ')), await bandOf(pg), await menuOf(pg)], [1, 'cs-edrow true', ['Получено', 'Частично…', 'Перенести…', 'Не придёт', 'Изменить строку'], ['Получено на другой счёт…', 'Выбрать платёж из выписки…', 'Удалить строку']], 'the arrow at the end of the row opens the same card right under it: where it came from, «Частично…», «Удалить строку»');
   await calm(pg, 'with a row\'s card open', 'cash');
   await rowForm(pg);
   same(await pg.$$eval(K('row') + '.ed-chks [data-ed-f]', (l) => l.map((e) => e.dataset.edF)), ['vat', 'monthly'], '… and «Изменить строку» opens its form: «+ VAT», «каждый месяц»');
