@@ -3223,7 +3223,7 @@ const Cash=(()=>{
  // cell says so: 9,750 typed and £11,700 beside it, with no word, read as a mistake.
  // A line paid in part (Ed.grp) is one row, and a row that is closed shows what its parts of this month brought.
  const paidHere=it=>{const g=Ed.grp(it),ym=it.occ?it.occ.ym:it.ym;return g.l.filter(m=>m.done&&(m.occ?m.occ.ym:m.ym)===ym);};
- const gbpText=it=>Ed.grp(it)&&Ed.shut(it)?(it.cur!=="GBP"||it.vat?fmt(paidHere(it).reduce((a,m)=>a+Math.abs(m.exp),0)):""):it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.state==="done"&&it.cur!=="GBP"?it.exp:it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
+ const gbpText=it=>Ed.grp(it)&&Ed.shut(it)?(Ed.grp(it).cur!=="GBP"||it.vat?fmt(paidHere(it).reduce((a,m)=>a+Math.abs(m.exp),0)):""):it.amt&&(it.cur!=="GBP"||it.vat)?fmt(Math.abs(it.state==="done"&&it.cur!=="GBP"?it.exp:it.full))+(it.vat&&it.factor>1?'<span class="cs-note cs-vatw">с VAT</span>':""):"";
  // A tax the page worked out is shown in whole units of its currency.
  const shown=it=>it.kind!=="typed"&&it.state!=="done"?Math.round(it.amt):it.amt;
  // The first thing in a line of the statement («По дням»): what can be done about it in one press. (In a month the
@@ -3252,7 +3252,7 @@ const Cash=(()=>{
   return `<tr class="${rowCls(it)}${hid(it)}${open?" cs-open":""}" data-cs-id="${id}" data-cs-k="${it.sec}">
    <td class="cs-dt"><span class="cs-dd" data-cs-d="${esc(it.date)}">${it.date?dRu(it.date):"—"}</span></td>
    <td class="cs-nmc"><div class="cs-nm"><i class="sw" style="background:${bcol(it.bank)}" title="${esc(it.bank)}"></i><span class="cs-nt">${name||"(без названия)"}</span></div></td>
-   <td class="r cs-amc">${amt}</td><td class="cs-cur"><span class="cs-ct">${esc(it.cur)}</span></td>
+   <td class="r cs-amc">${amt}</td><td class="cs-cur"><span class="cs-ct">${esc(g&&Ed.shut(it)?g.cur:it.cur)}</span></td>
    <td class="cs-mo"><button class="cs-more" data-ed-open="${id}" data-ed-at="plan" aria-expanded="${open}" aria-label="${name||"строка"}: подробнее" title="${RO?"Подробнее":"Название, банк, дата, «каждый месяц» — и что сделать со строкой"}"></button></td>
    <td class="m r cs-gbp" data-cs-gbp>${gbpText(it)}</td>
    <td class="cs-rm" data-cs-rm>${esc(remark(it))}</td></tr>`;
@@ -4170,7 +4170,10 @@ const Cash=(()=>{
 //                   against ("{account}|{asOf}|{moment typed}"). Such a row is held also when the memory is NOT in
 //                   force - on any withdrawal with a mark that is no word, whether the mark can count or not - while
 //                   that very balance stands; and a memory of a mark that cannot count holds those rows alone
-//    carry:{ym}     what is left of a line of the month `ym` that was paid in part, written by «Частично»: a one-off
+//    carry:{ym, of?} what is left of a line of the month `ym` that was paid in part, written by «Частично»: a one-off
+//                   (of:{cur, amt} - since 13 November 2026, on a rest that stands on an account in ANOTHER currency
+//                   than the line's: what it is of the line's debt, in the line's currency. The engine counts the
+//                   row as the row it is and only says `of` back; the page ties the pair into one row by it.)
 //                   row on the day the founder named for the rest. With that date it is counted like any dated row —
 //                   but it is never «the month's own row» of its label, and a payment that fits both it and that row
 //                   goes to the nearer date. Without a date — as «Частично» wrote it before the founder named the
@@ -4259,7 +4262,8 @@ const Cash=(()=>{
 //                                  VAT and owner of a withdrawal, and no sum (amt 0); not paid, not repeating,
 //                                  of:false for a tax.
 //                                  Returns the rows
-//  mark(P, it, on, at, by)         «Оплачено» / «Получено»: paid:{on,at,by} — on the row, in rec.x[ym] for a month of
+//  mark(P, it, on, at, by, src?)   «Оплачено» / «Получено»: paid:{on,at,by} (and from:{bank,cur,out} where `src`
+//                                  names another account - «Оплачено с другого счёта…») — on the row, in rec.x[ym] for a month of
 //                                  a repeating row, in tax.per[key] for a computed tax. unmark removes it. `on` is
 //                                  the day the founder says it was paid: today — or, for a line older than its
 //                                  account's balance that he says is inside that balance, the line's own date.
@@ -4558,7 +4562,7 @@ const Cash=(()=>{
 //                                  its date does; stops — it is the late month that makes the later ones `doubt`;
 //                                  until — the month the repeat ends with, if a founder ended it ("" while it goes
 //                                  on); last — this is that month
-//    carry                         null | {ym} — what is left of a line of that month that was paid in part (see
+//    carry                         null | {ym, of?} — what is left of a line of that month that was paid in part (see
 //                                  the plan document); dated, or — in a plan from before — without a date
 //    wd                            for a withdrawal: {from, to, got, by, rec?} — its window and what was taken (native);
 //                                  by[{c, l, gbp}] — whose takings it holds and under which label, in pounds, the
@@ -5462,7 +5466,7 @@ const Live=(()=>{
    const base=baseOf(r);
    const one=(o,e,on,b)=>add(Object.assign({},b||base,o,{on,paid:e.paid===true?{on:"",legacy:true}:obj(e.paid)?e.paid:null,tx:arr(e.tx),notx:e===r?arr(r.notx):arr(r.notx).concat(arr(e.notx)),closed:!!e.closed,rem:o.amt,got:0,gotG:0,done:null,hint:null,match:[],last:""}));
    const rec=obj(r.rec)&&isM(r.rec.from)&&+r.rec.day>=1&&+r.rec.day<=31?r.rec:null;
-   if(!rec)return void one({id,src:"row",amt:amt0,date:isD(r.date)?r.date:"",carry:obj(r.carry)&&isM(r.carry.ym)?{ym:r.carry.ym}:null},r,r.on!==false);
+   if(!rec)return void one({id,src:"row",amt:amt0,date:isD(r.date)?r.date:"",carry:obj(r.carry)&&isM(r.carry.ym)?Object.assign({ym:r.carry.ym},obj(r.carry.of)&&CURS.includes(r.carry.of.cur)&&+r.carry.of.amt>0?{of:{cur:r.carry.of.cur,amt:+r.carry.of.amt}}:{}):null},r,r.on!==false);
    const day=Math.round(+rec.day),x=obj(rec.x)?rec.x:{},to=isM(rec.to)?rec.to:"",chain=String(rec.chain||id),end=to&&to<genTo?to:genTo;
    // (S: the entries of rec.since, oldest first; bs[i]: the line as it reads once the first i of them hold)
    // (ls[i]: the row as it reads then - its sum and its day too, since 3 November 2026)
@@ -6739,7 +6743,8 @@ const Live=(()=>{
     if(!r.date)r.mon=ym;if(it.list==="inflows")r.vat=!!it.vat;if(src.sk&&src.skBy==="hand"){r.sk=src.sk;r.skBy="hand";}
     if(src.ptax){r.ptax=true;if(src.f)r.f=src.f;}else if(src.whose!==undefined)r.whose=src.whose;if(src.sub)r.sub=true;
     write.add(P,it.list,r);return r;});},
-  mark(P,it,on,at,by){const s=slot(P,it,true);if(s)s.paid={on,at,by};},
+  // (13 November 2026) `src` - {bank, cur, out}: «Оплачено с другого счёта…», the account the whole payment left.
+  mark(P,it,on,at,by,src){const s=slot(P,it,true);if(!s)return;s.paid={on,at,by};if(obj(src)&&src.bank&&+src.out>0&&!it.wd&&it.src!=="tax")s.paid.from={bank:String(src.bank),cur:String(src.cur),out:r2(+src.out)};},
   // (A mark «Часть строки плана…» wrote names the rows it tied the line to: they go with it, and the line waits for
   // its payment again as it did before - the rows dealt by the page as any row is.)
   unmark(P,it){const s=slot(P,it);if(s){const t=obj(s.paid)&&Array.isArray(s.paid.tx)?s.paid.tx.map(String):null;
@@ -6799,7 +6804,13 @@ const Live=(()=>{
   partial(P,it,got,id,now,by,on,date,src,bank){const s=slot(P,it,true),h=rowIn(P,it.row||it.id);if(!s||!h||it.src==="tax")return null;
    const k=it.factor||1,full=r2(it.amt*k),g=r2(Math.max(0,Math.min(+got||0,full))),rest=r2((full-g)/k),ym=it.occ?it.occ.ym:it.ym,r0=h.r,r=it.occ?lineAt(r0,ym):r0,day=isD(date)?date:"",from=day&&obj(r.carry)&&isM(r.carry.ym)?r.carry.ym:"";
    s.paid={on,at:now,by,amt:g};if(obj(src)&&src.bank&&+src.out>0&&!it.wd)s.paid.from={bank:String(src.bank),cur:String(src.cur),out:r2(+src.out)};if(!(rest>0))return null;
-   const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:rest,cur:r.cur,bank:bank&&!it.wd?String(bank):r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r!==r0&&r.blk===""?BLK0[h.k]:r.blk,carry:{ym:from||ym}});
+   // (13 November 2026) The rest may stand on an account in another currency: `bank` is then {bank, cur, amt} -
+   // the row is that account's, at `amt` (what the rest is there by the rate of the day it was said), and
+   // carry.of keeps what it is of the line's debt, in the line's currency. A part of such a rest takes its
+   // share of that debt; a rest brought back to the debt's own currency is the debt itself, and says no `of`.
+   const of0=obj(r.carry)&&obj(r.carry.of)&&+r.carry.of.amt>0?r.carry.of:null,debt=of0?r2(+of0.amt*(full-g)/full):r2(full-g),dcur=of0?String(of0.cur):r.cur,tb=obj(bank)?bank:{bank};
+   let tc=!it.wd&&tb.cur?String(tb.cur):r.cur;if(tc!==r.cur&&tc!==dcur&&!(+tb.amt>0))tc=r.cur;
+   const z=Object.assign({id:String(id),name:from?r.name:r.name+" — остаток с "+MONR[+ym.slice(5)-1],amt:tc===r.cur?rest:tc===dcur?r2(debt/k):r2(+tb.amt/k),cur:tc,bank:tb.bank&&!it.wd?String(tb.bank):r.bank,on:true,date:day},day?{}:{mon:ymAdd(ym,1)},{c0:now,m:{t:now,by},blk:r!==r0&&r.blk===""?BLK0[h.k]:r.blk,carry:Object.assign({ym:from||ym},tc!==dcur?{of:{cur:dcur,amt:debt}}:{})});
    // (no link, and not a subscription, as rec.since says it, is no key - as on a row; but whose:"" is a word: «общий»,
    // chosen by hand, and the rest keeps it whatever rec.since says of the line - the review of 1 November 2026)
    ["sk","skBy","vat","ptax","f","whose","sub"].forEach(f=>{if(r[f]!==undefined&&!(r!==r0&&((r[f]===""&&f!=="whose")||(f==="sub"&&r[f]===false))))z[f]=r[f];});
@@ -7569,15 +7580,24 @@ const Ed=(()=>{
  //   shut(it)  the row stands among the closed ones: done, or the rest that was switched off
  let PT=null;
  const NPARTS=["","","двумя частями","тремя частями","четырьмя частями"];
- const gotOf=m=>!m.done?0:m.done.got>0?m.done.got:m.done.note==="partial"?0:round2(m.amt*(m.factor||1));
+ // (13 November 2026) A rest may stand on an account in another currency (carry.of): the line's debt, its words
+ // and its sums stay in the LINE's currency - dcur, debt - and such a rest, paid, has paid what it was of that
+ // debt (a part of it, its share). `away` - where the money of a payment really left: the rows of the table that
+ // paid it, else what the mark says (paid.from), else the rest's own account where that is another currency.
+ const dcur=x=>x.carry&&x.carry.of?x.carry.of.cur:x.cur,debt=x=>x.carry&&x.carry.of?x.carry.of.amt:round2(x.amt*(x.factor||1));
+ const gotOf=m=>{if(!m.done)return 0;const of=m.carry&&m.carry.of,f=round2(m.amt*(m.factor||1));if(of)return m.done.note==="partial"?round2((+m.done.got||0)*(f>0?of.amt/f:0)):of.amt;return m.done.got>0?m.done.got:m.done.note==="partial"?0:f;};
+ const away=m=>{const rs=(m.done.rows||[]).map(id=>S.tx.find(q=>String(q.id)===String(id))),f=m.mark&&m.mark.from;
+  if(rs.length){if(rs.some(q=>!q||!q.o))return null;const c=rs[0].o.cur||"GBP",b=rs[0].b||"";return rs.some(q=>(q.o.cur||"GBP")!==c||(q.b||"")!==b)?null:{cur:c,bank:b,v:round2(rs.reduce((a,q)=>a+Math.abs(+q.o.a||0),0))};}
+  if(f)return{cur:f.cur,bank:f.bank,v:f.out};
+  return m.cur!==dcur(m)?{cur:m.cur,bank:m.bank,v:m.done.note==="partial"?+m.done.got||0:round2(m.amt*(m.factor||1))}:null;};
  function chains(){
   if(PT&&PT.M===M)return PT.by;
   const by=new Map(),at={},kid=new Map(),par=new Set();
   if(M)M.items.forEach(x=>{if(x.mark&&x.mark.amt!=null&&x.mark.at&&x.src!=="tax"&&!x.wd)at[x.list+"|"+x.mark.at]=x;});
-  if(M)M.items.forEach(c=>{if(c.src!=="row"||!c.carry||!c.c0||c.wd)return;const p=at[c.list+"|"+c.c0];if(p&&p!==c&&p.cur===c.cur&&p.dir===c.dir&&!kid.has(p)){kid.set(p,c);par.add(c);}});
+  if(M)M.items.forEach(c=>{if(c.src!=="row"||!c.carry||!c.c0||c.wd)return;const p=at[c.list+"|"+c.c0];if(p&&p!==c&&dcur(p)===dcur(c)&&p.dir===c.dir&&!kid.has(p)){kid.set(p,c);par.add(c);}});
   kid.forEach((c,p)=>{if(par.has(p))return;const l=[p];for(let x=p;kid.has(x)&&l.length<60;){x=kid.get(x);l.push(x);}
-   const root=l[0],last=l[l.length-1],off=last.state==="off"&&!last.done,open=last.done||off?null:last,pays=l.filter(m=>m.done).map(m=>({id:m.id,amt:gotOf(m),on:m.done.on||m.date||"",rows:(m.done.rows||[]).slice(),from:(m.mark&&m.mark.from)||null})).filter(x=>x.amt>0);
-   const g={l,root,last,open,off,cur:root.cur,inn:root.dir>0,full:round2(root.amt*(root.factor||1)),paid:round2(pays.reduce((a,x)=>a+x.amt,0)),rest:open||off?round2(last.amt*(last.factor||1)):0,pays};
+   const root=l[0],last=l[l.length-1],off=last.state==="off"&&!last.done,open=last.done||off?null:last,pays=l.filter(m=>m.done).map(m=>({id:m.id,amt:gotOf(m),on:m.done.on||m.date||"",rows:(m.done.rows||[]).slice(),from:(m.mark&&m.mark.from)||null,away:away(m)})).filter(x=>x.amt>0);
+   const g={l,root,last,open,off,cur:dcur(root),inn:root.dir>0,full:debt(root),paid:round2(pays.reduce((a,x)=>a+x.amt,0)),rest:open||off?debt(last):0,pays,via:open&&open.cur!==dcur(root)?{bank:open.bank,cur:open.cur,amt:round2(open.amt*(open.factor||1))}:null};
    l.forEach(x=>by.set(x.id,g));});
   PT={M,by};return by;}
  const grp=it=>(it&&M&&chains().get(it.id))||null;
@@ -7598,10 +7618,13 @@ const Ed=(()=>{
  // in another month, under another day - the same, and where the rest is; once nothing is awaited - in how many
  // parts it was paid, or that the rest will not be.
  function partSay(it,g,base){
-  const w=g.inn?"получено":"оплачено",n=v=>nat0(v,g.cur),head=`${w} ${n(g.paid)} из ${n(g.full)}`,o=g.open;
+  // (13 November 2026: what really left another currency's account is said beside what it closed - «(ушло £850 с
+  // Wise)» - and a rest that will leave such an account says which, and about how much that is there)
+  const fx=g.pays.filter(p=>p.away&&p.away.cur!==g.cur),went=fx.length?` (${g.inn?"пришло":"ушло"} ${fx.map(p=>nat0(p.away.v,p.away.cur)+(p.away.bank?(g.inn?" на ":" с ")+p.away.bank:"")).join(", ")})`:"",via=g.via?` · ${g.inn?"на счёт":"со счёта"} ${g.via.bank}: около ${nat0(g.via.amt,g.via.cur)}`:"";
+  const w=g.inn?"получено":"оплачено",n=v=>nat0(v,g.cur),head=`${w} ${n(g.paid)} из ${n(g.full)}${went}`,o=g.open;
   if(g.off)return `${head} · остаток ${n(g.rest)} ${g.inn?"не придёт":"не платим"}`;
   if(!o)return g.pays.length>1?`${w} ${NPARTS[g.pays.length]||g.pays.length+" частями"}: ${g.pays.map(p=>n(p.amt)+(p.on?" "+dRu(p.on):"")).join(", ")}`:null;
-  if(it===o)return `${head}, остаток ${n(g.rest)}${base?" · "+base:""}`;
+  if(it===o)return `${head}, остаток ${n(g.rest)}${via}${base?" · "+base:""}`;
   return `${head}, остаток ${n(g.rest)} — ${!o.date?"без даты":ymOf(o)!==ymOf(it)?`в ${monP(ymOf(o))}, ${dRu(o.date)}`:dRu(o.date)}`;}
  // A tax the page worked out is shown in whole pounds, in muted ink, and says «посчитано по правилу»: no sign of
  // approximation stands beside any figure of the plan — nothing in it is a guess.
@@ -7632,7 +7655,7 @@ const Ed=(()=>{
  function remark(it){const g=grp(it),t=g?partSay(it,g,g.open===it?remark0(it):""):null;return t!=null?t:remark0(it);}
  function remark0(it){const d=it.done,inn=it.dir>0,nat=nat0,plan=()=>nat(it.amt*(it.factor||1),it.cur);
   if(d)return d.note==="partial"?`${inn?"получено":"оплачено"} ${nat(d.got,it.cur)} из ${plan()}`
-   :d.by==="mark"?"отмечено · ждёт выписку":d.by==="ok"?(it.src==="tax"?"оплачено по вашему слову":"отмечено вручную"):d.by==="legacy"?"отмечено в старой Кассе":d.by==="closed"?"закрыто частью"
+   :d.by==="mark"?"отмечено · ждёт выписку"+(it.mark&&it.mark.from?` · ${inn?"на":"с"} ${it.mark.from.bank}${it.mark.from.cur!==it.cur?": "+nat(it.mark.from.out,it.mark.from.cur):""}`:""):d.by==="ok"?(it.src==="tax"?"оплачено по вашему слову":"отмечено вручную"):d.by==="legacy"?"отмечено в старой Кассе":d.by==="closed"?"закрыто частью"
    :it.wd&&d.note==="taken"?`взято ${nat(d.got,it.cur)} из ${plan()}`:d.note==="other"||d.note==="part"?`${inn?"пришло":"заплатили"} ${nat(d.got,it.cur)}, в плане ${plan()}`
    :d.note==="amount"&&d.label?`закрыто по сумме: ${d.label}`:d.note==="vat"?"пришло с VAT":d.note==="novat"?"пришло без VAT":d.note==="over"?`пришло больше на ${fmt(Math.round(d.over))}`:d.note==="sum"?"одним платежом с другими":d.note==="period"?"закрыто вместе с периодом":d.note==="hand"?handWith(it):"";
   if(it.state==="missed")return it.hint?"возможно, уже оплачено":"платежа не было";
@@ -7761,7 +7784,7 @@ const Ed=(()=>{
  // A press that has two answers opens the row's card on the question instead of doing one of them. («Убрать» of a
  // month of a «каждый месяц» row is gone from the card: what it wrote is what «Не придёт… / Не платим…» writes - the
  // month off, or the repeat ended before it - so a `del` that still reaches such a month asks that question.)
- const asks=(verb,it)=>verb==="part"?"part":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"?"skip":verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
+ const asks=(verb,it)=>verb==="part"?"part":verb==="payfrom"?"payfrom":verb==="pick"?"pick":(verb==="skip"||verb==="del")&&it.src==="occ"?"skip":verb==="paid"&&it.src==="tax"&&it.pays&&it.pays.length?"pay":verb==="paid"&&inBal(it)?"paid":"";
  // The control a step was opened from inside the card, for the cursor to go back to when the step is left or its
  // answer taken back: an item of «Ещё…» gives it back to «Ещё…», whose list has shut. Nothing for a press outside.
  const retOf=x=>!x||!x.closest||!x.closest('[data-ed-card="row"]')?"":x.dataset.edDo?`[data-ed-do="${x.dataset.edDo}"]`:x.dataset.edAsk!==undefined?`[data-ed-ask="${x.dataset.edAsk}"]`:x.matches("[data-wi-open]")?"[data-wi-open]":"";
@@ -7785,6 +7808,9 @@ const Ed=(()=>{
   const ym=it.occ?it.occ.ym:"",done=(say,fn)=>did(say,fn,card,cur&&cur.ret);
   if(what==="skip-only")return done(`${it.name}: ${skipped(it)}`,P=>{W.off(P,it);});
   if(what==="skip-onward")return done(`${it.name}: с ${monG(ym)} больше не ${it.dir>0?"придёт":"платим"}`,P=>{W.end(P,it);});
+  if(what==="payfrom"){const sa=q(card,"[data-ed-payacc]"),so=q(card,"[data-ed-payout]"),ak=sa.value.split("|"),fx=ak[1]!==it.cur,inn=it.dir>0,out=fx?+so.value:round2(it.amt*(it.factor||1));
+   if(!(out>0)){so.focus();return toast(inn?"Впишите, сколько пришло на этот счёт":"Впишите, сколько ушло с этого счёта");}
+   return done(`${inn?"Получено":"Оплачено"}: ${nm(it)} — ${inn?"на":"с"} ${ak[0]}${fx?`, ${inn?"пришло":"ушло"} ${nat(out,ak[1])}`:""}`,(P,now,by)=>{W.mark(P,it,Live.today(),now,by,{bank:ak[0],cur:ak[1],out});});}
   if(what==="part"){const f=q(card,"[data-ed-part]"),e=q(card,"[data-ed-partdate]"),inn=it.dir>0,full=round2(it.amt*(it.factor||1)),v=f.value===""?NaN:+f.value,d=e.value,T=Live.today();
    // (13 November 2026) The account the part left, where the step asked and it is not the line's own: its bank,
    // its currency, and what left it - the sum typed in that currency, or the line's own figure where the currency
@@ -7792,7 +7818,7 @@ const Ed=(()=>{
    const sa=q(card,"[data-ed-partacc]"),so=q(card,"[data-ed-partout]"),sr=q(card,"[data-ed-partrest]"),ak=sa?sa.value.split("|"):[it.bank,it.cur],fxa=ak[1]!==it.cur,out=fxa?+so.value:v;
    if(fxa&&!(out>0)){so.focus();return toast(inn?"Впишите, сколько пришло на этот счёт":"Впишите, сколько ушло с этого счёта");}
    if(fxa&&f.value===""){f.focus();return toast("Впишите, сколько это закрыло в строке");}
-   const from=!it.wd&&(ak[0]!==it.bank||fxa)&&v>0?{bank:ak[0],cur:ak[1],out}:null,rb=sr&&sr.value.split("|")[0]!==it.bank?sr.value.split("|")[0]:"";
+   const from=!it.wd&&(ak[0]!==it.bank||fxa)&&v>0?{bank:ak[0],cur:ak[1],out}:null,rk=sr?sr.value.split("|"):[it.bank,it.cur],rb=rk[1]!==it.cur?{bank:rk[0],cur:rk[1],amt:partConv(round2(full-(v>=0?v:0)),it.cur,rk[1])}:rk[0]!==it.bank?rk[0]:"";
    if(!(v>=0)||v>=full){f.focus();return toast(v>=full?(inn?"Если получено всё — это «Получено», а не «Частично»":"Если оплачено всё — это «Оплачено», а не «Частично»"):"Впишите, сколько уже прошло");}
    // The day of the rest is the founder's to name, as with «Перенести на…» — but not a day gone by: what is still
    // owed has not been paid, and on a past day it would be read as a payment the statements do not show. Each
@@ -7957,12 +7983,9 @@ const Ed=(()=>{
   // currency, where that is not the line's; the bank alone where only the bank is another. Read off the rows of the
   // table that paid the part: nothing is stored for it.)
   // … and, while a part is still a mark and no row, off what the founder said of it - paid.from.)
-  const left=x=>{const rs=(x.rows||[]).map(id=>S.tx.find(q=>String(q.id)===String(id)));let c,b,v;
-   if(rs.length){if(rs.some(q=>!q||!q.o))return "";c=rs[0].o.cur||"GBP";b=rs[0].b||"";if(rs.some(q=>(q.o.cur||"GBP")!==c||(q.b||"")!==b))return "";v=round2(rs.reduce((a,q)=>a+Math.abs(+q.o.a||0),0));}
-   else if(x.from){c=x.from.cur;b=x.from.bank;v=x.from.out;}else return "";
-   return c!==g.cur?` · ${g.inn?"пришло":"ушло"} ${mono(nat(v,c))}${b?(g.inn?" на ":" с ")+esc(b):""}`:b&&b!==g.root.bank?` · ${g.inn?"на":"с"} ${esc(b)}`:"";};
+  const left=x=>{const a=x.away;if(!a)return "";return a.cur!==g.cur?` · ${g.inn?"пришло":"ушло"} ${mono(nat(a.v,a.cur))}${a.bank?(g.inn?" на ":" с ")+esc(a.bank):""}`:a.bank&&a.bank!==g.root.bank?` · ${g.inn?"на":"с"} ${esc(a.bank)}`:"";};
   const pays=g&&g.pays.length?row("Оплаты",g.pays.map(x=>`<span class="ed-rc-pay">${x.on?dRu(x.on)+" — ":""}${mono(nat(x.amt,g.cur))}${left(x)}</span>`).join("")):"";
-  const rest=g&&g.open?row("Остаток",`${mono(nat(g.rest,g.cur))}${g.cur!=="GBP"?` · ${mono(fmt(Math.round(lineG(g.open))))}`:""} · ${g.open.date?`${inn?"ждём":"к оплате"} ${dRu(g.open.date)}`:"без даты"}`):"";
+  const rest=g&&g.open?row("Остаток",`${mono(nat(g.rest,g.cur))}${g.cur!=="GBP"?` · ${mono(fmt(Math.round(lineG(g.open))))}`:""} · ${g.open.date?`${inn?"ждём":"к оплате"} ${dRu(g.open.date)}`:"без даты"}${g.via?` · ${inn?"на счёт":"со счёта"} ${esc(g.via.bank)} · ${esc(g.via.cur)}: около ${mono(nat(g.via.amt,g.via.cur))}`:""}`):"";
   const of=it.list==="taxes"&&!tax&&!it.ptax?row("Относится",ofWords(it)?esc(ofWords(it)):'<span class="ed-rc-warn">не выбрано</span>'):"";
   const mk=tax?"Срок":!it.date&&!occ||!ym?"Дата":MONF[+ym.slice(5)-1];
   const sub=said()?cur.said:S_.state.join(" ");
@@ -8018,6 +8041,9 @@ const Ed=(()=>{
   if(rest&&!d&&st!=="off"){const p=g.l[g.l.length-2],x=g.pays.find(y=>y.id===p.id);
    if(p.done)menu.push(`<button type="button" data-ed-do="unpart" data-ed-id="${esc(it.id)}"><span>Убрать оплату${x&&x.on?" "+dRu(x.on):""}</span><small>${x?nat(x.amt,g.cur)+" ":""}${g.l.length>2?"вернутся в остаток":`вернутся в строку — она снова ждёт целиком${p.date?", на "+dRu(p.date):""}`}</small></button>`);}
   // «Это остаток строки …» on a row typed by hand beside a line closed «частью»: the two become one line.
+  // «Оплачено с другого счёта…» (13 November 2026): the whole line - or the whole rest - left another account than
+  // its own. One press of «Оплачено» stays what it was; this asks the account and, in another currency, the sum.
+  if(!d&&!tax&&!it.wd&&!hinted&&!["off","empty","doubt"].includes(st)&&partAccts(it).length>1)menu.push(`<button type="button" data-ed-do="payfrom" data-ed-id="${esc(it.id)}"><span>${inn?"Получено на другой счёт…":"Оплачено с другого счёта…"}</span><small>спрошу счёт и сколько ${inn?"на него пришло":"с него ушло"} — закрою ${rest?"остаток":"строку"} целиком</small></button>`);
   const whole=restOf(it);
   if(whole){const f=round2(whole.amt*(whole.factor||1));menu.push(`<button type="button" data-ed-do="tie" data-ed-id="${esc(it.id)}"><span>Это остаток строки «${esc(whole.name)}»${ymOf(whole)?" за "+mon(ymOf(whole)):""}</span><small>сведу в одну строку: ${inn?"получено":"оплачено"} ${nat(whole.done.got,whole.cur)} из ${nat(f,whole.cur)}, остаток ${nat(round2(it.amt*(it.factor||1)),it.cur)}</small></button>`);}
   if(pickable(it))menu.push(`<button type="button" data-ed-do="pick" data-ed-id="${esc(it.id)}"><span>Выбрать платёж из выписки…</span><small>${d?"если строку закрыл не тот платёж":inn?"деньги пришли, а строка их не нашла":"платёж прошёл, а строка его не нашла"}</small></button>`);
@@ -8040,15 +8066,20 @@ const Ed=(()=>{
   // own, where it may be typed over; the two fields of that are drawn hidden and shown by the choice, so nothing
   // typed is lost to a redraw. And a fourth, where another account holds the line's currency: which of them the
   // rest will leave. Not asked of a withdrawal, whose marks go by rules of their own.
+  if(a==="payfrom"){const A=partAccts(it).slice(1),c0=A[0].split("|")[1],fx=c0!==it.cur,full=round2(it.amt*(it.factor||1));
+   return `<div class="ed-ask" data-ed-askbox="payfrom"><label class="fld ed-part-acc" for="ed-payacc"><span>${inn?"На какой счёт пришло":"С какого счёта заплатили"}</span><select id="ed-payacc" data-ed-payacc>${A.map(k=>`<option value="${esc(k)}">${esc(k.replace("|"," · "))}</option>`).join("")}</select></label>
+    <label class="fld" for="ed-payout" data-ed-payfx${fx?"":" hidden"}><span data-ed-payoutl>${esc(payLabel(it,c0))}</span><input id="ed-payout" data-ed-payout type="number" min="0" step="any" inputmode="decimal" value="${fx?esc(partConv(full,it.cur,c0)):""}"></label>
+    <span class="note" data-ed-payn>${esc(payNote(it,A[0]))}</span>
+    <div class="row"><button class="sm primary" data-ed-go="payfrom">Готово</button>${x}</div></div>`;}
   if(a==="part"&&it.src!=="tax"){const got=it.done&&it.done.got?it.done.got:it.part?it.part.got:"",T=Live.today(),own=it.bank+"|"+it.cur;
    const said=grp(it)&&grp(it).open===it?`Сколько ${inn?"получено":"оплачено"} ещё`:`Сколько уже ${inn?"получено":"оплачено"}`,sym=esc((SYM[it.cur]||it.cur).trim());
-   const A=it.wd?[]:partAccts(it),R=A.filter(k=>k.split("|")[1]===it.cur),o=(l,sel)=>l.map(k=>`<option value="${esc(k)}"${k===sel?" selected":""}>${esc(k.replace("|"," · "))}${k===own?" — счёт строки":""}</option>`).join("");
+   const A=it.wd?[]:partAccts(it),R=A,o=(l,sel)=>l.map(k=>`<option value="${esc(k)}"${k===sel?" selected":""}>${esc(k.replace("|"," · "))}${k===own?" — счёт строки":""}</option>`).join("");
    const acc=A.length>1?`<label class="fld ed-part-acc" for="ed-partacc"><span>${inn?"На какой счёт пришло":"С какого счёта заплатили"}</span><select id="ed-partacc" data-ed-partacc>${o(A,own)}</select></label>
     <label class="fld" for="ed-partout" data-ed-partfx hidden><span data-ed-partoutl></span><input id="ed-partout" data-ed-partout type="number" min="0" step="any" inputmode="decimal"></label>`:"";
    return `<div class="ed-ask" data-ed-askbox="part">${acc}<label class="fld" for="ed-part"><span data-ed-partl data-own="${esc(said)}, ${sym}" data-fx="Сколько это закрыло в строке, ${sym}">${said}, ${sym}</span><input id="ed-part" data-ed-part type="number" min="0" step="any" inputmode="decimal" value="${esc(got)}"></label>
     ${acc?`<span class="note" data-ed-partfxn hidden></span>`:""}<span class="note" data-ed-partnote>${partNote(it,got)}</span>
     <label class="fld" for="ed-partdate"><span>${inn?"Когда придёт остаток":"Когда заплатите остаток"}</span><input id="ed-partdate" data-ed-partdate type="date" min="${T}" max="${dAdd(T,731)}"></label>
-    ${R.length>1?`<label class="fld ed-part-acc" for="ed-partrest"><span>${inn?"На какой счёт придёт остаток":"С какого счёта остаток"}</span><select id="ed-partrest" data-ed-partrest>${o(R,own)}</select></label>`:""}
+    ${R.length>1?`<label class="fld ed-part-acc" for="ed-partrest"><span>${inn?"На какой счёт придёт остаток":"С какого счёта остаток"}</span><select id="ed-partrest" data-ed-partrest>${o(R,own)}</select></label><span class="note" data-ed-partrestn hidden></span>`:""}
     <div class="row"><button class="sm primary" data-ed-go="part">Готово</button>${x}</div>
     <span class="note">${it.wd?`Строка закроется за ${mon(ymOf(it))} на том, что ${inn?"получено":"оплачено"}. Остаток встанет отдельной строкой на выбранный день.`:`Строка останется одной: в ней будет видно, сколько ${inn?"получено":"оплачено"} и сколько осталось. Остаток встанет на выбранный день.`}</span></div>`;}
   // «Не придёт…» / «Не платим…» on a month of a repeat: this month, or this one and every one after it (the repeat
@@ -8117,6 +8148,11 @@ const Ed=(()=>{
    <div class="ed-pks">${list.length?list.map(opt).join(""):`<span class="note">В таблице нет ${inn?"поступлений":"платежей"} рядом с этой датой.</span>`}${mine.size&&!it.mark?`<label class="ed-pk"><input type="radio" name="ed-pick" data-ed-pick value=""><span>Ни один: ${inn?"ещё не пришло":"ещё не оплачено"}</span></label>`:""}</div>
    <span class="note" data-ed-picknote>${esc(pickNote(it,sel))}</span>
    <div class="row"><button class="sm primary" data-ed-go="pick">Готово</button>${x}</div></div>`;}
+ // «Оплачено с другого счёта…»: the question of another currency, and what the step says under it.
+ const payLabel=(it,c)=>`Сколько ${it.dir>0?"пришло":"ушло"}, ${(SYM[c]||c).trim()}`;
+ const payNote=(it,k)=>{const [b,c]=k.split("|"),inn=it.dir>0,full=nat(round2(it.amt*(it.factor||1)),it.cur);return c!==it.cur?`Строка в ${it.cur}, счёт в ${c}. Подставляю по сегодняшнему курсу — впишите, сколько ${inn?"пришло":"ушло"} на самом деле. Строка закроется целиком, на ${full}.`:`Строка закроется целиком, на ${full}. Пока платежа нет в выписке, он считается на счёте ${b}.`;};
+ function payAcct(card,it){const s=q(card,"[data-ed-payacc]");if(!s)return;const c=s.value.split("|")[1],fx=c!==it.cur,o=q(card,"[data-ed-payout]");q(card,"[data-ed-payfx]").hidden=!fx;q(card,"[data-ed-payoutl]").textContent=payLabel(it,c);q(card,"[data-ed-payn]").textContent=payNote(it,s.value);
+  if(fx&&!o.dataset.own)o.value=String(partConv(round2(it.amt*(it.factor||1)),it.cur,c));}
  // The accounts «Частично…» may name: the plan's own and the ones in use, the line's first - "bank|cur".
  const partAccts=it=>{const own=it.bank+"|"+it.cur,l=M?M.accounts.filter(a=>(a.inPlan||a.active)&&a.bank).map(a=>a.bank+"|"+a.cur):[];return [own].concat(l.filter((k,i)=>k!==own&&l.indexOf(k)===i));};
  // What a sum of one currency is in another by today's rate - what the step puts in for the founder to check.
@@ -8127,7 +8163,10 @@ const Ed=(()=>{
   if(fx){const k=partConv(1,c,it.cur);q(card,"[data-ed-partoutl]").textContent=`Сколько ${inn?"пришло":"ушло"}, ${(SYM[c]||c).trim()}`;
    n.textContent=`Строка в ${it.cur}, счёт в ${c}. Подставляю по сегодняшнему курсу: ${(SYM[c]||c+" ").trim()}1 = ${fmt(k,k>=10?(Math.round(k*10)%10?1:0):4,SYM[it.cur]||"")}. Поправьте, если договорились о другой сумме.`;
    if(!f.dataset.own&&(typed||out.value!=="")){f.value=+out.value>0?String(partConv(+out.value,c,it.cur)):"";}}
-  const e=q(card,"[data-ed-partnote]");if(e)e.textContent=partNote(it,f.value);}
+  const e=q(card,"[data-ed-partnote]");if(e)e.textContent=partNote(it,f.value);partRest(card,it);}
+ // The rest on an account in another currency: the step says what will stand there, by today's rate.
+ function partRest(card,it){const s=q(card,"[data-ed-partrest]"),n=q(card,"[data-ed-partrestn]"),f=q(card,"[data-ed-part]");if(!s||!n)return;const k=s.value.split("|"),fx=k[1]!==it.cur,full=round2(it.amt*(it.factor||1)),v=f.value===""?NaN:+f.value,inn=it.dir>0;
+  n.hidden=!fx;if(fx)n.textContent=`Счёт в ${k[1]}, строка в ${it.cur}: остаток ${inn?"придёт на":"уйдёт с"} ${k[0]}${v>=0&&v<full?` — около ${nat(partConv(round2(full-v),it.cur,k[1]),k[1])} по сегодняшнему курсу`:""}. Строка останется одной и в ${it.cur}.`;}
  const partNote=(it,got)=>{const full=round2(it.amt*(it.factor||1)),v=got===""?NaN:+got,r=!!grp(it)&&grp(it).open===it;return v>=0&&v<full?`${r?"новый остаток":"остаток"} ${nat(round2(full-v),it.cur)}`:`${r?"из остатка":"из"} ${nat(full,it.cur)}`;};
  // «+ VAT»: what will come with the tax on top, said under the tick while it is on.
  const vatNote=(amt,cur,on)=>{const r=M?M.taxes.rate:20,a=+amt||0;return !on?"":!r?"ставка VAT — 0%: к счёту ничего не добавляется":a>0?`придёт ${nat(round2(a*(1+r/100)),cur)}, из них VAT ${nat(round2(a*r/100),cur)}`:"";};
@@ -8767,9 +8806,11 @@ const Ed=(()=>{
  document.addEventListener("input",ev=>{
   const t=ev.target,card=t.closest&&t.closest("[data-ed-card]");if(!card||!cur)return;
   const note=(k,s)=>{const e=q(card,`[data-ed-n="${k}"]`);if(e)e.textContent=s;};
-  if(t.matches("[data-ed-part]")){const it=item(card.dataset.edId),e=q(card,"[data-ed-partnote]"),a=q(card,"[data-ed-partacc]");if(a&&it&&a.value.split("|")[1]!==it.cur)t.dataset.own="1";if(it&&e)e.textContent=partNote(it,t.value);return;}
+  if(t.matches("[data-ed-part]")){const it=item(card.dataset.edId),e=q(card,"[data-ed-partnote]"),a=q(card,"[data-ed-partacc]");if(a&&it&&a.value.split("|")[1]!==it.cur)t.dataset.own="1";if(it&&e)e.textContent=partNote(it,t.value);if(it)partRest(card,it);return;}
   // (what left an account in another currency, as it is typed, and the account as it is chosen - a select says
   // `input` too - fill the line's own figure by today's rate until the founder has typed one himself)
+  if(t.matches("[data-ed-partrest]")){const it=item(card.dataset.edId);if(it)partRest(card,it);return;}
+  if(t.matches("[data-ed-payacc],[data-ed-payout]")){const it=item(card.dataset.edId);if(it){if(t.matches("[data-ed-payout]"))t.dataset.own="1";else payAcct(card,it);}return;}
   if(t.matches("[data-ed-partout],[data-ed-partacc]")){const it=item(card.dataset.edId);if(it){if(t.matches("[data-ed-partacc]")){const f=q(card,"[data-ed-part]");delete f.dataset.own;}partAcct(card,it,true);}return;}
   if(t.matches("[data-ed-pick]")){const it=item(card.dataset.edId),e=q(card,"[data-ed-picknote]");if(it&&e)e.textContent=pickNote(it,t.value);return;}
   if(card.dataset.edCard==="add"&&t.dataset.edF){const k=t.dataset.edF,d=cur.draft;
@@ -8816,6 +8857,7 @@ const Ed=(()=>{
   // first button that saves: in the form, its «Сохранить» (or the answer the band asks for in its place); in
   // «Перенести…», «Перенести».
   if(ev.key==="Enter"&&t.matches("[data-ed-part],[data-ed-partdate],[data-ed-partout]")){ev.preventDefault();return go("part",t.closest("[data-ed-card]"));}
+  if(ev.key==="Enter"&&t.matches("[data-ed-payout]")){ev.preventDefault();return go("payfrom",t.closest("[data-ed-card]"));}
   if(ev.key==="Enter"&&t.matches("[data-ed-card] input:not([type=checkbox]):not([list])")){const b=t.closest("[data-ed-card]").querySelector("[data-ed-save]");if(b){ev.preventDefault();b.click();}}
   if(ev.key==="Enter"&&t.matches("[data-ed-rv]"))t.blur();
   // Escape in a row's card undoes one thing at a time: «Ещё…» open shuts; a question asked under the form goes back
