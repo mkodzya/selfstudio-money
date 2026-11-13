@@ -563,6 +563,18 @@ a deploy:
   the pair as one row still asks one currency of both. Not built: a rest
   on an account in another currency, and «Оплачено» said of a whole line
   from another account. The check `part-acct` holds it.
+  **The statements know the parts by themselves** (the owner, the same
+  day: «и важно чтобы при загрузке выписок он распозновал все эти платежи
+  разбитые»). A payment under the line's name is its part whatever
+  account and currency it left - with no mark at all, after «Частично…»
+  with the account named, after «Частично…» without it - and the rest's
+  payment closes the rest. A mark that names its account knows its row by
+  that account and by `out` before the day's rate is asked (`fromHit`, in
+  the walk, before the rows are dealt): a part the founder said closed
+  another figure than the rate's gives the line exactly what the mark
+  said. What is not guessed: a payment with no name on it from another
+  account than the mark knows - it waits «вне плана» until it is named.
+  The check `split-seen` holds every case.
 - **A line paid in part is one line on the screen, and two rows in the
   plan** (the owner's word of 12 November 2026, to a prototype: «Да,
   делаем»). «Частично…» writes what it always wrote - the mark at what was

@@ -10877,6 +10877,70 @@ await run('part-acct', '«Частично…» names the account the part left:
   await finish(pg);
 });
 
+// What the statements make of a line paid in parts, with nobody pressing anything more (13 November 2026, the owner,
+// of parts in other currencies and from other banks: «и важно чтобы при загрузке выписок он распозновал все эти
+// платежи разбитые»). A payment that carries the line's name is the line's part whatever account it left: with no
+// mark at all, after «Частично…» with the account named, and after «Частично…» without it. The one fault found: a
+// mark whose founder said the part closed another figure than the day's rate («£850 closed ₽120,000») did not know
+// its own row by the rate - the row went to what was left of the line, or was given to the month at the rate's
+// figure, and the line read ₽100,300 paid beside a rest of ₽116,000.
+await run('split-seen', 'a line paid in parts from other accounts and in other currencies is known by the statements as they are uploaded: each part goes to its line, the rest to the rest, and nothing is left «вне плана» or counted twice', async () => {
+  const hist = HALF.map((m, i) => sheet('th' + i, m + '-12', 2000, 'cogs', 'Tessa', { b: 'Tochka' }));
+  const banks = BALS().concat([bal('Mosta', 'USD', 5000, '2026-10-05')]);
+  const one = plan3({ banks, team: [row('tessa', 'Tessa', 236000, '2026-10-05', { blk: 'cogs', cur: 'RUB', bank: 'Tochka' })] });
+  const rep = plan3({ banks, team: [every('tessa', 'Tessa', 236000, 5, '2026-10', { blk: 'cogs', cur: 'RUB', bank: 'Tochka' })] });
+  const pg = await scene('split-seen', ledger(hist), one, { h: 900 });
+  const out = await pg.evaluate(({ T, hist, one, rep, C0 }) => {
+    const L = window.__money, FX = { USD: 1.35, RUB: 118 }, cp = (x) => JSON.parse(JSON.stringify(x));
+    const led = (rows) => ({ v: 1, tx: cp(hist).concat(rows), inbox: [], rules: [], fx: { USD: 1.35, EUR: 1.17, RUB: 118, AMD: 525 }, history: {}, aliases: {}, own: [], ownSeen: [], holders: {} });
+    const f = (id, d, amt, cur, b, at, l = 'Tessa') => ({ id, d, a: Math.round(Math.abs(amt) / (cur === 'GBP' ? 1 : FX[cur]) * 100) / 100, c: 'cogs', b, l, v: 0, s: 'file', o: { a: amt, cur, t: l || 'TRANSFER' }, key: 'k|' + id, at });
+    const AT = C0 + 3600e3, A2 = AT + 3600e3;
+    const see = (name, P, rows) => {
+      const M = L.compute(led(rows), P, T), r = {};
+      M.items.filter((x) => /Tessa/.test(x.name) && (x.ym === '2026-10' || !x.ym)).forEach((x) => { r[x.id.replace(/@.*/, '')] = [x.state, x.done ? x.done.by + (x.done.note ? ':' + x.done.note : '') : x.part ? 'part' : '', x.done ? x.done.got || 0 : x.part ? x.part.got : 0, x.rows]; });
+      const off = M.months.by['2026-10'].off.by.team.rows.map((x) => x.id + ':' + Math.round(x.gbp || x.amt || 0));
+      return { name, items: r, off, est: Object.fromEntries(M.accounts.map((a) => [a.key, Math.round(a.est)])), now: Math.round(M.now) };
+    };
+    const marked = (P0, got, src, restDay, mode) => { const P = cp(P0), M = L.compute(led([]), P, T), it = M.items.find((x) => x.id === 'tessa' || x.id === 'tessa@2026-10'); L.write.partial(P, it, got, 'rest1', AT, 'Mika', T, restDay, src); return P; };
+    const R = [];
+    R.push(see('0 base, no rows', cp(one), []));
+    R.push(see('1 no mark: £850 Wise then ₽135,700 Tochka', cp(one), [f('w1', '2026-10-05', -850, 'GBP', 'Wise', AT), f('t1', '2026-10-06', -135700, 'RUB', 'Tochka', A2)]));
+    R.push(see('2 no mark: £850 Wise then $1,553 Mosta', cp(one), [f('w1', '2026-10-05', -850, 'GBP', 'Wise', AT), f('m1', '2026-10-06', -1553, 'USD', 'Mosta', A2)]));
+    R.push(see('2b no mark, only £850 Wise so far', cp(one), [f('w1', '2026-10-05', -850, 'GBP', 'Wise', AT)]));
+    const P3 = marked(one, 100300, { bank: 'Wise', cur: 'GBP', out: 850 }, T);
+    R.push(see('3 marked from Wise at rate; rows: £850 Wise, ₽135,700 Tochka', P3, [f('w1', T, -850, 'GBP', 'Wise', A2), f('t1', T, -135700, 'RUB', 'Tochka', A2)]));
+    R.push(see('4 marked from Wise at rate; rows: £850 Wise, $1,553 Mosta', P3, [f('w1', T, -850, 'GBP', 'Wise', A2), f('m1', T, -1553, 'USD', 'Mosta', A2)]));
+    const P5 = marked(one, 120000, { bank: 'Wise', cur: 'GBP', out: 850 }, T);
+    R.push(see('5 marked from Wise at own figure 120,000; rows: £850 Wise labelled', P5, [f('w1', T, -850, 'GBP', 'Wise', A2)]));
+    R.push(see('5b … and the rest ₽116,000 Tochka', P5, [f('w1', T, -850, 'GBP', 'Wise', A2), f('t1', T, -116000, 'RUB', 'Tochka', A2)]));
+    const P6 = marked(one, 100300, null, T);
+    R.push(see('6 marked in roubles, no account named; rows: £850 Wise labelled', P6, [f('w1', T, -850, 'GBP', 'Wise', A2)]));
+    R.push(see('6b same, the row has no label', P6, [f('w1', T, -850, 'GBP', 'Wise', A2, '')]));
+    R.push(see('7 monthly, no mark: £850 Wise then ₽135,700 Tochka', cp(rep), [f('w1', '2026-10-05', -850, 'GBP', 'Wise', AT), f('t1', '2026-10-06', -135700, 'RUB', 'Tochka', A2)]));
+    R.push(see('7b monthly, no mark: only £850 Wise', cp(rep), [f('w1', '2026-10-05', -850, 'GBP', 'Wise', AT)]));
+    const P8 = marked(rep, 100300, { bank: 'Wise', cur: 'GBP', out: 850 }, T);
+    R.push(see('8 monthly marked from Wise; rows £850 Wise, $1,553 Mosta', P8, [f('w1', T, -850, 'GBP', 'Wise', A2), f('m1', T, -1553, 'USD', 'Mosta', A2)]));
+    const P9 = marked(rep, 120000, { bank: 'Wise', cur: 'GBP', out: 850 }, T);
+    R.push(see('9 monthly marked from Wise at own 120,000; row £850 Wise', P9, [f('w1', T, -850, 'GBP', 'Wise', A2)]));
+    return R;
+  }, { T, hist, one, rep, C0 });
+  const by = Object.fromEntries(out.map((r) => [r.name.split(' ')[0], r])), e0 = by['0'].est, d = (k, a) => by[k].est[a] - e0[a];
+  same([by['2b'].items.tessa, by['2b'].off, d('2b', 'Wise|GBP'), d('2b', 'Tochka|RUB')], [['blind', 'part', 100300, ['w1']], [], -850, 0],
+    'no mark, and £850 leaves Wise under her name: the rouble line has had ₽100,300 of its ₽236,000 and waits for the rest - the pounds are no payment «вне плана»');
+  same([by['1'].items.tessa, by['1'].off, by['2'].items.tessa, by['2'].off], [['done', 'row', 0, ['w1', 't1']], [], ['done', 'row', 0, ['w1', 'm1']], []],
+    '… and the second part closes it, from the line\'s own account in roubles or from a third one in dollars');
+  same([by['7b'].items.tessa, by['7'].items.tessa, by['7'].off], [['blind', 'part', 100300, ['w1']], ['done', 'row', 236000, ['w1', 't1']], []], 'a month of a «каждый месяц» line is paid in two currencies the same way');
+  same([by['3'].items, by['3'].off, d('3', 'Wise|GBP'), d('3', 'Tochka|RUB')], [{ tessa: ['done', 'row:partial', 100300, ['w1']], rest1: ['done', 'row', 0, ['t1']] }, [], -850, -135700],
+    '«Частично…» with the account named, then the statements: the pounds take the mark\'s place, the roubles close the rest, and each account has lost its own money once');
+  same([by['4'].items, by['4'].off, by['8'].items, by['8'].off], [{ tessa: ['done', 'row:partial', 100300, ['w1']], rest1: ['done', 'row', 0, ['m1']] }, [], { tessa: ['done', 'row:partial', 100300, ['w1']], rest1: ['done', 'row', 0, ['m1']] }, []],
+    'the rest paid in dollars from a third account closes the rest all the same - of a one-off line and of a month');
+  same([by['5'].items.tessa, by['5b'].items, by['5b'].off, by['9'].items.tessa], [['done', 'row:partial', 120000, ['w1']], { tessa: ['done', 'row:partial', 120000, ['w1']], rest1: ['done', 'row', 0, ['t1']] }, [], ['done', 'row:partial', 120000, ['w1']]],
+    'a part the founder said closed ₽120,000 - not the rate\'s ₽100,300 - is known by its account and what left it: the line reads ₽120,000 by that row, and its rest of ₽116,000 is closed by its own payment (the fault: the line read ₽100,300)');
+  same([by['6'].items.tessa, by['6'].off], [['done', 'row:partial', 100300, ['w1']], []], '«Частично…» in roubles with no account named: the pounds under her name still take the mark\'s place');
+  same([by['6b'].items.tessa, by['6b'].off], [['done', 'mark:partial', 100300, []], ['w1:850']], 'what is NOT guessed: a payment with no name on it, from another account than the mark knows - it waits «вне плана» until somebody names it');
+  await finish(pg);
+});
+
 await run('open-pair', 'a page that opens over «Разбор» holding transfers between own accounts saves nothing - not a sure row, not a pair whose kind is known, not two of the table\'s own transfers that pair; a person\'s own act files them exactly as the page used to when it opened', async () => {
   // The table: two of its own transfers that make a pair and were never paired (Wise −500 on 2 Oct, Barclays +500 on
   // 3 Oct). «Разбор»: a row it is sure of (Wise −1,000 on 4 Oct, filed as a transfer between own accounts by itself), and

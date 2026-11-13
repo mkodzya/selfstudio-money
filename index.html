@@ -5783,8 +5783,14 @@ const Live=(()=>{
    // founder's word, and what was still owed stood in no figure. The row goes where it would have gone had no other
    // line taken it: to a month of the label as the row of any marked month does, else into the place of the mark.
    const its=o=>o.src!=="occ"?cand(f,o):lab.includes(o)||(ok(o)&&(o.lk==="tax|"?f.lk==="tax|":!o.lk&&!DL[o.chain]&&byAmt(f,o)));
-   const told=said.find(o=>canPay(o)&&!had(o)&&its(o)&&f.at>(+o.paid.at||0)&&dn(f.d)>=dn(o.paid.on)-3&&dn(f.d)<=dn(o.paid.on)+7&&cmpN(f,o,o.pamt-o.got).ok);
-   if(told)return lab.includes(told)?give(told,f):close(told,f,"mark");
+   // (13 November 2026: a mark that names the account its part left - paid.from - knows its row by that account and
+   // by what left it, whatever the row is worth in the line's currency by the day's rate: the founder may have said
+   // the part closed another figure than the rate's, and held to the rate such a row was no part of the line - it
+   // went to what was LEFT of it, or to the month by its label at the rate's figure, and the line then read one sum
+   // in its words and another in its rest. Such a row gives the line exactly what the mark said.)
+   const fromHit=o=>{if(!o.from||o.got>0||f.b!==o.from.bank)return false;const g=asLine(f,o);if(!g.o||(g.o.cur||"GBP")!==o.from.cur)return false;const x=Math.abs(+g.o.a||0),z=tol(o.from.out,o.dir);return x>=o.from.out-z[0]&&x<=o.from.out+z[1];};
+   const told=said.find(o=>canPay(o)&&!had(o)&&its(o)&&f.at>(+o.paid.at||0)&&dn(f.d)>=dn(o.paid.on)-3&&dn(f.d)<=dn(o.paid.on)+7&&(fromHit(o)||cmpN(f,o,o.pamt-o.got).ok));
+   if(told){if(!lab.includes(told))return close(told,f,"mark");if(!fromHit(told))return give(told,f);told.got=told.pamt;told.match.push(f.id);if(f.d>told.last)told.last=f.d;used.add(f.id);return;}
    // What is left of a line paid in part is a one-off row (carry), and one-off rows come first. But a payment that
    // is exactly what its own month still lacks may be that month's: given to the rest, the month would be given up
    // as unpaid a month later while the rest had been closed in its place. So it goes to whichever of the two is
